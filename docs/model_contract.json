@@ -1,0 +1,14 @@
+{
+  "contract_version": "2.0",
+  "product_policy": "same product_code",
+  "schema_policy": "effectiveness schema is the complete editable product schema; price input schema is independent",
+  "shared_field_validation": ["parameter_id", "data_type", "unit"],
+  "effectiveness_missing_policy": "reject complete product attributes",
+  "price_missing_policies": ["reject", "training_mean", "default", "constant", "zero"],
+  "price_input_precedence": ["request_value", "database_configured_value", "model_missing_policy", "reject"],
+  "effectiveness_required_sections": ["manifest", "schema", "training_ranges", "coupling_models", "feasibility_model", "capability_model"],
+  "price_required_sections": ["manifest", "input_contract", "feature_names", "mean", "scale", "models", "ensemble_weights", "residual_interval_log"],
+  "separate_anomaly_outputs": ["effectiveness_anomaly_assessment", "price_anomaly_assessment"],
+  "runtime_outputs": ["predicted_price_wan", "price_interval_wan", "capability_score", "cost_effectiveness", "feasibility_probability", "prediction_confidence", "anomaly_assessment", "price_imputed_features"],
+  "atomic_rollback": true
+}

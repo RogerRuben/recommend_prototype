@@ -1,0 +1,307 @@
+{
+  "recommendation_contract_version": "4.0",
+  "model_kind": "price",
+  "product_code": "AIRCRAFT_DOOR_LOCK_DEMO",
+  "product_name": "航空舱门锁演示",
+  "model_version": "price-test-v19.5",
+  "feature_schema": [
+    {
+      "field_name": "rated_load",
+      "field_label": "额定载荷",
+      "source_column": "额定载荷",
+      "dtype": "number",
+      "unit": "kN",
+      "required": true,
+      "training_min": 28.82,
+      "training_max": 57.87,
+      "training_mean": 43.371875,
+      "generation_min": 18.0,
+      "generation_max": 70.0,
+      "precision": 3,
+      "search_type": "continuous",
+      "allowed_values": null,
+      "editable": true,
+      "auto_adjustable": true,
+      "description": "价格模型输入属性。",
+      "adjustment_hint": "调整后将重新计算预测价格。"
+    },
+    {
+      "field_name": "mass",
+      "field_label": "重量",
+      "source_column": "重量",
+      "dtype": "number",
+      "unit": "kg",
+      "required": true,
+      "training_min": 9.13,
+      "training_max": 15.04,
+      "training_mean": 11.9484375,
+      "generation_min": 6.0,
+      "generation_max": 32.0,
+      "precision": 3,
+      "search_type": "continuous",
+      "allowed_values": null,
+      "editable": true,
+      "auto_adjustable": true,
+      "description": "价格模型输入属性。",
+      "adjustment_hint": "调整后将重新计算预测价格。"
+    },
+    {
+      "field_name": "design_life",
+      "field_label": "设计寿命",
+      "source_column": "设计寿命",
+      "dtype": "number",
+      "unit": "千次",
+      "required": true,
+      "training_min": 50.0,
+      "training_max": 158.0,
+      "training_mean": 101.375,
+      "generation_min": 40.0,
+      "generation_max": 220.0,
+      "precision": 3,
+      "search_type": "continuous",
+      "allowed_values": null,
+      "editable": true,
+      "auto_adjustable": true,
+      "description": "价格模型输入属性。",
+      "adjustment_hint": "调整后将重新计算预测价格。"
+    },
+    {
+      "field_name": "purchase_quantity",
+      "field_label": "采购批量",
+      "source_column": "采购批量",
+      "dtype": "integer",
+      "unit": "件",
+      "required": true,
+      "training_min": 20.0,
+      "training_max": 500.0,
+      "training_mean": 170.6640625,
+      "generation_min": 1.0,
+      "generation_max": 1000.0,
+      "precision": 0,
+      "search_type": "integer",
+      "allowed_values": null,
+      "editable": true,
+      "auto_adjustable": true,
+      "description": "价格模型输入属性。",
+      "adjustment_hint": "调整后将重新计算预测价格。"
+    },
+    {
+      "field_name": "delivery_months",
+      "field_label": "交付周期",
+      "source_column": "交付周期",
+      "dtype": "number",
+      "unit": "月",
+      "required": true,
+      "training_min": 3.0,
+      "training_max": 12.0,
+      "training_mean": 7.65234375,
+      "generation_min": 1.0,
+      "generation_max": 24.0,
+      "precision": 3,
+      "search_type": "continuous",
+      "allowed_values": null,
+      "editable": true,
+      "auto_adjustable": true,
+      "description": "价格模型输入属性。",
+      "adjustment_hint": "调整后将重新计算预测价格。"
+    }
+  ],
+  "model_input_bindings": [
+    {
+      "model_kind": "price",
+      "field_name": "rated_load",
+      "field_label": "额定载荷",
+      "source_type": "product_parameter",
+      "dtype": "number",
+      "unit": "kN",
+      "required": true,
+      "missing_policy": "reject",
+      "training_mean": 43.371875,
+      "model_version": "price-test-v19.5",
+      "enabled": true
+    },
+    {
+      "model_kind": "price",
+      "field_name": "mass",
+      "field_label": "重量",
+      "source_type": "product_parameter",
+      "dtype": "number",
+      "unit": "kg",
+      "required": true,
+      "missing_policy": "reject",
+      "training_mean": 11.9484375,
+      "model_version": "price-test-v19.5",
+      "enabled": true
+    },
+    {
+      "model_kind": "price",
+      "field_name": "design_life",
+      "field_label": "设计寿命",
+      "source_type": "product_parameter",
+      "dtype": "number",
+      "unit": "千次",
+      "required": true,
+      "missing_policy": "reject",
+      "training_mean": 101.375,
+      "model_version": "price-test-v19.5",
+      "enabled": true
+    },
+    {
+      "model_kind": "price",
+      "field_name": "purchase_quantity",
+      "field_label": "采购批量",
+      "source_type": "product_parameter",
+      "dtype": "integer",
+      "unit": "件",
+      "required": true,
+      "missing_policy": "training_mean",
+      "training_mean": 170.6640625,
+      "model_version": "price-test-v19.5",
+      "enabled": true
+    },
+    {
+      "model_kind": "price",
+      "field_name": "delivery_months",
+      "field_label": "交付周期",
+      "source_type": "product_parameter",
+      "dtype": "number",
+      "unit": "月",
+      "required": true,
+      "missing_policy": "training_mean",
+      "training_mean": 7.65234375,
+      "model_version": "price-test-v19.5",
+      "enabled": true
+    }
+  ],
+  "target_name": "价格",
+  "target_unit": "万元",
+  "target_divisor_to_wan": 10000.0,
+  "target_transform": "log",
+  "preprocessing": {
+    "type": "minmax",
+    "feature_order": [
+      "rated_load",
+      "mass",
+      "design_life",
+      "purchase_quantity",
+      "delivery_months"
+    ],
+    "source_feature_order": [
+      "额定载荷",
+      "重量",
+      "设计寿命",
+      "采购批量",
+      "交付周期"
+    ],
+    "min": [
+      28.82,
+      9.13,
+      50.0,
+      20.0,
+      3.0
+    ],
+    "max": [
+      57.87,
+      15.04,
+      158.0,
+      500.0,
+      12.0
+    ]
+  },
+  "ensemble": {
+    "aggregation": "weighted_mean_log_prediction",
+    "members": [
+      {
+        "name": "ridge_0.01",
+        "alpha": 0.01,
+        "intercept": 1.8595673565076214,
+        "coefficients": [
+          0.19688270591441742,
+          0.06015864161159623,
+          0.20455998817284438,
+          -0.15259687519611018,
+          0.10168093195698177
+        ],
+        "weight": 0.3371021003241821
+      },
+      {
+        "name": "ridge_0.1",
+        "alpha": 0.1,
+        "intercept": 1.8605245798352394,
+        "coefficients": [
+          0.1960549932889018,
+          0.059971125232722855,
+          0.20365505489349545,
+          -0.152248827918676,
+          0.10142567239507216
+        ],
+        "weight": 0.33684064504264855
+      },
+      {
+        "name": "ridge_1",
+        "alpha": 1.0,
+        "intercept": 1.869671713773586,
+        "coefficients": [
+          0.18816656573631163,
+          0.05812666553291557,
+          0.1950245070942066,
+          -0.14883837973298436,
+          0.09894758185070132
+        ],
+        "weight": 0.3260572546331694
+      }
+    ]
+  },
+  "residual_calibration": {
+    "coverage": 0.95,
+    "log_residual_lower": -0.030949121187731493,
+    "log_residual_upper": 0.033955777399644727,
+    "sample_count": 256
+  },
+  "training_metrics": {
+    "holdout_r2": 0.9373571233247253,
+    "holdout_mape": 0.016583499033714734,
+    "holdout_count": 52
+  },
+  "training_report": {
+    "sample_count": 256,
+    "holdout_count": 52,
+    "holdout_mape_by_member": {
+      "ridge_0.01": 0.016474684384972585,
+      "ridge_0.1": 0.016487472014100606,
+      "ridge_1": 0.01703274694685262
+    },
+    "feature_columns": [
+      "额定载荷",
+      "重量",
+      "设计寿命",
+      "采购批量",
+      "交付周期"
+    ],
+    "parameter_ids": [
+      "rated_load",
+      "mass",
+      "design_life",
+      "purchase_quantity",
+      "delivery_months"
+    ],
+    "field_mapping": {
+      "额定载荷": "rated_load",
+      "重量": "mass",
+      "设计寿命": "design_life",
+      "采购批量": "purchase_quantity",
+      "交付周期": "delivery_months"
+    },
+    "leakage_columns_excluded": [
+      "Cluster",
+      "Unnamed: 0",
+      "index",
+      "is_outlier",
+      "价格",
+      "价格类别"
+    ],
+    "data_sha256": "00a561851ab18984462a54e4b211dd9ef621c4a131166ab8b72461c2b8e0cf11",
+    "random_seed": 20260728,
+    "target_divisor_to_wan": 10000.0
+  }
+}

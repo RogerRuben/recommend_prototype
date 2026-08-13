@@ -1,0 +1,2 @@
+V19.5-corrected-full-integration
+基于真实V19.4源码复核：2026-07-29

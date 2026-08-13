@@ -1,0 +1,40 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "价格预测服务 API",
+    "version": "1.0.0",
+    "description": "独立价格模型服务。原生模式直接加载完整pickle模型包；兼容模式使用纯JSON模型。"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "健康检查与模型加载状态"
+      }
+    },
+    "/api/v1/schema": {
+      "get": {
+        "summary": "价格模型字段契约"
+      }
+    },
+    "/api/v1/predict": {
+      "post": {
+        "summary": "单方案价格预测"
+      }
+    },
+    "/api/v1/predict/batch": {
+      "post": {
+        "summary": "批量价格预测，最多1000条"
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "summary": "OpenAPI 3.0文档"
+      }
+    },
+    "/docs": {
+      "get": {
+        "summary": "简易接口前端"
+      }
+    }
+  }
+}

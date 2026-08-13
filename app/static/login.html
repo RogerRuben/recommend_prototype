@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>登录 · 工业技术协议智能推荐系统 V19.6</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="login-body">
+  <main class="login-shell">
+    <section class="login-brand">
+      <div class="brand-mark large">IP</div>
+      <div class="eyebrow">SECURE DEMONSTRATION</div>
+      <h1>工业技术协议智能推荐系统</h1>
+      <p>登录后可访问推荐、方案详情、专家方案库和数据管理中心。当前Cloudflare演示为服务器端只读模式，所有持久化写入均被后端禁止。</p>
+      <div class="login-feature-list">
+        <span>✓ 条件驱动实时生成</span>
+        <span>✓ 价格与效能联合计算</span>
+        <span>✓ 数据库与模型配置只读查看</span>
+      </div>
+    </section>
+    <section class="login-panel">
+      <div>
+        <div class="eyebrow">ACCOUNT LOGIN</div>
+        <h2>进入演示系统</h2>
+        <p>请输入演示账号。连续输错5次后将暂时限制登录。</p>
+      </div>
+      <form id="loginForm" class="login-form">
+        <label for="username">账号
+          <input id="username" name="username" autocomplete="username" required autofocus>
+        </label>
+        <label for="password">密码
+          <input id="password" name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <button id="loginButton" class="button primary full" type="submit">登录演示系统</button>
+      </form>
+      <div id="loginMessage" class="login-message" aria-live="polite"></div>
+      <p class="login-security-note">该账号仅用于临时演示，不应作为正式生产环境的安全配置。</p>
+    </section>
+  </main>
+  <script src="/login.js"></script>
+</body>
+</html>

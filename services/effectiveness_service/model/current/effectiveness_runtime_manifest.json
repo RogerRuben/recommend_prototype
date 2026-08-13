@@ -1,0 +1,77 @@
+{
+  "format_version": "effectiveness-original-runtime-package-1.0",
+  "product_code": "VIRTUAL_COUPLED_ACTUATOR",
+  "product_name": "多类型耦合执行机构（虚拟验收成品）",
+  "model_version": "effect-v11-355494cea084-fa079a21179c",
+  "algorithm_version": "V11-PAR-UTA",
+  "profile_version": 11,
+  "source_root": "source",
+  "workbook": "data/virtual_effectiveness_project.xlsx",
+  "state": "state/state_355494cea084c779.json",
+  "workbook_fingerprint": "701e424f742ae017",
+  "learning_fingerprint": "355494cea084c779",
+  "state_sha256": "fa079a21179c6fe22596ed16ab2b12ccd824950581cacecdcf44899838bfdc91",
+  "active_protocol": {
+    "profile_id": "VCA-REQ-001",
+    "profile_name": "虚拟执行机构综合技术协议",
+    "reference_score": 100.0,
+    "reference_digest": "f9114a0348c416308accb0eed1420611477a05f0a5839800d59f2d542cf5a90f",
+    "reference_values": {
+      "rated_thrust_n": 6045.0,
+      "stroke_mm": 74.4,
+      "speed_mm_s": 15.5,
+      "protection_grade": 55.0,
+      "overload_protection": 0.0,
+      "mass_kg": 16.57,
+      "accuracy_mm": 0.158,
+      "response_time_ms": 311.8,
+      "duty_cycle_pct": 30.8,
+      "redundancy_level": 3.0
+    },
+    "mode": "fixed_packaged_protocol"
+  },
+  "state_mode": "learned_state",
+  "capabilities": {
+    "dynamic_target_protocol": true,
+    "packaged_protocol_count": 1,
+    "counterfactual_improvement": true,
+    "coupling_model_count": 2,
+    "coupling_edge_count": 6,
+    "learned_boundary_count": 0
+  },
+  "files": [
+    {
+      "path": "source/interactive_project_app.py",
+      "sha256": "eb8e7ad7369de730179bdd212053829983799f0a4dae2f6980152d60212645ca"
+    },
+    {
+      "path": "source/project_excel.py",
+      "sha256": "dc0f6cf5e14b6fd80776070e657ffaf5a91718a0575f7a499aea91f41cf03728"
+    },
+    {
+      "path": "source/coupling_model.py",
+      "sha256": "6f9255a72b84374675d273b15a9f19073851d26c017d399d01e563a4e4f58c82"
+    },
+    {
+      "path": "source/feasibility_model.py",
+      "sha256": "374ea3606fe894d655ff98a5cac08f368ec75df7cca15e66bdd4e1c6519556f3"
+    },
+    {
+      "path": "source/preference_models.py",
+      "sha256": "bfbb7afd2f3f9cd8d1ec12604811551ede1fd5b9298ecc0b8f11da1804b2a40c"
+    },
+    {
+      "path": "source/requirement_model.py",
+      "sha256": "35285e1deee360bd97738275f48030e5824d69136289863d1d7939f564f213e8"
+    },
+    {
+      "path": "data/virtual_effectiveness_project.xlsx",
+      "sha256": "701e424f742ae017ae4adf21ae23a5ec73f54c6a9e19acdebd40b016bd403c17"
+    },
+    {
+      "path": "state/state_355494cea084c779.json",
+      "sha256": "fa079a21179c6fe22596ed16ab2b12ccd824950581cacecdcf44899838bfdc91"
+    }
+  ],
+  "prediction_equivalence": "loads the same source modules + Workbook + State and calls ProjectApp.evaluate"
+}

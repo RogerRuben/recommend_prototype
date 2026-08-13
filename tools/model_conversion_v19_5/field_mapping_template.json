@@ -1,0 +1,18 @@
+{
+  "训练表或Workbook原字段名": {
+    "parameter_id": "DataMaster指标编号",
+    "label": "中文名称",
+    "dtype": "number",
+    "unit": "单位",
+    "missing_policy": "reject",
+    "required": true
+  },
+  "采购批量": {
+    "parameter_id": "purchase_quantity",
+    "label": "采购批量",
+    "dtype": "integer",
+    "unit": "件",
+    "missing_policy": "training_mean",
+    "required": true
+  }
+}

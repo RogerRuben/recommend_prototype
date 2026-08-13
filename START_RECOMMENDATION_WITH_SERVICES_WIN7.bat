@@ -1,0 +1,8 @@
+@echo off
+setlocal EnableExtensions
+cd /d "%~dp0"
+set IPDEMO_MODEL_EXECUTION_MODE=services
+set IPDEMO_PRICE_SERVICE_URL=http://127.0.0.1:18101
+set IPDEMO_EFFECT_SERVICE_URL=http://127.0.0.1:18102
+set IPDEMO_MODEL_SERVICE_FALLBACK=0
+call START_ALL_NO_BROWSER.bat

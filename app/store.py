@@ -1,0 +1,1434 @@
+# -*- coding: utf-8 -*-
+from __future__ import print_function
+
+import csv
+import json
+import os
+import re
+import shutil
+import sqlite3
+import threading
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+from .model_field_types import model_types_compatible
+
+from .recommender import filter_match
+
+
+def now_iso():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def safe_id(prefix):
+    return "%s-%s" % (prefix, uuid.uuid4().hex[:10].upper())
+
+
+def _number(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _json_list(value):
+    if value in (None, ""):
+        return []
+    if isinstance(value, list):
+        return value
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, list) else []
+    except Exception:
+        return [x.strip() for x in str(value).replace("，", ",").replace("、", ",").split(",") if x.strip()]
+
+
+def _json_mapping(value):
+    if value in (None, ""):
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    try:
+        parsed = json.loads(value)
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _infer_model_value_mapping(parameter, model_spec):
+    """Infer only unambiguous business-label to canonical-model encodings."""
+    value_type = str(parameter.get("value_type") or "").lower()
+    model_type = str(model_spec.get("dtype") or model_spec.get("type") or "").lower()
+    if value_type == "boolean" or model_type in ("bool", "boolean"):
+        return {
+            "是": 1, "有": 1, "启用": 1, "具备": 1, "支持": 1,
+            "否": 0, "无": 0, "停用": 0, "不具备": 0, "不支持": 0,
+            "true": 1, "false": 0, "yes": 1, "no": 0,
+        }
+    business_values = _json_list(parameter.get("allowed_values_json"))
+    model_values = list(model_spec.get("allowed_values") or [])
+    if not business_values or not model_values or len(business_values) != len(model_values):
+        return {}
+    if set(str(value).strip().lower() for value in business_values) == set(str(value).strip().lower() for value in model_values):
+        return {}
+    numbered = []
+    for value in business_values:
+        match = re.search(r"(?:类型|类别|方案|等级|type)\s*([0-9]+)$", str(value).strip(), re.I)
+        if not match:
+            return {}
+        numbered.append((int(match.group(1)), value))
+    try:
+        ordered_model = sorted(model_values, key=lambda value: float(value))
+    except (TypeError, ValueError):
+        return {}
+    numbered.sort(key=lambda item: item[0])
+    if [item[0] for item in numbered] != list(range(1, len(numbered) + 1)):
+        return {}
+    return dict((str(source), target) for (_number, source), target in zip(numbered, ordered_model))
+
+
+class Store(object):
+    REQUIRED_TABLES = {
+        "metadata", "products", "parameter_definitions", "tags", "agreements",
+        "saved_schemes", "model_registry", "model_input_bindings", "indicator_couplings", "constraint_rules",
+        "tag_rules", "audit_log", "product_releases",
+    }
+    MIGRATABLE_TABLES = {"product_releases"}
+
+    def __init__(self, db_path, dataset_path, model_runtime, backup_dir=None, read_only=False):
+        self.db_path = Path(db_path)
+        self.dataset_path = Path(dataset_path)
+        self.runtime = model_runtime
+        self.backup_dir = Path(backup_dir or self.db_path.parent.parent / "backups")
+        self.read_only = bool(read_only)
+        self.lock = threading.RLock()
+        if self.read_only:
+            if not self.db_path.is_file():
+                raise RuntimeError("只读演示数据库不存在：%s" % self.db_path)
+        else:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self.backup_dir.mkdir(parents=True, exist_ok=True)
+            self._initialize()
+
+    def connect(self, path=None):
+        target = Path(path) if path is not None else self.db_path
+        use_read_only = self.read_only and target.resolve() == self.db_path.resolve()
+        if use_read_only:
+            uri = "file:%s?mode=ro" % target.resolve().as_posix()
+            conn = sqlite3.connect(uri, timeout=30, uri=True)
+        else:
+            conn = sqlite3.connect(str(target), timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+    @staticmethod
+    def _columns(conn, table):
+        return set(row[1] for row in conn.execute("PRAGMA table_info(%s)" % table))
+
+    def _add_column(self, conn, table, definition):
+        name = definition.split()[0]
+        if name not in self._columns(conn, table):
+            conn.execute("ALTER TABLE %s ADD COLUMN %s" % (table, definition))
+
+    def _initialize(self):
+        with self.lock:
+            conn = self.connect()
+            try:
+                conn.executescript("""
+                PRAGMA journal_mode=WAL;
+                CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS products(
+                    product_code TEXT PRIMARY KEY, product_name TEXT NOT NULL, product_description TEXT, enabled INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE TABLE IF NOT EXISTS parameter_definitions(
+                    parameter_id TEXT PRIMARY KEY, label TEXT NOT NULL, unit TEXT, value_type TEXT NOT NULL,
+                    min_value REAL, max_value REAL, preference TEXT, description TEXT, adjustment_hint TEXT,
+                    allowed_values_json TEXT, model_value_mapping_json TEXT, search_type TEXT NOT NULL DEFAULT 'auto', required INTEGER NOT NULL DEFAULT 1,
+                    auto_adjustable INTEGER NOT NULL DEFAULT 1, decimal_places INTEGER NOT NULL DEFAULT 3,
+                    display_order INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, model_bound INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE TABLE IF NOT EXISTS tags(
+                    tag_id TEXT PRIMARY KEY, tag_name TEXT NOT NULL, tag_group TEXT, weight REAL NOT NULL,
+                    derivation_mode TEXT NOT NULL DEFAULT 'rule', description TEXT, enabled INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE TABLE IF NOT EXISTS tag_rules(
+                    rule_id TEXT PRIMARY KEY, tag_id TEXT NOT NULL, parameter_id TEXT NOT NULL,
+                    operator TEXT NOT NULL, value1 TEXT, value2 TEXT, rule_group TEXT NOT NULL DEFAULT 'default',
+                    enabled INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE TABLE IF NOT EXISTS agreements(
+                    agreement_id TEXT PRIMARY KEY, product_code TEXT NOT NULL, agreement_name TEXT NOT NULL,
+                    positioning TEXT, agreement_source TEXT NOT NULL, source_year INTEGER, supplier_type TEXT,
+                    historical_price_wan REAL, capability_score REAL, feasibility_probability REAL,
+                    params_json TEXT NOT NULL, tags_json TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+                    updated_at TEXT
+                );
+                CREATE TABLE IF NOT EXISTS saved_schemes(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, scheme_name TEXT NOT NULL, base_agreement_id TEXT,
+                    source_type TEXT, params_json TEXT NOT NULL, evaluation_json TEXT NOT NULL,
+                    risk_confirmed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS model_registry(
+                    model_kind TEXT PRIMARY KEY, model_version TEXT NOT NULL, product_code TEXT,
+                    artifact_path TEXT NOT NULL, artifact_sha256 TEXT, contract_status TEXT,
+                    enabled INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS model_input_bindings(
+                    binding_id TEXT PRIMARY KEY, model_kind TEXT NOT NULL, parameter_id TEXT NOT NULL,
+                    label TEXT, source_type TEXT, data_type TEXT, unit TEXT,
+                    required INTEGER NOT NULL DEFAULT 0, missing_policy TEXT NOT NULL DEFAULT 'reject',
+                    configured_value TEXT, training_mean REAL, model_version TEXT,
+                    enabled INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS indicator_couplings(
+                    coupling_id TEXT PRIMARY KEY, coupling_name TEXT NOT NULL, coupling_type TEXT NOT NULL,
+                    parameter_a TEXT NOT NULL, parameter_b TEXT NOT NULL, domain_operator TEXT,
+                    multiplier REAL, offset REAL, strength REAL, severity TEXT, description TEXT, rationale TEXT,
+                    display_order INTEGER NOT NULL DEFAULT 1, enabled INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE TABLE IF NOT EXISTS constraint_rules(
+                    rule_id TEXT PRIMARY KEY, rule_name TEXT NOT NULL, left_parameter TEXT NOT NULL,
+                    operator TEXT NOT NULL, right_parameter TEXT, multiplier REAL NOT NULL DEFAULT 1,
+                    offset REAL NOT NULL DEFAULT 0, severity TEXT, message TEXT, rationale TEXT,
+                    display_order INTEGER NOT NULL DEFAULT 1, enabled INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE TABLE IF NOT EXISTS audit_log(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, action TEXT NOT NULL, object_type TEXT,
+                    object_id TEXT, detail_json TEXT, created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS product_releases(
+                    release_id TEXT PRIMARY KEY, product_code TEXT NOT NULL, product_name TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'draft', data_json TEXT NOT NULL,
+                    validation_json TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    activated_at TEXT
+                );
+                """)
+                for table, definition in [
+                    ("products", "enabled INTEGER NOT NULL DEFAULT 1"),
+                    ("parameter_definitions", "enabled INTEGER NOT NULL DEFAULT 1"),
+                    ("parameter_definitions", "model_bound INTEGER NOT NULL DEFAULT 1"),
+                    ("parameter_definitions", "allowed_values_json TEXT"),
+                    ("parameter_definitions", "model_value_mapping_json TEXT"),
+                    ("parameter_definitions", "search_type TEXT NOT NULL DEFAULT 'auto'"),
+                    ("parameter_definitions", "required INTEGER NOT NULL DEFAULT 1"),
+                    ("parameter_definitions", "auto_adjustable INTEGER NOT NULL DEFAULT 1"),
+                    ("parameter_definitions", "decimal_places INTEGER NOT NULL DEFAULT 3"),
+                    ("tags", "enabled INTEGER NOT NULL DEFAULT 1"),
+                    ("tags", "derivation_mode TEXT NOT NULL DEFAULT 'rule'"),
+                    ("tags", "description TEXT"),
+                    ("indicator_couplings", "strength REAL"),
+                    ("agreements", "updated_at TEXT"),
+                    ("model_registry", "artifact_sha256 TEXT"),
+                    ("model_registry", "contract_status TEXT"),
+                    ("tags", "archived_at TEXT"),
+                    ("tag_rules", "archived_at TEXT"),
+                    ("indicator_couplings", "archived_at TEXT"),
+                    ("constraint_rules", "archived_at TEXT"),
+                    ("agreements", "archived_at TEXT"),
+                ]:
+                    self._add_column(conn, table, definition)
+                # Normalize legacy IP-grade definitions. Older packages stored a
+                # handful of observed grades as if they were the full legal set;
+                # that prevented exploration of valid intermediate integer grades.
+                conn.execute(
+                    "UPDATE parameter_definitions SET search_type='integer', allowed_values_json=NULL "
+                    "WHERE value_type='ip_grade' AND (search_type IS NULL OR search_type='' OR search_type='auto')"
+                )
+                self._sync_model_registry(conn)
+                self._sync_model_input_bindings(conn)
+                conn.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", ("database_version", "V19.6.8-hybrid-deep-extrapolation-search"))
+                conn.execute("INSERT OR IGNORE INTO metadata VALUES(?,?)", ("master_data_version", "0"))
+                conn.commit()
+            finally:
+                conn.close()
+
+    def is_empty(self):
+        conn = self.connect()
+        try:
+            return conn.execute("SELECT COUNT(*) FROM parameter_definitions").fetchone()[0] == 0
+        finally:
+            conn.close()
+
+    def sync_model_schema(self):
+        """Synchronize the union of effectiveness and price product attributes.
+
+        Effectiveness attributes remain the primary product definition and must
+        exist in DataMaster. Price-only product attributes are created from the
+        signed model contract so old protocols can be evaluated with the model's
+        explicit fallback value and experts can reveal/edit them in the drawer.
+        """
+        warnings = []
+        with self.lock:
+            conn = self.connect()
+            try:
+                existing = dict((row["parameter_id"], dict(row)) for row in conn.execute("SELECT * FROM parameter_definitions"))
+                roles = self.runtime.feature_roles()
+                effect_keys = set(roles.get("shared_features", [])) | set(roles.get("effectiveness_only_features", []))
+                specs = self.runtime.all_feature_specs()
+                model_keys = set()
+                next_order = max([int(x.get("display_order") or 0) for x in existing.values()] or [0])
+                for spec in specs:
+                    key = spec["key"]
+                    model_keys.add(key)
+                    expected_type = "ip_grade" if spec.get("parser") == "ip_grade" else spec.get("dtype") or spec.get("type", "number")
+                    if expected_type == "integer": expected_type = "number"
+                    current = existing.get(key)
+                    if current is None:
+                        next_order += 1
+                        allowed = spec.get("allowed_values")
+                        conn.execute("""INSERT INTO parameter_definitions
+                            (parameter_id,label,unit,value_type,min_value,max_value,preference,description,adjustment_hint,
+                             allowed_values_json,model_value_mapping_json,search_type,required,auto_adjustable,decimal_places,display_order,enabled,model_bound)
+                            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""", (
+                            key, spec.get("label", key), spec.get("unit", ""), expected_type,
+                            spec.get("min"), spec.get("max"), spec.get("preference", "neutral"),
+                            spec.get("description", ""), spec.get("adjustment_hint", "由当前模型Schema自动补充，可在数据中心继续维护。"),
+                            json.dumps(allowed, ensure_ascii=False) if allowed else None,
+                            None,
+                            spec.get("search_type", "auto"), 1 if spec.get("required", True) else 0,
+                            1 if spec.get("auto_adjustable", True) else 0, int(spec.get("decimal_places", 3)), next_order, 1,
+                        ))
+                        warnings.append("已从模型Schema自动补充字段%s。" % key)
+                        continue
+                    current_type = current.get("value_type")
+                    compatible = model_types_compatible(current_type, expected_type)
+                    if not compatible:
+                        warnings.append(
+                            "指标%s的数据中心类型%s与模型类型%s不同；保留业务定义并在调用时尝试编码。" %
+                            (key, current_type, expected_type)
+                        )
+                    if current.get("unit") not in (None, "") and spec.get("unit") not in (None, "") and current.get("unit") != spec.get("unit"):
+                        warnings.append(
+                            "指标%s的数据中心单位%s与模型单位%s不同；该差异不阻断API调用。" %
+                            (key, current.get("unit"), spec.get("unit"))
+                        )
+                    mapping = _json_mapping(current.get("model_value_mapping_json"))
+                    if not mapping:
+                        mapping = _infer_model_value_mapping(current, spec)
+                    conn.execute("""UPDATE parameter_definitions SET min_value=?,max_value=?,preference=?,model_bound=1,
+                        required=?,enabled=1,model_value_mapping_json=? WHERE parameter_id=?""", (
+                        spec.get("min"), spec.get("max"), spec.get("preference", "neutral"),
+                        1 if spec.get("required", True) else 0,
+                        json.dumps(mapping, ensure_ascii=False) if mapping else None, key,
+                    ))
+                extras = sorted(set(existing) - model_keys)
+                if extras:
+                    placeholders = ",".join("?" for _ in extras)
+                    conn.execute(
+                        "UPDATE parameter_definitions SET model_bound=0 WHERE parameter_id IN (%s)" % placeholders,
+                        tuple(extras),
+                    )
+                self._sync_model_registry(conn)
+                self._sync_model_input_bindings(conn)
+                conn.commit()
+            finally:
+                conn.close()
+        return warnings
+
+    def _sync_model_registry(self, conn):
+        manifest = self.runtime.manifest()
+        if manifest.get("calculation_available") is False:
+            # Preserve the last known registry as audit history.  A stopped HTTP
+            # service is not a new local model installation.
+            return
+        for kind in ("effectiveness", "price"):
+            item = manifest[kind]
+            if manifest.get("execution_mode") == "independent_http_services":
+                artifact_path = "service://%s/%s" % (item.get("backend") or "unknown", kind)
+            else:
+                artifact_path = "models/%s_bundle.json" % kind
+            conn.execute("""INSERT OR REPLACE INTO model_registry
+                (model_kind,model_version,product_code,artifact_path,artifact_sha256,contract_status,enabled,updated_at)
+                VALUES(?,?,?,?,?,?,1,?)""", (
+                kind, item["model_version"], manifest["product_code"], artifact_path,
+                item.get("artifact_sha256"), "valid" if manifest.get("contract_valid") else "invalid", now_iso()
+            ))
+
+    def _sync_model_input_bindings(self, conn):
+        """Mirror model input contracts into SQLite without overwriting operator values."""
+        manifest = self.runtime.manifest()
+        if manifest.get("calculation_available") is False:
+            return
+        conn.execute("UPDATE model_input_bindings SET enabled=0")
+        rows = []
+        for spec in self.runtime.effectiveness.features:
+            rows.append({
+                "binding_id": "effectiveness:%s" % spec["key"], "model_kind": "effectiveness",
+                "parameter_id": spec["key"], "label": spec.get("label", spec["key"]),
+                "source_type": "product_parameter", "data_type": "ip_grade" if spec.get("parser") == "ip_grade" else spec.get("type", "number"),
+                "unit": spec.get("unit", ""), "required": 1 if spec.get("required", True) else 0,
+                "missing_policy": spec.get("missing_policy", "reject"), "training_mean": None,
+                "model_version": manifest["effectiveness"]["model_version"],
+            })
+        for item in self.runtime.price.raw_contract:
+            rows.append({
+                "binding_id": "price:%s" % item["key"], "model_kind": "price",
+                "parameter_id": item["key"], "label": item.get("label", item["key"]),
+                "source_type": item.get("source", "product_parameter"), "data_type": item.get("dtype") or ("ip_grade" if item.get("parser") == "ip_grade" else item.get("type", "number")),
+                "unit": item.get("unit", ""), "required": 1 if item.get("required", item.get("missing_policy", "reject") == "reject") else 0,
+                "missing_policy": item.get("missing_policy", "reject"), "training_mean": item.get("training_mean"),
+                "model_version": manifest["price"]["model_version"],
+            })
+        for item in rows:
+            conn.execute("""INSERT INTO model_input_bindings
+                (binding_id,model_kind,parameter_id,label,source_type,data_type,unit,required,missing_policy,
+                 configured_value,training_mean,model_version,enabled,updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?,NULL,?,?,1,?)
+                ON CONFLICT(binding_id) DO UPDATE SET
+                 model_kind=excluded.model_kind,parameter_id=excluded.parameter_id,label=excluded.label,
+                 source_type=excluded.source_type,data_type=excluded.data_type,unit=excluded.unit,
+                 required=excluded.required,missing_policy=excluded.missing_policy,
+                 training_mean=excluded.training_mean,model_version=excluded.model_version,
+                 enabled=1,updated_at=excluded.updated_at""", (
+                item["binding_id"], item["model_kind"], item["parameter_id"], item["label"],
+                item["source_type"], item["data_type"], item["unit"], item["required"],
+                item["missing_policy"], item["training_mean"], item["model_version"], now_iso()
+            ))
+
+    def configured_model_inputs(self, model_kind="price"):
+        """Return centrally configured model-only inputs from the admin database."""
+        conn = self.connect()
+        try:
+            rows = conn.execute("""SELECT parameter_id,data_type,configured_value FROM model_input_bindings
+                WHERE model_kind=? AND enabled=1 AND configured_value IS NOT NULL AND TRIM(configured_value)!=''""", (model_kind,)).fetchall()
+        finally:
+            conn.close()
+        result = {}
+        for row in rows:
+            value = row["configured_value"]
+            try:
+                if row["data_type"] == "boolean":
+                    text = str(value).strip().lower()
+                    result[row["parameter_id"]] = 1 if text in ("1","true","yes","有","是","启用") else 0
+                elif row["data_type"] in ("number", "numeric", "integer", "ip_grade"):
+                    result[row["parameter_id"]] = float(str(value).strip().upper().replace("IP", ""))
+                else:
+                    result[row["parameter_id"]] = value
+            except (TypeError, ValueError):
+                # Invalid configured values are ignored here and will be exposed
+                # by model input validation if the field is actually required.
+                continue
+        return result
+
+    def runtime_parameters(self, params):
+        merged = dict(params or {})
+        for key, value in self.configured_model_inputs("price").items():
+            if merged.get(key) in (None, ""):
+                merged[key] = value
+        conn = self.connect()
+        try:
+            rows = conn.execute("SELECT parameter_id,model_value_mapping_json FROM parameter_definitions WHERE enabled=1").fetchall()
+        finally:
+            conn.close()
+        for row in rows:
+            key = row["parameter_id"]
+            if key not in merged or merged[key] in (None, ""):
+                continue
+            mapping = _json_mapping(row["model_value_mapping_json"])
+            if not mapping:
+                continue
+            lookup = str(merged[key]).strip()
+            normalized = dict((str(source).strip().lower(), target) for source, target in mapping.items())
+            if lookup.lower() in normalized:
+                merged[key] = normalized[lookup.lower()]
+        return merged
+
+    def business_parameters(self, model_params, source_params=None):
+        result = dict(source_params or {})
+        conn = self.connect()
+        try:
+            rows = conn.execute("SELECT parameter_id,model_value_mapping_json FROM parameter_definitions WHERE enabled=1").fetchall()
+        finally:
+            conn.close()
+        mappings = dict((row["parameter_id"], _json_mapping(row["model_value_mapping_json"])) for row in rows)
+        for key, value in dict(model_params or {}).items():
+            if key in result and result[key] not in (None, ""):
+                continue
+            reverse = {}
+            for business, canonical in mappings.get(key, {}).items():
+                reverse.setdefault(str(canonical).strip().lower(), business)
+            result[key] = reverse.get(str(value).strip().lower(), value)
+        return result
+
+    def tag_map(self, include_disabled=False):
+        conn = self.connect()
+        try:
+            sql = "SELECT * FROM tags" if include_disabled else "SELECT * FROM tags WHERE enabled=1"
+            return dict((row["tag_id"], dict(row)) for row in conn.execute(sql))
+        finally:
+            conn.close()
+
+    def tag_rule_rows(self):
+        conn = self.connect()
+        try:
+            return [dict(row) for row in conn.execute("SELECT * FROM tag_rules WHERE enabled=1 ORDER BY tag_id,rule_group,rule_id")]
+        finally:
+            conn.close()
+
+    def derive_tags(self, params, evaluation=None, inherited_tags=None):
+        """Derive generated-scheme tags from DataMaster rules, never code constants."""
+        evaluation = evaluation or {}
+        values = dict(params or {})
+        values.update({
+            "__predicted_price_wan": evaluation.get("predicted_price_wan"),
+            "__capability_score": evaluation.get("capability_score"),
+            "__feasibility_probability": evaluation.get("feasibility_probability"),
+        })
+        tags = self.tag_map()
+        inherited = set(inherited_tags or [])
+        grouped = {}
+        for rule in self.tag_rule_rows():
+            grouped.setdefault(rule["tag_id"], {}).setdefault(rule.get("rule_group") or "default", []).append(rule)
+        result = []
+        for tag_id, tag in tags.items():
+            mode = str(tag.get("derivation_mode") or "rule").lower()
+            if mode == "manual":
+                continue
+            if mode == "inherit":
+                if tag_id in inherited:
+                    result.append(tag_id)
+                continue
+            groups = grouped.get(tag_id, {})
+            if not groups:
+                continue
+            matched = False
+            for rules in groups.values():
+                if all(filter_match(values, {
+                    "parameter_id": rule.get("parameter_id"),
+                    "operator": rule.get("operator"),
+                    "value1": rule.get("value1"),
+                    "value2": rule.get("value2"),
+                }) for rule in rules):
+                    matched = True
+                    break
+            if matched:
+                result.append(tag_id)
+        return sorted(set(result))
+
+    def tag_rule_branches(self, selected_tags, max_branches=24):
+        """Compile selected tag OR-groups into explicit generation branches."""
+        selected = [str(x) for x in (selected_tags or [])]
+        tags = self.tag_map()
+        grouped = {}
+        for rule in self.tag_rule_rows():
+            if rule.get("tag_id") in selected:
+                grouped.setdefault(rule["tag_id"], {}).setdefault(rule.get("rule_group") or "default", []).append(rule)
+        branches = [{"rules": [], "tag_groups": {}, "unresolved_tags": []}]
+        for tag_id in selected:
+            tag = tags.get(tag_id, {})
+            mode = str(tag.get("derivation_mode") or "rule").lower()
+            groups = grouped.get(tag_id, {}) if mode == "rule" else {}
+            if not groups:
+                for branch in branches:
+                    branch["unresolved_tags"].append(tag_id)
+                continue
+            alternatives = []
+            for group_name, rules in groups.items():
+                alternatives.append({"tag_id": tag_id, "group": group_name, "rules": [dict(x) for x in rules]})
+            expanded = []
+            for branch in branches:
+                for alternative in alternatives:
+                    clone = {"rules": list(branch["rules"]), "tag_groups": dict(branch["tag_groups"]), "unresolved_tags": list(branch["unresolved_tags"])}
+                    clone["rules"].extend(alternative["rules"])
+                    clone["tag_groups"][tag_id] = alternative["group"]
+                    expanded.append(clone)
+                    if len(expanded) >= max_branches:
+                        break
+                if len(expanded) >= max_branches:
+                    break
+            branches = expanded or branches
+        return branches or [{"rules": [], "tag_groups": {}, "unresolved_tags": selected}]
+
+    def tag_evidence(self, params, evaluation=None, inherited_tags=None):
+        evaluation = evaluation or {}
+        values = dict(params or {})
+        values.update({
+            "__predicted_price_wan": evaluation.get("predicted_price_wan"),
+            "__capability_score": evaluation.get("capability_score"),
+            "__feasibility_probability": evaluation.get("feasibility_probability"),
+        })
+        tags = self.tag_map()
+        inherited = set(inherited_tags or [])
+        grouped = {}
+        for rule in self.tag_rule_rows():
+            grouped.setdefault(rule["tag_id"], {}).setdefault(rule.get("rule_group") or "default", []).append(rule)
+        result = {}
+        for tag_id, tag in tags.items():
+            mode = str(tag.get("derivation_mode") or "rule").lower()
+            entry = {"tag_id": tag_id, "tag_name": tag.get("tag_name", tag_id), "mode": mode, "matched": False, "status": "unmatched", "matched_group": None, "rules": []}
+            if mode == "manual":
+                entry["status"] = "expert_confirmation_required"
+            elif mode == "inherit":
+                entry["matched"] = tag_id in inherited
+                entry["status"] = "inherited" if entry["matched"] else "not_inherited"
+            else:
+                for group_name, rules in grouped.get(tag_id, {}).items():
+                    details = []
+                    group_ok = True
+                    for rule in rules:
+                        match = filter_match(values, {"parameter_id": rule.get("parameter_id"), "operator": rule.get("operator"), "value1": rule.get("value1"), "value2": rule.get("value2")})
+                        details.append({"rule_id": rule.get("rule_id"), "parameter_id": rule.get("parameter_id"), "operator": rule.get("operator"), "value1": rule.get("value1"), "value2": rule.get("value2"), "matched": bool(match)})
+                        group_ok = group_ok and bool(match)
+                    if group_ok:
+                        entry.update({"matched": True, "status": "rule_matched", "matched_group": group_name, "rules": details})
+                        break
+                    if not entry["rules"]:
+                        entry["rules"] = details
+            result[tag_id] = entry
+        return result
+
+    def tag_constraints(self, selected_tags):
+        """Convert unambiguous DataMaster tag rules to direct parameter bounds."""
+        selected = set(selected_tags or [])
+        grouped = {}
+        for rule in self.tag_rule_rows():
+            if rule["tag_id"] in selected and not str(rule.get("parameter_id", "")).startswith("__"):
+                grouped.setdefault(rule["tag_id"], {}).setdefault(rule.get("rule_group") or "default", []).append(rule)
+        result = {}
+        for tag_id, groups in grouped.items():
+            # Multiple alternative groups are OR semantics and cannot safely be
+            # projected to one interval. They remain strict post-generation gates.
+            if len(groups) != 1:
+                continue
+            for rule in list(groups.values())[0]:
+                key, op = rule.get("parameter_id"), rule.get("operator")
+                target = result.setdefault(key, {})
+                try:
+                    v1 = float(str(rule.get("value1", "")).strip().upper().replace("IP", ""))
+                    v2 = float(str(rule.get("value2", "")).strip().upper().replace("IP", "")) if rule.get("value2") not in (None, "") else None
+                except (TypeError, ValueError):
+                    if not target: result.pop(key, None)
+                    continue
+                if op in ("gte", "gt"): target["min"] = max(v1, float(target.get("min", v1)))
+                elif op in ("lte", "lt"): target["max"] = min(v1, float(target.get("max", v1)))
+                elif op in ("eq", "boolean_is"):
+                    target["min"] = v1; target["max"] = v1
+                elif op == "range_inside" and v2 is not None:
+                    target["min"] = min(v1, v2); target["max"] = max(v1, v2)
+                else:
+                    if not target: result.pop(key, None)
+        return result
+
+    def _positioning(self, tags):
+        tag_map = self.tag_map()
+        names = [tag_map[item]["tag_name"] for item in tags if item in tag_map]
+        return "、".join(names[:4]) if names else "通用技术方案"
+
+    def master_data_version(self):
+        conn = self.connect()
+        try:
+            row = conn.execute("SELECT value FROM metadata WHERE key='master_data_version'").fetchone()
+            return row[0] if row else "0"
+        finally:
+            conn.close()
+
+    def _audit(self, conn, action, object_type, object_id, detail=None):
+        conn.execute("INSERT INTO audit_log(action,object_type,object_id,detail_json,created_at) VALUES(?,?,?,?,?)", (
+            action, object_type, object_id, json.dumps(detail or {}, ensure_ascii=False), now_iso()
+        ))
+
+    def parameter_roles(self):
+        roles = self.runtime.feature_roles()
+        shared = set(roles.get("shared_features") or [])
+        effect_only = set(roles.get("effectiveness_only_features") or [])
+        price_only = set(roles.get("price_only_features") or [])
+        result = {}
+        for spec in self.runtime.all_feature_specs():
+            key = spec["key"]
+            role = "shared" if key in shared else "price_only" if key in price_only else "effectiveness_only"
+            result[key] = {
+                "parameter_id": key,
+                "model_role": role,
+                "affects_effectiveness": role in ("shared", "effectiveness_only"),
+                "affects_price": role in ("shared", "price_only"),
+                "default_visible": role != "price_only",
+                "editable": bool(spec.get("editable", True)),
+                "default_value": spec.get("default_value") if spec.get("default_value") is not None else spec.get("training_mean"),
+            }
+        return result
+
+    def bootstrap(self):
+        conn = self.connect()
+        try:
+            product_row = conn.execute("SELECT * FROM products WHERE product_code=? AND enabled=1 LIMIT 1", (self.runtime.schema["product_code"],)).fetchone()
+            product = dict(product_row) if product_row else {}
+            parameters = [dict(row) for row in conn.execute("SELECT * FROM parameter_definitions WHERE enabled=1 ORDER BY display_order,label")]
+            role_map = self.parameter_roles()
+            for item in parameters:
+                item.update(role_map.get(item["parameter_id"], {"model_role":"effectiveness_only","affects_effectiveness":True,"affects_price":False,"default_visible":True,"editable":True,"default_value":None}))
+            tags = [dict(row) for row in conn.execute("SELECT * FROM tags WHERE enabled=1 ORDER BY tag_group,tag_name")]
+            models = [dict(row) for row in conn.execute("SELECT * FROM model_registry ORDER BY model_kind")]
+            counts = {
+                "historical": conn.execute("SELECT COUNT(*) FROM agreements WHERE agreement_source IN ('historical','imported') AND enabled=1").fetchone()[0],
+                "static_generated": conn.execute("SELECT COUNT(*) FROM agreements WHERE agreement_source IN ('live_generated','generated_model','generated')").fetchone()[0],
+                "saved": conn.execute("SELECT COUNT(*) FROM saved_schemes").fetchone()[0],
+            }
+            version_row = conn.execute("SELECT value FROM metadata WHERE key='master_data_version'").fetchone()
+            bindings = [dict(row) for row in conn.execute("SELECT * FROM model_input_bindings WHERE enabled=1 ORDER BY model_kind,parameter_id")]
+            return {"product": product, "parameters": parameters, "parameter_roles": role_map, "model_input_bindings": bindings,
+                    "tags": tags, "models": models, "counts": counts, "master_data_version": version_row[0] if version_row else "0"}
+        finally:
+            conn.close()
+
+    def parameter_map(self):
+        conn = self.connect()
+        try:
+            return dict((row["parameter_id"], dict(row)) for row in conn.execute("SELECT * FROM parameter_definitions"))
+        finally:
+            conn.close()
+
+    def current_product_code(self):
+        conn = self.connect()
+        try:
+            row = conn.execute("SELECT product_code FROM products ORDER BY enabled DESC, product_code LIMIT 1").fetchone()
+            return str(row["product_code"]) if row else ""
+        finally:
+            conn.close()
+
+    def historical_agreements(self, target_protocol=None, recalculate=True):
+        conn = self.connect()
+        try:
+            product_code = self.current_product_code()
+            rows = conn.execute("SELECT * FROM agreements WHERE product_code=? AND enabled=1 ORDER BY agreement_id", (product_code,)).fetchall()
+            items = [self._agreement_row(row, recalculate=False) for row in rows]
+        finally:
+            conn.close()
+        if not items or not recalculate:
+            return items
+        requests = [
+            {
+                "candidate_id": item["agreement_id"],
+                "parameters": self.runtime_parameters(item["params"]),
+                "target_protocol": target_protocol,
+            }
+            for item in items
+        ]
+        try:
+            if hasattr(self.runtime, "evaluate_batch"):
+                evaluations = self.runtime.evaluate_batch(requests, target_protocol=target_protocol)
+            else:
+                evaluations = [
+                    (
+                        self.runtime.evaluate(request["parameters"], target_protocol=target_protocol)
+                        if target_protocol not in (None, "")
+                        else self.runtime.evaluate(request["parameters"])
+                    )
+                    for request in requests
+                ]
+            if len(evaluations) != len(items):
+                raise ValueError("历史成品批量评价返回数量与请求数量不一致。")
+            return [self._apply_agreement_evaluation(item, evaluation) for item, evaluation in zip(items, evaluations)]
+        except Exception as batch_error:
+            # One incomplete legacy row must not hide the rest of the historical
+            # catalog. Retry independently and keep failures as model-free rows.
+            result = []
+            for item, request in zip(items, requests):
+                try:
+                    evaluation = (
+                        self.runtime.evaluate(request["parameters"], target_protocol=target_protocol)
+                        if target_protocol not in (None, "")
+                        else self.runtime.evaluate(request["parameters"])
+                    )
+                    result.append(self._apply_agreement_evaluation(item, evaluation))
+                except Exception as exc:
+                    preserved = dict(item)
+                    preserved["model_evaluation_available"] = False
+                    preserved["model_evaluation_error"] = str(exc)
+                    preserved["batch_evaluation_error"] = str(batch_error)
+                    result.append(preserved)
+            return result
+
+    def historical_boundary_profile(self):
+        """Return a model-free historical envelope for generation preflight.
+
+        This deliberately reads stored business data only, so the UI can warn
+        about a deep extrapolation immediately without waiting for either model
+        service.  The generator still uses freshly evaluated history for search.
+        """
+        conn = self.connect()
+        try:
+            rows = conn.execute(
+                "SELECT historical_price_wan,capability_score,feasibility_probability,params_json "
+                "FROM agreements WHERE product_code=? AND enabled=1",
+                (self.runtime.schema["product_code"],),
+            ).fetchall()
+        finally:
+            conn.close()
+        prices, capabilities, feasibilities = [], [], []
+        attributes = {}
+        for row in rows:
+            for target, key in (
+                (prices, "historical_price_wan"),
+                (capabilities, "capability_score"),
+                (feasibilities, "feasibility_probability"),
+            ):
+                value = _number(row[key])
+                if value is not None:
+                    target.append(value)
+            try:
+                params = json.loads(row["params_json"] or "{}")
+            except Exception:
+                params = {}
+            for key, raw in params.items():
+                value = _number(raw)
+                if value is not None:
+                    attributes.setdefault(str(key), []).append(value)
+        def envelope(values):
+            return [min(values), max(values)] if values else None
+        return {
+            "sample_count": len(rows),
+            "price_wan": envelope(prices),
+            "capability_score": envelope(capabilities),
+            "feasibility_probability": envelope(feasibilities),
+            "attributes": dict((key, envelope(values)) for key, values in attributes.items() if values),
+        }
+
+    def get_historical(self, agreement_id, target_protocol=None, recalculate=True):
+        conn = self.connect()
+        try:
+            row = conn.execute("SELECT * FROM agreements WHERE agreement_id=?", (agreement_id,)).fetchone()
+            return self._agreement_row(row, recalculate=recalculate, target_protocol=target_protocol) if row else None
+        finally:
+            conn.close()
+
+    def _agreement_row(self, row, recalculate=False, target_protocol=None):
+        item = dict(row)
+        item["params"] = json.loads(item.pop("params_json"))
+        item["tags"] = json.loads(item.pop("tags_json"))
+        item["is_generated"] = item["agreement_source"] in ("live_generated", "generated_model", "generated")
+        if recalculate:
+            runtime_params = self.runtime_parameters(item["params"])
+            evaluation = (
+                self.runtime.evaluate(runtime_params, target_protocol=target_protocol)
+                if target_protocol not in (None, "")
+                else self.runtime.evaluate(runtime_params)
+            )
+            item = self._apply_agreement_evaluation(item, evaluation)
+        return item
+
+    def _apply_agreement_evaluation(self, item, evaluation):
+        model_parameters = dict(evaluation.get("parameters") or {})
+        evaluation["model_parameters"] = model_parameters
+        evaluation["parameters"] = self.business_parameters(model_parameters, item["params"])
+        item["params"] = dict(evaluation["parameters"])
+        item["predicted_price_wan"] = evaluation["predicted_price_wan"]
+        item["price_interval_wan"] = evaluation["price_interval_wan"]
+        item["capability_score"] = evaluation["capability_score"]
+        item["conservative_capability_score"] = evaluation.get("conservative_capability_score", evaluation["capability_score"])
+        item["protocol_score_interval"] = evaluation.get("protocol_score_interval")
+        item["support_at_80"] = evaluation.get("support_at_80")
+        item["support_at_100"] = evaluation.get("support_at_100")
+        item["score_uncertainty_width"] = evaluation.get("score_uncertainty_width")
+        item["feasibility_probability"] = evaluation["feasibility_probability"]
+        item["physical_gate"] = evaluation.get("physical_gate") or {}
+        item["cost_effectiveness"] = evaluation["cost_effectiveness"]
+        item["evaluation"] = evaluation
+        item["model_evaluation_available"] = True
+        item["tags"] = self.derive_tags(item["params"], evaluation, item.get("tags") or [])
+        return item
+
+    def save_scheme(self, scheme_name, base_agreement_id, source_type, params, evaluation, risk_confirmed=False):
+        with self.lock:
+            conn = self.connect()
+            try:
+                cursor = conn.execute("""INSERT INTO saved_schemes
+                    (scheme_name,base_agreement_id,source_type,params_json,evaluation_json,risk_confirmed,created_at)
+                    VALUES(?,?,?,?,?,?,?)""", (
+                    scheme_name, base_agreement_id, source_type, json.dumps(params, ensure_ascii=False),
+                    json.dumps(evaluation, ensure_ascii=False), 1 if risk_confirmed else 0, now_iso()
+                ))
+                self._audit(conn, "create", "saved_scheme", str(cursor.lastrowid), {"name": scheme_name})
+                conn.commit(); return cursor.lastrowid
+            finally: conn.close()
+
+    def list_saved(self):
+        conn = self.connect()
+        try:
+            result = []
+            for row in conn.execute("SELECT * FROM saved_schemes ORDER BY id DESC LIMIT 200"):
+                item = dict(row); item["params"] = json.loads(item.pop("params_json")); item["evaluation"] = json.loads(item.pop("evaluation_json")); result.append(item)
+            return result
+        finally: conn.close()
+
+    def get_saved(self, scheme_id, recalculate=True):
+        conn = self.connect()
+        try:
+            row = conn.execute("SELECT * FROM saved_schemes WHERE id=?", (int(scheme_id),)).fetchone()
+            if not row:
+                return None
+            item = dict(row)
+            item["params"] = json.loads(item.pop("params_json"))
+            item["saved_evaluation"] = json.loads(item.pop("evaluation_json"))
+            item["evaluation"] = self.runtime.evaluate(self.runtime_parameters(item["params"])) if recalculate else item["saved_evaluation"]
+            if recalculate:
+                item["params"] = dict(item["evaluation"].get("parameters") or item["params"])
+            item["agreement_id"] = "SAVED-%s" % item["id"]
+            item["agreement_name"] = item["scheme_name"]
+            item["agreement_source"] = "expert_saved"
+            item["is_generated"] = False
+            item["positioning"] = "专家保存方案"
+            item["tags"] = self.derive_tags(item["params"], item["evaluation"])
+            return item
+        finally:
+            conn.close()
+
+    def import_wide_rows(self, parsed_rows, overwrite=False, evaluate=True):
+        valid = [entry["item"] for entry in parsed_rows if entry.get("valid")]
+        if not valid:
+            raise ValueError("没有可导入的有效宽表记录。")
+        inserted, updated = 0, 0
+        with self.lock:
+            conn = self.connect()
+            try:
+                for item in valid:
+                    exists = conn.execute("SELECT 1 FROM agreements WHERE agreement_id=?", (item["agreement_id"],)).fetchone()
+                    if exists and not overwrite:
+                        raise ValueError("协议编号%s已存在；请启用覆盖模式或修改编号。" % item["agreement_id"])
+                    if evaluate:
+                        evaluation = self.runtime.evaluate(self.runtime_parameters(item["params"]))
+                        stored_params = evaluation.get("parameters") or item["params"]
+                        tags = item.get("tags") or self.derive_tags(stored_params, evaluation)
+                        capability_score = evaluation.get("capability_score")
+                        feasibility_probability = evaluation.get("feasibility_probability")
+                    else:
+                        # Business-data staging/activation must not call whichever
+                        # HTTP model happens to be running at the moment.
+                        stored_params = dict(item.get("params") or {})
+                        tags = list(item.get("tags") or [])
+                        capability_score = None
+                        feasibility_probability = None
+                    values = (
+                        item["agreement_id"], item.get("product_code") or self.runtime.schema["product_code"], item["agreement_name"],
+                        item.get("positioning") or self._positioning(tags), item.get("agreement_source") or "imported",
+                        item.get("source_year"), item.get("supplier_type"), item.get("historical_price_wan"),
+                        capability_score, feasibility_probability,
+                        json.dumps(stored_params, ensure_ascii=False), json.dumps(tags, ensure_ascii=False),
+                        int(item.get("enabled", 1)), now_iso()
+                    )
+                    conn.execute("""INSERT INTO agreements
+                        (agreement_id,product_code,agreement_name,positioning,agreement_source,source_year,supplier_type,
+                         historical_price_wan,capability_score,feasibility_probability,params_json,tags_json,enabled,updated_at)
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ON CONFLICT(agreement_id) DO UPDATE SET
+                         product_code=excluded.product_code,agreement_name=excluded.agreement_name,positioning=excluded.positioning,
+                         agreement_source=excluded.agreement_source,source_year=excluded.source_year,supplier_type=excluded.supplier_type,
+                         historical_price_wan=excluded.historical_price_wan,capability_score=excluded.capability_score,
+                         feasibility_probability=excluded.feasibility_probability,params_json=excluded.params_json,
+                         tags_json=excluded.tags_json,enabled=excluded.enabled,updated_at=excluded.updated_at""", values)
+                    updated += 1 if exists else 0; inserted += 0 if exists else 1
+                    self._audit(conn, "wide_import_update" if exists else "wide_import_create", "agreement", item["agreement_id"], {"source": "wide_table", "evaluated": bool(evaluate)})
+                conn.commit()
+            finally:
+                conn.close()
+        return {"imported": True, "inserted": inserted, "updated": updated, "total": inserted + updated}
+
+    def replace_from_datamaster(self, data, evaluate_agreements=True, sync_model_contract=True):
+        """Atomically replace operator-maintained business data.
+
+        Model-service calls and model-binding synchronization are optional so a
+        new product can be installed before or after its independent HTTP model
+        services. Runtime readiness is handled outside this transaction.
+        """
+        if self.read_only:
+            raise ValueError("只读演示模式不能提交DataMaster。")
+        backup = self.create_backup("before_datamaster") if self.db_path.exists() else None
+        version = datetime.now().strftime("%Y%m%d%H%M%S")
+        with self.lock:
+            conn = self.connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                for table in ("agreements", "constraint_rules", "indicator_couplings", "tag_rules", "tags", "parameter_definitions", "products"):
+                    conn.execute("DELETE FROM %s" % table)
+                for item in data.get("products", []):
+                    conn.execute("INSERT INTO products(product_code,product_name,product_description,enabled) VALUES(?,?,?,?)", (item["product_code"],item["product_name"],item.get("product_description"),int(item.get("enabled",1))))
+                for item in data.get("parameters", []):
+                    conn.execute("""INSERT INTO parameter_definitions
+                        (parameter_id,label,unit,value_type,min_value,max_value,preference,description,adjustment_hint,
+                         allowed_values_json,model_value_mapping_json,search_type,required,auto_adjustable,decimal_places,display_order,enabled,model_bound)
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                        item["parameter_id"],item["label"],item.get("unit"),item["value_type"],item.get("min_value"),item.get("max_value"),item.get("preference"),item.get("description"),item.get("adjustment_hint"),item.get("allowed_values_json"),item.get("model_value_mapping_json"),item.get("search_type") or "auto",int(item.get("required",1)),int(item.get("auto_adjustable",1)),int(item.get("decimal_places",3)),int(item.get("display_order",1)),int(item.get("enabled",1)),int(item.get("model_bound",1))))
+                for item in data.get("tags", []):
+                    conn.execute("INSERT INTO tags(tag_id,tag_name,tag_group,weight,derivation_mode,description,enabled) VALUES(?,?,?,?,?,?,?)", (item["tag_id"],item["tag_name"],item.get("tag_group"),float(item.get("weight",1)),item.get("derivation_mode") or "rule",item.get("description"),int(item.get("enabled",1))))
+                for item in data.get("tag_rules", []):
+                    conn.execute("INSERT INTO tag_rules(rule_id,tag_id,parameter_id,operator,value1,value2,rule_group,enabled) VALUES(?,?,?,?,?,?,?,?)", (item["rule_id"],item["tag_id"],item["parameter_id"],item["operator"],item.get("value1"),item.get("value2"),item.get("rule_group") or "default",int(item.get("enabled",1))))
+                for item in data.get("couplings", []):
+                    conn.execute("""INSERT INTO indicator_couplings
+                        (coupling_id,coupling_name,coupling_type,parameter_a,parameter_b,domain_operator,multiplier,offset,strength,severity,description,rationale,display_order,enabled)
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (item["coupling_id"],item["coupling_name"],item["coupling_type"],item["parameter_a"],item["parameter_b"],item.get("domain_operator"),item.get("multiplier"),item.get("offset"),item.get("strength"),item.get("severity"),item.get("description"),item.get("rationale"),int(item.get("display_order",1)),int(item.get("enabled",1))))
+                for item in data.get("constraints", []):
+                    conn.execute("""INSERT INTO constraint_rules
+                        (rule_id,rule_name,left_parameter,operator,right_parameter,multiplier,offset,severity,message,rationale,display_order,enabled)
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (item["rule_id"],item["rule_name"],item["left_parameter"],item["operator"],item.get("right_parameter"),float(item.get("multiplier",1)),float(item.get("offset",0)),item.get("severity"),item.get("message"),item.get("rationale"),int(item.get("display_order",1)),int(item.get("enabled",1))))
+                if sync_model_contract:
+                    # Runtime contract rows describe external model services and
+                    # are not part of the business DataMaster authority.
+                    self._sync_model_registry(conn)
+                    self._sync_model_input_bindings(conn)
+                    for item in data.get("model_inputs", []):
+                        conn.execute("UPDATE model_input_bindings SET configured_value=?,enabled=? WHERE binding_id=?", (item.get("configured_value"),int(item.get("enabled",1)),item["binding_id"]))
+                conn.execute("INSERT OR REPLACE INTO metadata(key,value) VALUES('master_data_version',?)", (version,))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+        # Agreements require model evaluation. If any unexpected runtime error
+        # occurs after master tables were committed, restore the pre-import backup
+        # so users never end up with a half-applied DataMaster.
+        active_product_code = (
+            (data.get("products") or [{}])[0].get("product_code") or self.runtime.schema.get("product_code")
+        )
+        protocol_rows = []
+        for source_item in data.get("agreements", []):
+            item = dict(source_item)
+            if not item.get("product_code"):
+                item["product_code"] = active_product_code
+            protocol_rows.append({"item": item, "valid": True})
+        try:
+            result = self.import_wide_rows(
+                protocol_rows, overwrite=True, evaluate=evaluate_agreements,
+            ) if protocol_rows else {"inserted":0,"updated":0,"total":0}
+        except Exception:
+            if backup:
+                source = self.backup_dir / backup["name"]
+                with self.lock:
+                    temp = self.db_path.with_suffix(".datamaster_rollback.tmp")
+                    shutil.copy2(str(source), str(temp))
+                    for suffix in ("-wal", "-shm"):
+                        sidecar = Path(str(self.db_path) + suffix)
+                        if sidecar.exists(): sidecar.unlink()
+                    os.replace(str(temp), str(self.db_path))
+                self._initialize()
+            raise
+        conn = self.connect()
+        try:
+            self._audit(conn,"replace","datamaster",version,{"counts":dict((k,len(v)) for k,v in data.items() if isinstance(v,list))})
+            conn.commit()
+        finally:
+            conn.close()
+        return {
+            "committed":True,"master_data_version":version,"backup":backup and backup.get("name"),
+            "agreements":result,"agreements_evaluated":bool(evaluate_agreements),
+            "model_contract_synced":bool(sync_model_contract),
+        }
+
+    def coupling_rows(self):
+        conn = self.connect()
+        try:
+            return [dict(row) for row in conn.execute("SELECT * FROM indicator_couplings WHERE enabled=1 ORDER BY display_order")]
+        finally:
+            conn.close()
+
+    def constraint_rows(self):
+        conn = self.connect()
+        try:
+            return [dict(row) for row in conn.execute("SELECT * FROM constraint_rules WHERE enabled=1 ORDER BY display_order")]
+        finally:
+            conn.close()
+
+    # -------------------------- Rule assessment --------------------------
+    @staticmethod
+    def _compare(left, operator, right):
+        if operator == "gt": return left > right
+        if operator == "gte": return left >= right
+        if operator == "lt": return left < right
+        if operator == "lte": return left <= right
+        if operator == "eq": return abs(left - right) <= 1e-9
+        return False
+
+    def assess_rules(self, params, base_params=None):
+        definitions = self.parameter_map()
+        conn = self.connect()
+        try:
+            constraints = [dict(row) for row in conn.execute("SELECT * FROM constraint_rules WHERE enabled=1 ORDER BY display_order")]
+            couplings = [dict(row) for row in conn.execute("SELECT * FROM indicator_couplings WHERE enabled=1 ORDER BY display_order")]
+        finally: conn.close()
+        messages = []
+        for rule in constraints:
+            left_key, right_key = rule["left_parameter"], rule.get("right_parameter")
+            if left_key not in params or (right_key and right_key not in params): continue
+            left = float(params[left_key]); right = float(rule.get("offset") or 0)
+            if right_key: right += float(rule.get("multiplier") or 1) * float(params[right_key])
+            if not self._compare(left, rule["operator"], right):
+                label = definitions.get(left_key, {}).get("label", left_key)
+                right_label = definitions.get(right_key, {}).get("label", right_key) if right_key else "常数"
+                messages.append({
+                    "source": "constraint", "severity": rule.get("severity") or "warning", "title": rule["rule_name"],
+                    "message": rule.get("message") or "约束规则未满足。",
+                    "detail": "%s=%s，要求%s %s × %s + %s" % (label, left, rule["operator"], rule.get("multiplier"), right_label, rule.get("offset")),
+                    "suggestion": "请调整%s或%s，使规则重新满足。" % (label, right_label),
+                    "parameters": [left_key] + ([right_key] if right_key else []),
+                })
+        for item in couplings:
+            a, b = item["parameter_a"], item["parameter_b"]
+            if a not in params or b not in params: continue
+            if item["coupling_type"] == "feasible_domain":
+                rhs = float(item.get("multiplier") or 1) * float(params[a]) + float(item.get("offset") or 0)
+                if not self._compare(float(params[b]), item.get("domain_operator") or "gte", rhs):
+                    messages.append({
+                        "source": "coupling", "severity": item.get("severity") or "warning", "title": item["coupling_name"],
+                        "message": item.get("description") or "可行域耦合关系未满足。",
+                        "detail": "%s当前值为%s，模型化可行边界为%s。" % (definitions.get(b, {}).get("label", b), params[b], round(rhs, 3)),
+                        "suggestion": "优先将%s调整到边界%s附近，或降低%s。" % (definitions.get(b, {}).get("label", b), round(rhs, 3), definitions.get(a, {}).get("label", a)),
+                        "parameters": [a, b],
+                    })
+            elif base_params and a in base_params and b in base_params:
+                da, db = float(params[a]) - float(base_params[a]), float(params[b]) - float(base_params[b])
+                violated = (item["coupling_type"] == "positive" and da * db < 0) or (item["coupling_type"] == "negative" and da * db > 0)
+                one_sided = abs(da) > 1e-9 and abs(db) <= 1e-9
+                if violated or one_sided:
+                    relation = "同向" if item["coupling_type"] == "positive" else "反向"
+                    messages.append({
+                        "source": "coupling", "severity": item.get("severity") or "info", "title": item["coupling_name"],
+                        "message": item.get("description") or "指标调整方向可能与耦合经验不一致。",
+                        "detail": "%s变化%s，%s变化%s；经验上建议%s联动。" % (definitions.get(a, {}).get("label", a), round(da, 3), definitions.get(b, {}).get("label", b), round(db, 3), relation),
+                        "suggestion": "复核%s，并结合%s同步调整。" % (definitions.get(b, {}).get("label", b), item.get("rationale") or "工程经验"),
+                        "parameters": [a, b],
+                    })
+        order = {"error": 0, "warning": 1, "info": 2}
+        messages.sort(key=lambda x: order.get(x.get("severity"), 9))
+        return messages
+
+    # --------------------- Staged product releases ---------------------
+    def create_product_release(self, product_code, product_name, data):
+        if self.read_only:
+            raise ValueError("只读演示模式不能创建待发布成品。")
+        release_id = safe_id("REL")
+        stamp = now_iso()
+        with self.lock:
+            conn = self.connect()
+            try:
+                conn.execute("""INSERT INTO product_releases
+                    (release_id,product_code,product_name,status,data_json,validation_json,created_at,updated_at)
+                    VALUES(?,?,?,'draft',?,NULL,?,?)""", (
+                    release_id, product_code, product_name,
+                    json.dumps(data, ensure_ascii=False), stamp, stamp,
+                ))
+                self._audit(conn, "create", "product_release", release_id, {
+                    "product_code": product_code, "product_name": product_name,
+                })
+                conn.commit()
+            finally:
+                conn.close()
+        return self.get_product_release(release_id)
+
+    @staticmethod
+    def _release_row(row, include_data=True):
+        item = dict(row)
+        if include_data:
+            item["data"] = json.loads(item.pop("data_json") or "{}")
+        else:
+            raw = json.loads(item.pop("data_json") or "{}")
+            item["counts"] = dict((key, len(value)) for key, value in raw.items() if isinstance(value, list))
+        item["validation"] = json.loads(item.pop("validation_json")) if item.get("validation_json") else None
+        return item
+
+    def list_product_releases(self):
+        conn = self.connect()
+        try:
+            rows = conn.execute("SELECT * FROM product_releases ORDER BY updated_at DESC").fetchall()
+            return [self._release_row(row, include_data=False) for row in rows]
+        finally:
+            conn.close()
+
+    def get_product_release(self, release_id):
+        conn = self.connect()
+        try:
+            row = conn.execute("SELECT * FROM product_releases WHERE release_id=?", (str(release_id),)).fetchone()
+            return self._release_row(row) if row else None
+        finally:
+            conn.close()
+
+    def update_product_release(self, release_id, data, product_code=None, product_name=None, status=None, validation=None):
+        if self.read_only:
+            raise ValueError("只读演示模式不能修改待发布成品。")
+        current = self.get_product_release(release_id)
+        if not current:
+            raise ValueError("待发布成品不存在：%s" % release_id)
+        product_code = product_code if product_code is not None else current["product_code"]
+        product_name = product_name if product_name is not None else current["product_name"]
+        status = status or current["status"]
+        validation_json = json.dumps(validation, ensure_ascii=False) if validation is not None else None
+        with self.lock:
+            conn = self.connect()
+            try:
+                conn.execute("""UPDATE product_releases
+                    SET product_code=?,product_name=?,status=?,data_json=?,validation_json=?,updated_at=?
+                    WHERE release_id=?""", (
+                    product_code, product_name, status, json.dumps(data, ensure_ascii=False),
+                    validation_json, now_iso(), str(release_id),
+                ))
+                self._audit(conn, "update", "product_release", str(release_id), {
+                    "status": status,
+                    "counts": dict((key, len(value)) for key, value in data.items() if isinstance(value, list)),
+                })
+                conn.commit()
+            finally:
+                conn.close()
+        return self.get_product_release(release_id)
+
+    def mark_product_release_active(self, release_id):
+        with self.lock:
+            conn = self.connect()
+            try:
+                stamp = now_iso()
+                conn.execute("UPDATE product_releases SET status='superseded',updated_at=? WHERE status='active' AND release_id<>?", (stamp, str(release_id)))
+                conn.execute("UPDATE product_releases SET status='active',activated_at=?,updated_at=? WHERE release_id=?", (stamp, stamp, str(release_id)))
+                self._audit(conn, "activate", "product_release", str(release_id), {})
+                conn.commit()
+            finally:
+                conn.close()
+        return self.get_product_release(release_id)
+
+    def delete_product_release(self, release_id):
+        if self.read_only:
+            raise ValueError("只读演示模式不能删除待发布成品。")
+        current = self.get_product_release(release_id)
+        if not current:
+            raise ValueError("待发布成品不存在：%s" % release_id)
+        if current.get("status") == "active":
+            raise ValueError("当前已激活的发布记录不能删除。")
+        with self.lock:
+            conn = self.connect()
+            try:
+                conn.execute("DELETE FROM product_releases WHERE release_id=?", (str(release_id),))
+                self._audit(conn, "delete", "product_release", str(release_id), {})
+                conn.commit()
+            finally:
+                conn.close()
+        return {"deleted": True, "release_id": str(release_id)}
+
+    # -------------------------- Admin CRUD --------------------------
+    ADMIN_TABLES = {
+        "products": ("products", "product_code"),
+        "parameters": ("parameter_definitions", "parameter_id"),
+        "tags": ("tags", "tag_id"),
+        "tag_rules": ("tag_rules", "rule_id"),
+        "couplings": ("indicator_couplings", "coupling_id"),
+        "constraints": ("constraint_rules", "rule_id"),
+        "agreements": ("agreements", "agreement_id"),
+        "models": ("model_registry", "model_kind"),
+        "model_inputs": ("model_input_bindings", "binding_id"),
+    }
+
+    def admin_snapshot(self):
+        conn = self.connect()
+        try:
+            payload = {}
+            for key, (table, pk) in self.ADMIN_TABLES.items():
+                order = "display_order" if table in ("parameter_definitions", "indicator_couplings", "constraint_rules") else pk
+                rows = [dict(row) for row in conn.execute("SELECT * FROM %s ORDER BY %s" % (table, order))]
+                if key == "agreements":
+                    for row in rows:
+                        row["params"] = json.loads(row.pop("params_json")); row["tags"] = json.loads(row.pop("tags_json"))
+                payload[key] = rows
+            payload["saved_schemes"] = self.list_saved()
+            payload["audit_log"] = [dict(row) for row in conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT 100")]
+            payload["database"] = {"path": str(self.db_path), "size_bytes": self.db_path.stat().st_size if self.db_path.exists() else 0, "integrity": self.integrity_check()}
+            return payload
+        finally: conn.close()
+
+    def admin_upsert(self, section, item):
+        if section not in self.ADMIN_TABLES or section == "models":
+            raise ValueError("不支持维护该数据类型")
+        table, pk = self.ADMIN_TABLES[section]
+        data = dict(item or {})
+        parameter_ids = set(self.parameter_map())
+        tag_ids = set(self.tag_map(include_disabled=True))
+        if section == "tag_rules":
+            if data.get("tag_id") not in tag_ids:
+                raise ValueError("标签规则引用了不存在的标签")
+            if data.get("parameter_id") not in parameter_ids and data.get("parameter_id") not in ("__predicted_price_wan", "__capability_score", "__feasibility_probability"):
+                raise ValueError("标签规则引用了不存在的指标")
+        if section == "couplings":
+            if data.get("parameter_a") not in parameter_ids or data.get("parameter_b") not in parameter_ids:
+                raise ValueError("耦合关系引用了不存在的指标")
+        if section == "constraints":
+            if data.get("left_parameter") not in parameter_ids or (data.get("right_parameter") and data.get("right_parameter") not in parameter_ids):
+                raise ValueError("约束规则引用了不存在的指标")
+        if section == "agreements":
+            params = data.pop("params", {})
+            data["params_json"] = json.dumps(dict(params or {}), ensure_ascii=False)
+            data["tags_json"] = json.dumps(data.pop("tags", []) or [], ensure_ascii=False)
+            # Business-data editing never invokes the current external model.
+            # Existing computed results are invalidated until an explicit user
+            # calculation is requested in the recommendation system.
+            data["capability_score"] = None
+            data["feasibility_probability"] = None
+            data["product_code"] = data.get("product_code") or self.current_product_code()
+            data.setdefault("updated_at", now_iso())
+        if section == "parameters":
+            if isinstance(data.get("allowed_values_json"), (list, dict)):
+                data["allowed_values_json"] = json.dumps(data["allowed_values_json"], ensure_ascii=False)
+            if isinstance(data.get("model_value_mapping_json"), dict):
+                data["model_value_mapping_json"] = json.dumps(data["model_value_mapping_json"], ensure_ascii=False)
+        columns = self._table_columns(table)
+        data = dict((k, v) for k, v in data.items() if k in columns)
+        if not data.get(pk):
+            data[pk] = safe_id({"parameters":"PAR","tags":"TAG","tag_rules":"TAGRULE","couplings":"CPL","constraints":"RULE","agreements":"AGR","products":"PRODUCT"}.get(section,"ID"))
+        placeholders = ",".join("?" for _ in data)
+        updates = ",".join("%s=excluded.%s" % (key, key) for key in data if key != pk)
+        sql = "INSERT INTO %s(%s) VALUES(%s) ON CONFLICT(%s) DO UPDATE SET %s" % (table, ",".join(data), placeholders, pk, updates)
+        with self.lock:
+            conn = self.connect()
+            try:
+                conn.execute(sql, tuple(data.values())); self._audit(conn, "upsert", section, str(data[pk]), data); conn.commit()
+            finally: conn.close()
+        return {"saved": True, "id": data[pk]}
+
+    def _table_columns(self, table):
+        conn = self.connect()
+        try: return self._columns(conn, table)
+        finally: conn.close()
+
+    def admin_dependencies(self, section, object_id):
+        """Return references that make permanent deletion unsafe."""
+        conn = self.connect()
+        try:
+            refs = []
+            if section == "tags":
+                count = conn.execute("SELECT COUNT(*) FROM tag_rules WHERE tag_id=?", (object_id,)).fetchone()[0]
+                if count: refs.append({"type":"标签规则", "count":count})
+                # Agreements store tags as JSON text. This is intentionally a conservative scan.
+                count = conn.execute("SELECT COUNT(*) FROM agreements WHERE tags_json LIKE ?", ('%%"%s"%%' % object_id,)).fetchone()[0]
+                if count: refs.append({"type":"协议标签", "count":count})
+            elif section == "parameters":
+                for table, column, label in [
+                    ("tag_rules","parameter_id","标签规则"), ("indicator_couplings","parameter_a","耦合关系A"),
+                    ("indicator_couplings","parameter_b","耦合关系B"), ("constraint_rules","left_parameter","约束左侧"),
+                    ("constraint_rules","right_parameter","约束右侧"), ("model_input_bindings","parameter_id","模型字段绑定")]:
+                    count = conn.execute("SELECT COUNT(*) FROM %s WHERE %s=?" % (table,column), (object_id,)).fetchone()[0]
+                    if count: refs.append({"type":label,"count":count})
+            elif section == "products":
+                count = conn.execute("SELECT COUNT(*) FROM agreements WHERE product_code=?", (object_id,)).fetchone()[0]
+                if count: refs.append({"type":"协议数据","count":count})
+                count = conn.execute("SELECT COUNT(*) FROM model_registry WHERE product_code=?", (object_id,)).fetchone()[0]
+                if count: refs.append({"type":"模型注册","count":count})
+            return refs
+        finally:
+            conn.close()
+
+    def admin_toggle(self, section, object_id, enabled):
+        if section not in self.ADMIN_TABLES or section == "models":
+            raise ValueError("该数据类型不支持启用/停用")
+        table, pk = self.ADMIN_TABLES[section]
+        columns = self._table_columns(table)
+        if "enabled" not in columns:
+            raise ValueError("该数据类型没有启用状态")
+        enabled = 1 if bool(enabled) else 0
+        if section == "products" and not enabled:
+            raise ValueError("当前业务成品不能直接停用；请通过成品数据工作区备份并切换业务数据。")
+        with self.lock:
+            conn = self.connect()
+            try:
+                if "archived_at" in columns:
+                    conn.execute("UPDATE %s SET enabled=?, archived_at=? WHERE %s=?" % (table, pk), (enabled, None if enabled else now_iso(), object_id))
+                else:
+                    conn.execute("UPDATE %s SET enabled=? WHERE %s=?" % (table, pk), (enabled, object_id))
+                if conn.total_changes == 0:
+                    raise ValueError("记录不存在")
+                self._audit(conn, "enable" if enabled else "disable", section, object_id, {"enabled":enabled})
+                conn.commit()
+            finally:
+                conn.close()
+        return {"updated":True,"id":object_id,"enabled":enabled}
+
+    def admin_delete(self, section, object_id):
+        """User-facing delete means archive/disable, never physical DELETE."""
+        if section not in self.ADMIN_TABLES or section in ("models", "products", "parameters", "model_inputs"):
+            raise ValueError("该数据类型不允许归档")
+        result = self.admin_toggle(section, object_id, False)
+        result.update({"deleted":False,"archived":True})
+        return result
+
+    def admin_purge(self, section, object_id):
+        """Permanently delete an already disabled record after dependency checks."""
+        if section not in self.ADMIN_TABLES or section in ("models", "products", "parameters", "model_inputs"):
+            raise ValueError("该数据类型不允许永久删除")
+        table, pk = self.ADMIN_TABLES[section]
+        dependencies = self.admin_dependencies(section, object_id)
+        if dependencies:
+            raise ValueError("记录仍被引用，不能永久删除：%s" % "；".join("%s%d条" % (x["type"], x["count"]) for x in dependencies))
+        with self.lock:
+            conn = self.connect()
+            try:
+                row = conn.execute("SELECT enabled FROM %s WHERE %s=?" % (table, pk), (object_id,)).fetchone()
+                if row is None: raise ValueError("记录不存在")
+                if int(row["enabled"] or 0): raise ValueError("请先停用/归档，再执行永久删除")
+                self.create_backup("before_purge_%s" % section)
+                conn.execute("DELETE FROM %s WHERE %s=?" % (table, pk), (object_id,))
+                self._audit(conn, "purge", section, object_id, {"permanent":True})
+                conn.commit()
+            finally:
+                conn.close()
+        return {"purged":True,"id":object_id}
+
+    # -------------------------- Database backup --------------------------
+    def integrity_check(self, path=None):
+        try:
+            conn = self.connect(path)
+            result = conn.execute("PRAGMA integrity_check").fetchone()[0]
+            tables = set(row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'"))
+            conn.close()
+            missing = sorted(self.REQUIRED_TABLES - tables)
+            blocking_missing = sorted(set(missing) - self.MIGRATABLE_TABLES)
+            return {
+                "ok": result == "ok" and not blocking_missing,
+                "sqlite": result,
+                "missing_tables": missing,
+                "migratable_tables": sorted(set(missing) & self.MIGRATABLE_TABLES),
+            }
+        except Exception as exc:
+            return {"ok": False, "sqlite": str(exc), "missing_tables": []}
+
+    def create_backup(self, reason="manual"):
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        target = self.backup_dir / ("protocol_demo_%s_%s.db" % (stamp, reason))
+        with self.lock:
+            source = self.connect(); dest = sqlite3.connect(str(target))
+            try: source.backup(dest)
+            finally: dest.close(); source.close()
+        return {"name": target.name, "size_bytes": target.stat().st_size, "created_at": now_iso(), "integrity": self.integrity_check(target)}
+
+    def list_backups(self):
+        result = []
+        for path in sorted(self.backup_dir.glob("*.db"), key=lambda p: p.stat().st_mtime, reverse=True):
+            result.append({"name": path.name, "size_bytes": path.stat().st_size, "modified_at": datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")})
+        return result
+
+    def restore_backup(self, name):
+        source = (self.backup_dir / Path(name).name).resolve()
+        if not source.is_file() or not str(source).startswith(str(self.backup_dir.resolve())): raise ValueError("备份不存在")
+        check = self.integrity_check(source)
+        if not check["ok"]: raise ValueError("备份数据库校验失败: %s" % check)
+        self.create_backup("before_restore")
+        with self.lock:
+            temp = self.db_path.with_suffix(".restore.tmp")
+            shutil.copy2(str(source), str(temp))
+            for suffix in ("-wal", "-shm"):
+                sidecar = Path(str(self.db_path) + suffix)
+                if sidecar.exists(): sidecar.unlink()
+            os.replace(str(temp), str(self.db_path))
+        self._initialize()
+        return {"restored": True, "name": source.name}
+
+    def restore_uploaded(self, uploaded_path):
+        path = Path(uploaded_path)
+        check = self.integrity_check(path)
+        if not check["ok"]: raise ValueError("上传数据库校验失败: %s" % check)
+        backup = self.create_backup("before_upload_restore")
+        with self.lock:
+            temp = self.db_path.with_suffix(".upload.tmp")
+            shutil.copy2(str(path), str(temp))
+            for suffix in ("-wal", "-shm"):
+                sidecar = Path(str(self.db_path) + suffix)
+                if sidecar.exists(): sidecar.unlink()
+            os.replace(str(temp), str(self.db_path))
+        self._initialize()
+        return {"restored": True, "previous_backup": backup["name"]}
+
+    def export_json(self):
+        return self.admin_snapshot()

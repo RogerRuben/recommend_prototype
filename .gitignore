@@ -1,0 +1,49 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+runtime/venvs/
+runtime/
+
+# Offline dependency bundles are delivered separately
+**/wheelhouse_win7/
+*.whl
+
+# Runtime state and operator-generated files
+logs/
+backups/
+exports/
+uploads/
+runtime_state/
+*.log
+*.tmp
+*.bak
+
+# Generated test/delivery outputs
+outputs/
+deliverables/
+.codex_sheet_check/
+
+# Local handoff archives and extracted third-party workspaces
+明日交接_20260812/
+明日交接_20260812.rar
+*.rar
+
+# Editor and OS metadata
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local credentials and environment overrides
+.env
+.env.*
+!.env.example
+*.pem
+*.key

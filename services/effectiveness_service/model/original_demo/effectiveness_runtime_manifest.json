@@ -1,0 +1,43 @@
+{
+  "format_version": "effectiveness-original-runtime-package-1.0",
+  "product_code": "c67a9c7003a9de67",
+  "product_name": "aircraft_door_lock_demo",
+  "model_version": "original-runtime-c67a9c7003a9",
+  "source_root": "source",
+  "workbook": "data/aircraft_door_lock_demo.xlsx",
+  "state": null,
+  "workbook_fingerprint": "9ebbc08908138c52",
+  "learning_fingerprint": "c67a9c7003a9de67",
+  "state_mode": "workbook_baseline",
+  "files": [
+    {
+      "path": "source/interactive_project_app.py",
+      "sha256": "8b67e9ab1cf344467b5213a15d0a4378eda0d9d6af0823ceb0efeb27b6ec502d"
+    },
+    {
+      "path": "source/project_excel.py",
+      "sha256": "ef14189fa8049ee44111db93566d64ca8e9ee9d13f779d1530ac575f7d5a5319"
+    },
+    {
+      "path": "source/coupling_model.py",
+      "sha256": "6f9255a72b84374675d273b15a9f19073851d26c017d399d01e563a4e4f58c82"
+    },
+    {
+      "path": "source/feasibility_model.py",
+      "sha256": "374ea3606fe894d655ff98a5cac08f368ec75df7cca15e66bdd4e1c6519556f3"
+    },
+    {
+      "path": "source/preference_models.py",
+      "sha256": "e727692a98521edab92fce889d2cb837f929890eac2a50af6308a00805495cbf"
+    },
+    {
+      "path": "source/requirement_model.py",
+      "sha256": "87b10548ec2323fdb443bf65ae5787200a393ff26b7f9f3cfa4c7da8e70f169b"
+    },
+    {
+      "path": "data/aircraft_door_lock_demo.xlsx",
+      "sha256": "9ebbc08908138c52213d2c27d21afca8bb35ac67544296c95f96cead1c69417e"
+    }
+  ],
+  "prediction_equivalence": "loads the same source modules + Workbook + State and calls ProjectApp.evaluate"
+}

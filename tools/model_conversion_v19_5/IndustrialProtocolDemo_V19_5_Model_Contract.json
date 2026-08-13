@@ -1,0 +1,32 @@
+{
+  "recommendation_contract_version": "4.0",
+  "runtime": "app/model_runtime.py",
+  "contract_helper": "app/model_contract_v4.py",
+  "roles": {
+    "shared": "同一parameter_id同时出现在effectiveness与price绑定中；界面只显示一次，修改后两个模型都重算",
+    "effectiveness_only": "默认显示并允许按DataMaster设置编辑",
+    "price_only": "默认隐藏，用户展开价格相关属性后显示"
+  },
+  "shared_field_requirements": [
+    "field_name一致",
+    "dtype一致",
+    "unit一致",
+    "source_type一致"
+  ],
+  "price_only_required_fallback": [
+    "training_mean",
+    "default",
+    "constant",
+    "zero"
+  ],
+  "effectiveness_source": "Workbook + optional matching state JSON + original reconstruction code",
+  "price_source": "raw training table retrained into deployable pure-JSON ensemble",
+  "installation": {
+    "effectiveness": "models/effectiveness_bundle.json",
+    "price": "models/price_bundle.json",
+    "validator": "validate_and_install_models.py",
+    "copies_runtime": false,
+    "atomic_rollback": true,
+    "product_change_requires_datamaster": true
+  }
+}

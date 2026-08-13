@@ -1,0 +1,17 @@
+[Unit]
+Description=Industrial Protocol Demo V19.5
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/industrial-protocol-demo
+Environment=PYTHONUTF8=1
+Environment=IPDEMO_HOST=127.0.0.1
+Environment=IPDEMO_PORT=8080
+ExecStart=/usr/bin/python3 /opt/industrial-protocol-demo/run_app.py --host 127.0.0.1 --port 8080 --port-span 0 --no-browser
+Restart=on-failure
+User=ipdemo
+Group=ipdemo
+
+[Install]
+WantedBy=multi-user.target

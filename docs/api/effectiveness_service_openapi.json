@@ -1,0 +1,40 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "效能与可行性预测服务 API",
+    "version": "1.0.0",
+    "description": "支持直接运行原效能工程Workbook+State，也支持快照兼容模式。"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "健康检查与效能模型状态"
+      }
+    },
+    "/api/v1/schema": {
+      "get": {
+        "summary": "效能字段契约"
+      }
+    },
+    "/api/v1/evaluate": {
+      "post": {
+        "summary": "单方案效能、可行性和轮廓评价"
+      }
+    },
+    "/api/v1/evaluate/batch": {
+      "post": {
+        "summary": "批量评价，最多1000条"
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "summary": "OpenAPI 3.0文档"
+      }
+    },
+    "/docs": {
+      "get": {
+        "summary": "简易接口前端"
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+# Python 3.8 / Win64 exact-price inference environment.
+# A formal bundle's manifest remains authoritative: if it references another
+# library/version, prepare that dependency as well and validate on the target image.
+numpy==1.24.4
+scipy==1.10.1
+joblib==1.4.2
+threadpoolctl==3.5.0
+scikit-learn==1.3.2
+xgboost==1.7.6
+# The application serializes with standard pickle and never calls joblib.load,
+# but joblib remains an installation dependency of scikit-learn itself.

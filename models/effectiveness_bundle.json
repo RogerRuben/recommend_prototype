@@ -1,0 +1,551 @@
+{
+  "manifest": {
+    "model_type": "feasible_contour_plus_logistic_plus_additive_utility",
+    "model_version": "eff-fc-20260726-v19-generic-rules",
+    "created_utc": "2026-07-24T06:40:12.293581Z",
+    "product_code": "SERVO_CYLINDER_DEMO",
+    "runtime": "Python 3.8+ standard library; JSON artifact",
+    "training_source": "virtual_protocol_dataset",
+    "integration_note": "Runtime uses pure Python in-process loader; training may still use NumPy/SciPy.",
+    "compatibility_note": "V18 separates complete product/effectiveness schema from price-model feature schema.",
+    "contract_version": "3.0"
+  },
+  "schema": {
+    "product_code": "SERVO_CYLINDER_DEMO",
+    "product_name": "高可靠伺服电动缸（虚拟测试）",
+    "features": [
+      {
+        "key": "stroke_mm",
+        "label": "行程",
+        "unit": "mm",
+        "type": "number",
+        "min": 50,
+        "max": 220,
+        "preference": "neutral",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "rated_thrust_n",
+        "label": "额定推力",
+        "unit": "N",
+        "type": "number",
+        "min": 4000,
+        "max": 18000,
+        "preference": "higher",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "peak_thrust_n",
+        "label": "峰值推力",
+        "unit": "N",
+        "type": "number",
+        "min": 6000,
+        "max": 30000,
+        "preference": "higher",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "speed_mm_s",
+        "label": "运行速度",
+        "unit": "mm/s",
+        "type": "number",
+        "min": 5,
+        "max": 90,
+        "preference": "higher",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "accuracy_mm",
+        "label": "定位精度",
+        "unit": "mm",
+        "type": "number",
+        "min": 0.05,
+        "max": 1.0,
+        "preference": "lower",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "response_time_ms",
+        "label": "响应时间",
+        "unit": "ms",
+        "type": "number",
+        "min": 50,
+        "max": 340,
+        "preference": "lower",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "temp_low_c",
+        "label": "工作温度下限",
+        "unit": "℃",
+        "type": "number",
+        "min": -60,
+        "max": -10,
+        "preference": "lower",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "temp_high_c",
+        "label": "工作温度上限",
+        "unit": "℃",
+        "type": "number",
+        "min": 55,
+        "max": 100,
+        "preference": "higher",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "duty_cycle_pct",
+        "label": "连续工作制",
+        "unit": "%",
+        "type": "number",
+        "min": 20,
+        "max": 100,
+        "preference": "higher",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "mass_kg",
+        "label": "质量上限",
+        "unit": "kg",
+        "type": "number",
+        "min": 4.5,
+        "max": 22,
+        "preference": "lower",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "salt_spray_h",
+        "label": "盐雾试验时间",
+        "unit": "h",
+        "type": "number",
+        "min": 0,
+        "max": 240,
+        "preference": "higher",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "protection_grade",
+        "label": "防护等级数字",
+        "unit": "IP",
+        "type": "number",
+        "min": 54,
+        "max": 68,
+        "preference": "higher",
+        "required": true,
+        "missing_policy": "reject",
+        "parser": "ip_grade",
+        "allowed_values": [
+          54,
+          55,
+          65,
+          66,
+          67,
+          68
+        ]
+      },
+      {
+        "key": "manual_emergency",
+        "label": "手动应急",
+        "unit": "",
+        "type": "boolean",
+        "min": 0,
+        "max": 1,
+        "preference": "higher",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "self_lock",
+        "label": "断电自锁",
+        "unit": "",
+        "type": "boolean",
+        "min": 0,
+        "max": 1,
+        "preference": "higher",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "position_feedback",
+        "label": "位置反馈",
+        "unit": "",
+        "type": "boolean",
+        "min": 0,
+        "max": 1,
+        "preference": "higher",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "overload_protection",
+        "label": "过载保护",
+        "unit": "",
+        "type": "boolean",
+        "min": 0,
+        "max": 1,
+        "preference": "higher",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "self_diagnosis",
+        "label": "自诊断",
+        "unit": "",
+        "type": "boolean",
+        "min": 0,
+        "max": 1,
+        "preference": "higher",
+        "required": true,
+        "missing_policy": "reject"
+      }
+    ],
+    "couplings": [
+      {
+        "target": "peak_thrust_n",
+        "sources": [
+          {
+            "key": "rated_thrust_n",
+            "direction": "positive"
+          }
+        ]
+      },
+      {
+        "target": "mass_kg",
+        "sources": [
+          {
+            "key": "rated_thrust_n",
+            "direction": "positive"
+          },
+          {
+            "key": "stroke_mm",
+            "direction": "positive"
+          },
+          {
+            "key": "salt_spray_h",
+            "direction": "positive"
+          },
+          {
+            "key": "temp_low_c",
+            "direction": "negative"
+          },
+          {
+            "key": "temp_high_c",
+            "direction": "positive"
+          }
+        ]
+      },
+      {
+        "target": "response_time_ms",
+        "sources": [
+          {
+            "key": "speed_mm_s",
+            "direction": "negative"
+          },
+          {
+            "key": "accuracy_mm",
+            "direction": "positive"
+          }
+        ]
+      },
+      {
+        "target": "protection_grade",
+        "sources": [
+          {
+            "key": "salt_spray_h",
+            "direction": "positive"
+          },
+          {
+            "key": "temp_high_c",
+            "direction": "positive"
+          }
+        ]
+      }
+    ],
+    "generator_order": [
+      "stroke_mm",
+      "rated_thrust_n",
+      "speed_mm_s",
+      "accuracy_mm",
+      "temp_low_c",
+      "temp_high_c",
+      "duty_cycle_pct",
+      "salt_spray_h",
+      "manual_emergency",
+      "self_lock",
+      "position_feedback",
+      "overload_protection",
+      "self_diagnosis",
+      "peak_thrust_n",
+      "mass_kg",
+      "response_time_ms",
+      "protection_grade"
+    ],
+    "schema_role": "complete_product_and_effectiveness_attributes"
+  },
+  "training_ranges": {
+    "stroke_mm": [
+      53.785993000000005,
+      217.12187299999994
+    ],
+    "rated_thrust_n": [
+      4129.351511999999,
+      17817.875133999998
+    ],
+    "peak_thrust_n": [
+      6000.0,
+      28079.408851999997
+    ],
+    "speed_mm_s": [
+      5.935017,
+      89.035879
+    ],
+    "accuracy_mm": [
+      0.0610788,
+      0.9897976999999999
+    ],
+    "response_time_ms": [
+      87.759205,
+      328.064509
+    ],
+    "temp_low_c": [
+      -59.050205,
+      -10.710804000000003
+    ],
+    "temp_high_c": [
+      55.478907,
+      99.438175
+    ],
+    "duty_cycle_pct": [
+      21.280003999999998,
+      99.17239
+    ],
+    "mass_kg": [
+      6.668159999999999,
+      19.032994
+    ],
+    "salt_spray_h": [
+      0.0,
+      240.0
+    ],
+    "protection_grade": [
+      54.0,
+      68.0
+    ],
+    "manual_emergency": [
+      0.0,
+      1.0
+    ],
+    "self_lock": [
+      0.0,
+      1.0
+    ],
+    "position_feedback": [
+      0.0,
+      1.0
+    ],
+    "overload_protection": [
+      0.0,
+      1.0
+    ],
+    "self_diagnosis": [
+      0.0,
+      1.0
+    ]
+  },
+  "coupling_models": [
+    {
+      "target": "peak_thrust_n",
+      "intercept": 0.01152835740816054,
+      "sources": [
+        {
+          "key": "rated_thrust_n",
+          "direction": "positive",
+          "coefficient": 0.8807527037390501
+        }
+      ],
+      "lower_offset": -0.05097592376203984,
+      "upper_offset": 0.05194397872599565,
+      "rmse_normalized": 0.036688535830435035,
+      "r2": 0.9803913713482237,
+      "sample_count": 682
+    },
+    {
+      "target": "mass_kg",
+      "intercept": 0.11639732671265253,
+      "sources": [
+        {
+          "key": "rated_thrust_n",
+          "direction": "positive",
+          "coefficient": 0.44983892893639127
+        },
+        {
+          "key": "stroke_mm",
+          "direction": "positive",
+          "coefficient": 0.16225187590639725
+        },
+        {
+          "key": "salt_spray_h",
+          "direction": "positive",
+          "coefficient": 0.1604479529256517
+        },
+        {
+          "key": "temp_low_c",
+          "direction": "negative",
+          "coefficient": -0.0841418816890262
+        },
+        {
+          "key": "temp_high_c",
+          "direction": "positive",
+          "coefficient": 0.06154454280717602
+        }
+      ],
+      "lower_offset": -0.08554494528452541,
+      "upper_offset": 0.08431877013075427,
+      "rmse_normalized": 0.05892273780052405,
+      "r2": 0.8698797299634492,
+      "sample_count": 682
+    },
+    {
+      "target": "response_time_ms",
+      "intercept": 0.8456866974341127,
+      "sources": [
+        {
+          "key": "speed_mm_s",
+          "direction": "negative",
+          "coefficient": -0.6848586370056142
+        },
+        {
+          "key": "accuracy_mm",
+          "direction": "positive",
+          "coefficient": 0.10923476421352936
+        }
+      ],
+      "lower_offset": -0.08356718843747936,
+      "upper_offset": 0.08889547919259484,
+      "rmse_normalized": 0.059695581853644326,
+      "r2": 0.9212207263971826,
+      "sample_count": 682
+    },
+    {
+      "target": "protection_grade",
+      "intercept": -0.05443813559027499,
+      "sources": [
+        {
+          "key": "salt_spray_h",
+          "direction": "positive",
+          "coefficient": 0.9646715856163403
+        },
+        {
+          "key": "temp_high_c",
+          "direction": "positive",
+          "coefficient": 0.03139837202287798
+        }
+      ],
+      "lower_offset": -0.2712882688144445,
+      "upper_offset": 0.3307321109018494,
+      "rmse_normalized": 0.1839779989776246,
+      "r2": 0.7506358013346381,
+      "sample_count": 682
+    }
+  ],
+  "feasibility_model": {
+    "intercept": 1.96806508205697,
+    "weights": {
+      "hard_violation_count": -2.9603913685805163,
+      "coupling_violation_severity": -0.3448416760593706,
+      "outside_training_range": -0.13180611254215963,
+      "center_distance": 0.3055787180335788
+    },
+    "training_accuracy": 0.8525,
+    "log_loss": 0.3951155622253467,
+    "sample_count": 800
+  },
+  "capability_model": {
+    "intercept": -9.014916720383976,
+    "weights": {
+      "rated_thrust_n": 5e-324,
+      "peak_thrust_n": 28.491853857698107,
+      "speed_mm_s": 10.381184660146024,
+      "accuracy_mm": 10.598582305394196,
+      "response_time_ms": 6.432202190657199,
+      "temp_low_c": 7.38053885672722,
+      "temp_high_c": 7.450244565383597,
+      "duty_cycle_pct": 7.1064287190286155,
+      "mass_kg": 10.975777265852665,
+      "salt_spray_h": 8.192636045082296e-26,
+      "protection_grade": 4.641549523930854e-22,
+      "manual_emergency": 2.377416642859672,
+      "self_lock": 2.0734877457874856,
+      "position_feedback": 3.566373414711505,
+      "overload_protection": 4.755766866622277,
+      "self_diagnosis": 0.5391331075121195
+    },
+    "rmse": 5.825107346773104,
+    "r2": 0.7357475180908348,
+    "sample_count": 682
+  },
+  "hard_rules": [
+    {
+      "rule_id": "MODEL-RULE-001",
+      "name": "峰值推力安全倍率",
+      "left": "peak_thrust_n",
+      "operator": "gte",
+      "right": "1.35 * rated_thrust_n",
+      "message": "峰值推力低于额定推力的1.35倍"
+    },
+    {
+      "rule_id": "MODEL-RULE-002",
+      "name": "结构质量支撑下限",
+      "left": "mass_kg",
+      "operator": "gte",
+      "right": "2.0 + 0.00045 * rated_thrust_n + 0.010 * stroke_mm + 0.007 * salt_spray_h",
+      "message": "质量低于历史结构支撑下限"
+    },
+    {
+      "rule_id": "MODEL-RULE-003",
+      "name": "速度精度响应约束",
+      "left": "response_time_ms",
+      "operator": "lte",
+      "right": "330 - 1.45 * speed_mm_s + 45 * accuracy_mm",
+      "message": "速度与精度条件下响应时间偏高"
+    },
+    {
+      "rule_id": "MODEL-RULE-004",
+      "name": "高盐雾防护要求",
+      "expression": "(salt_spray_h < 96) or (protection_grade >= 67)",
+      "message": "高盐雾要求下防护等级不足"
+    },
+    {
+      "rule_id": "MODEL-RULE-005",
+      "name": "高推力过载保护",
+      "expression": "(rated_thrust_n <= 12500) or (overload_protection >= 1)",
+      "message": "高推力方案缺少过载保护"
+    },
+    {
+      "rule_id": "MODEL-RULE-006",
+      "name": "高推力位置反馈",
+      "expression": "(rated_thrust_n <= 14500) or (position_feedback >= 1)",
+      "message": "高推力方案缺少位置反馈"
+    },
+    {
+      "rule_id": "MODEL-RULE-007",
+      "name": "温度区间有效性",
+      "left": "temp_high_c",
+      "operator": "gt",
+      "right": "temp_low_c",
+      "message": "工作温度上下限关系错误"
+    }
+  ]
+}

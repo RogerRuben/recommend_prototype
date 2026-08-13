@@ -1,0 +1,382 @@
+{
+  "manifest": {
+    "model_type": "deployment_safe_log_price_ridge_ensemble",
+    "model_version": "price-json-20260726-v18064013",
+    "created_utc": "2026-07-24T06:40:13.728555Z",
+    "product_code": "SERVO_CYLINDER_DEMO",
+    "training_source": "virtual_protocol_dataset_feasible_only",
+    "target": "price_wan",
+    "notes": "No target leakage; preprocessing, feature order, ensemble and interval are all stored.",
+    "runtime": "Python 3.8+ standard library; JSON artifact",
+    "integration_note": "In-process price prediction; no HTTP service and no pickle dependency.",
+    "compatibility_note": "V18 separates complete product/effectiveness schema from price-model feature schema.",
+    "contract_version": "3.0"
+  },
+  "feature_names": [
+    "accuracy_mm",
+    "duty_cycle_pct",
+    "environment_index",
+    "feature_count",
+    "force_density",
+    "high_thrust_overload",
+    "inverse_sqrt_accuracy",
+    "log_peak_thrust",
+    "log_rated_thrust",
+    "log_speed",
+    "manual_emergency",
+    "mass_kg",
+    "overload_protection",
+    "peak_thrust_n",
+    "position_feedback",
+    "protection_grade",
+    "rated_thrust_n",
+    "response_time_ms",
+    "salt_ip_interaction",
+    "salt_spray_h",
+    "self_diagnosis",
+    "self_lock",
+    "speed_accuracy_index",
+    "speed_mm_s",
+    "stroke_mm",
+    "temp_high_c",
+    "temp_low_c",
+    "temp_span",
+    "thrust_ratio"
+  ],
+  "mean": [
+    0.5219247874306844,
+    60.33343031423295,
+    1.0604499598626886,
+    3.22550831792976,
+    824.5505992696129,
+    0.5176544580612034,
+    0.3649250803554103,
+    9.61447385284892,
+    9.18695247940566,
+    3.7056710850818533,
+    0.36229205175600737,
+    12.612100924214417,
+    0.866913123844732,
+    16257.722887800359,
+    0.8317929759704251,
+    58.76894639556377,
+    10609.206213863217,
+    210.5640865064694,
+    0.24770266701874832,
+    94.00369685767097,
+    0.5212569316081331,
+    0.6432532347504621,
+    157.71887506009494,
+    48.11916432532348,
+    136.74315083179306,
+    77.46170554528642,
+    -35.05353752310536,
+    112.51524306839173,
+    1.5372070145856074
+  ],
+  "scale": [
+    0.2715649919545393,
+    23.17737621255089,
+    0.7396240144660239,
+    0.999526676533806,
+    210.68286874753704,
+    0.2937114736548368,
+    0.15293687035895753,
+    0.4184096205774755,
+    0.42025193224910184,
+    0.6888664189352167,
+    0.48066258538649254,
+    2.8813600079662836,
+    0.3396686025385644,
+    6234.214892767498,
+    0.3740500248585593,
+    5.25893629023069,
+    4083.3321738348855,
+    62.40604735356236,
+    0.3300914366869404,
+    82.52955548119053,
+    0.4995479384990058,
+    0.47903915365398825,
+    204.804689199976,
+    25.024572309397875,
+    47.80030192628741,
+    13.312593385620813,
+    14.523192963059824,
+    19.426032641098512,
+    0.10715989627627781
+  ],
+  "models": [
+    {
+      "name": "ridge_alpha_0.05",
+      "alpha": 0.05,
+      "intercept": 2.6972966584947367,
+      "coefficients": [
+        -0.004357486116743895,
+        0.03303351202699374,
+        -0.031483097175484774,
+        0.01767360670308162,
+        0.00978443841391753,
+        -0.0223312824068054,
+        0.003994802881458471,
+        0.07058412326905673,
+        -0.04340500730282887,
+        0.006396884086613218,
+        0.001980293427252193,
+        0.03441590135763289,
+        0.016138403549757232,
+        0.007812262308731453,
+        0.008371812210232884,
+        0.06065273885917875,
+        0.07216218684485347,
+        -0.010937369596739079,
+        -0.006842545017269544,
+        0.05516853182012866,
+        0.01218986531969951,
+        0.004197529074264488,
+        0.0033099461868379768,
+        0.03352756304760669,
+        -0.004274420421603445,
+        0.004194793614853255,
+        -0.008023259603946228,
+        0.008872986691835224,
+        -0.008426608615341105
+      ],
+      "validation_metrics": {
+        "mae": 0.7911118677977442,
+        "rmse": 0.9841440889299644,
+        "mape": 0.05289248188833785,
+        "r2": 0.8591066930683967
+      }
+    },
+    {
+      "name": "ridge_alpha_0.5",
+      "alpha": 0.5,
+      "intercept": 2.6973126272173675,
+      "coefficients": [
+        -0.004197663481811106,
+        0.03303176106703435,
+        0.010669221303707866,
+        0.017550880357574076,
+        0.010330645969566381,
+        -0.021361400445915148,
+        0.00409238734261581,
+        0.0222232207829314,
+        0.0057511077810093745,
+        0.006724575496323325,
+        0.001961148750916112,
+        0.03483294000763507,
+        0.015553169283856434,
+        0.017401948769025018,
+        0.008420701544079433,
+        0.03885416012714331,
+        0.06063099054089401,
+        -0.011176249522535946,
+        -0.00630709942146485,
+        0.03542385699853348,
+        0.012257809864737283,
+        0.004266606859926499,
+        0.0033231055479438837,
+        0.03300874031772955,
+        -0.004214900900199356,
+        0.0005855256933742606,
+        -0.0040813938783331605,
+        0.0034525699384810376,
+        -0.001683706595493952
+      ],
+      "validation_metrics": {
+        "mae": 0.7904976278887446,
+        "rmse": 0.9836501096347685,
+        "mape": 0.052835840291325716,
+        "r2": 0.8592480969750083
+      }
+    },
+    {
+      "name": "ridge_alpha_5.0",
+      "alpha": 5.0,
+      "intercept": 2.6973454628765805,
+      "coefficients": [
+        -0.003982150547162248,
+        0.03283130090792605,
+        0.02463977353725623,
+        0.016791684625694428,
+        0.0108941443741768,
+        -0.015135842434693986,
+        0.0038076875884393816,
+        0.016618906364338278,
+        0.015470135603562491,
+        0.008368462216154495,
+        0.0022447278481815395,
+        0.03535968114276039,
+        0.011930275950357463,
+        0.02895488187313937,
+        0.008593284179889808,
+        0.0292290980417221,
+        0.03960268678950277,
+        -0.012644494993360405,
+        -0.0023121892178779987,
+        0.02725097989901031,
+        0.01248531697691969,
+        0.004594838106981802,
+        0.0036697165331402107,
+        0.02976825360530024,
+        -0.004216280561111036,
+        -0.000516598743656717,
+        -0.0027429757817532016,
+        0.0016966664352915655,
+        -0.00215112289384578
+      ],
+      "validation_metrics": {
+        "mae": 0.7894229627857614,
+        "rmse": 0.981482503866802,
+        "mape": 0.05276408255243475,
+        "r2": 0.8598677451105811
+      }
+    }
+  ],
+  "ensemble_weights": [
+    0.3330095984354173,
+    0.33326835668872834,
+    0.33372204487585433
+  ],
+  "residual_interval_log": [
+    -0.08511192085554091,
+    0.09509145406917588
+  ],
+  "test_metrics": {
+    "mae": 0.7415165802953276,
+    "rmse": 0.9132508884728657,
+    "mape": 0.04821465255666355,
+    "r2": 0.8746429991632805
+  },
+  "row_counts": {
+    "total_feasible": 774,
+    "train": 541,
+    "validation": 116,
+    "test": 117
+  },
+  "input_contract": {
+    "schema_role": "independent_price_model_input",
+    "raw_features": [
+      {
+        "key": "stroke_mm",
+        "source": "product_parameter",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "rated_thrust_n",
+        "source": "product_parameter",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "peak_thrust_n",
+        "source": "product_parameter",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "speed_mm_s",
+        "source": "product_parameter",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "accuracy_mm",
+        "source": "product_parameter",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "response_time_ms",
+        "source": "product_parameter",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "temp_low_c",
+        "source": "product_parameter",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "temp_high_c",
+        "source": "product_parameter",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "duty_cycle_pct",
+        "source": "product_parameter",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "mass_kg",
+        "source": "product_parameter",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "salt_spray_h",
+        "source": "product_parameter",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "protection_grade",
+        "source": "product_parameter",
+        "required": true,
+        "missing_policy": "reject",
+        "parser": "ip_grade"
+      },
+      {
+        "key": "manual_emergency",
+        "source": "product_parameter",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "self_lock",
+        "source": "product_parameter",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "position_feedback",
+        "source": "product_parameter",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "overload_protection",
+        "source": "product_parameter",
+        "required": true,
+        "missing_policy": "reject"
+      },
+      {
+        "key": "self_diagnosis",
+        "source": "product_parameter",
+        "required": true,
+        "missing_policy": "reject"
+      }
+    ],
+    "engineered_feature_builder": "servo_cylinder_price_v1",
+    "allows_subset_of_effectiveness_schema": true,
+    "allows_extra_raw_features_with_imputation": true
+  },
+  "feature_engineering": {
+    "log_rated_thrust": "log1p(max(rated_thrust_n, 0))",
+    "log_peak_thrust": "log1p(max(peak_thrust_n, 0))",
+    "log_speed": "log1p(max(speed_mm_s, 0))",
+    "inverse_sqrt_accuracy": "sqrt(0.05 / max(accuracy_mm, 0.02))",
+    "temp_span": "temp_high_c - temp_low_c",
+    "thrust_ratio": "peak_thrust_n / max(rated_thrust_n, 1)",
+    "force_density": "rated_thrust_n / max(mass_kg, 0.1)",
+    "speed_accuracy_index": "speed_mm_s / max(accuracy_mm, 0.02)",
+    "environment_index": "salt_spray_h / 240 + max(temp_high_c - temp_low_c - 80, 0) / 100 + max(protection_grade - 54, 0) / 14",
+    "feature_count": "manual_emergency + self_lock + position_feedback + overload_protection + self_diagnosis",
+    "high_thrust_overload": "rated_thrust_n / 18000 * overload_protection",
+    "salt_ip_interaction": "salt_spray_h / 240 * max(protection_grade - 54, 0) / 14"
+  }
+}
