@@ -191,6 +191,144 @@ def rows_to_dicts(rows):
     return result
 
 
+SUPPORTED_VALUE_TYPES = ("number", "boolean", "ip_grade", "enum", "text")
+SUPPORTED_SEARCH_TYPES = ("auto", "continuous", "integer", "ordered_discrete", "unordered_enum", "boolean")
+SUPPORTED_OPERATORS = ("gte", "gt", "lte", "lt", "eq", "boolean_is", "text_equals", "text_contains", "range_inside", "range_overlap")
+SUPPORTED_COUPLING_TYPES = ("positive", "negative", "feasible_domain")
+SUPPORTED_SEVERITIES = ("info", "warning", "error")
+OUTPUT_FIELDS = ("__predicted_price_wan", "__capability_score", "__feasibility_probability")
+
+_SECTION_REQUIRED = {
+    "products": ("product_code", "product_name"),
+    "parameters": ("parameter_id", "label"),
+    "tags": ("tag_id", "tag_name"),
+    "tag_rules": ("rule_id", "tag_id", "parameter_id"),
+    "couplings": ("coupling_id", "coupling_name", "parameter_a", "parameter_b"),
+    "constraints": ("rule_id", "rule_name", "left_parameter"),
+    "agreements": ("agreement_id", "agreement_name"),
+}
+_SECTION_PK = {
+    "products": "product_code",
+    "parameters": "parameter_id",
+    "tags": "tag_id",
+    "tag_rules": "rule_id",
+    "couplings": "coupling_id",
+    "constraints": "rule_id",
+    "agreements": "agreement_id",
+}
+_SECTION_TITLE = {
+    "products": "成品信息", "parameters": "指标定义", "tags": "标签字典",
+    "tag_rules": "标签规则", "couplings": "耦合关系", "constraints": "约束规则",
+    "agreements": "历史协议",
+}
+
+
+def _duplicate_keys(items, key):
+    seen = set()
+    duplicates = set()
+    for item in items:
+        value = clean(item.get(key))
+        if value in seen:
+            duplicates.add(value)
+        seen.add(value)
+    return sorted(v for v in duplicates if v)
+
+
+def validate_business_data(data):
+    """Structural validator shared by DataMaster preview and product releases.
+
+    Returns ``(errors, warnings)`` for a parsed business-data dict whose keys are
+    ``products`` / ``parameters`` / ``tags`` / ``tag_rules`` / ``couplings`` /
+    ``constraints`` / ``agreements``.  It checks required fields, duplicate
+    primary keys, supported enum values, numeric bounds and cross-section
+    references, so a "preview passed" verdict means the data can actually be
+    written to SQLite.
+    """
+    errors = []
+    warnings = []
+
+    products = data.get("products") or []
+    if len(products) != 1:
+        errors.append("成品信息必须且只能有一条。")
+    product_code = ""
+    for index, item in enumerate(products, 1):
+        for field in _SECTION_REQUIRED["products"]:
+            if not clean(item.get(field)):
+                errors.append("成品信息第%d条缺少%s。" % (index, field))
+        if index == 1:
+            product_code = clean(item.get("product_code"))
+
+    for section in ("parameters", "tags", "tag_rules", "couplings", "constraints", "agreements"):
+        items = data.get(section) or []
+        title = _SECTION_TITLE[section]
+        pk = _SECTION_PK[section]
+        required = _SECTION_REQUIRED[section]
+        for index, item in enumerate(items, 1):
+            for field in required:
+                if not clean(item.get(field)):
+                    errors.append("%s第%d条缺少%s。" % (title, index, field))
+        duplicates = _duplicate_keys(items, pk)
+        if duplicates:
+            errors.append("%s存在重复编号：%s" % (title, "、".join(duplicates)))
+
+    parameters = data.get("parameters") or []
+    param_ids = set(clean(item.get("parameter_id")) for item in parameters if clean(item.get("parameter_id")))
+    if not param_ids:
+        errors.append("至少需要一条指标定义。")
+    for item in parameters:
+        pid = clean(item.get("parameter_id"))
+        if item.get("value_type") not in SUPPORTED_VALUE_TYPES:
+            errors.append("指标%s的取值类型无效：%s。" % (pid, item.get("value_type")))
+        if item.get("search_type") not in SUPPORTED_SEARCH_TYPES:
+            errors.append("指标%s的搜索类型无效：%s。" % (pid, item.get("search_type")))
+        if item.get("min_value") is not None and item.get("max_value") is not None:
+            try:
+                if float(item["min_value"]) > float(item["max_value"]):
+                    errors.append("指标%s的工程下限不能高于工程上限。" % pid)
+            except (TypeError, ValueError):
+                errors.append("指标%s的工程上下限必须是数字。" % pid)
+
+    tag_ids = set(clean(item.get("tag_id")) for item in (data.get("tags") or []) if clean(item.get("tag_id")))
+    for item in data.get("tag_rules") or []:
+        rule_id = clean(item.get("rule_id"))
+        if item.get("tag_id") not in tag_ids:
+            errors.append("标签规则%s引用不存在的标签%s。" % (rule_id, item.get("tag_id")))
+        if item.get("parameter_id") not in param_ids and item.get("parameter_id") not in OUTPUT_FIELDS:
+            errors.append("标签规则%s引用不存在的指标%s。" % (rule_id, item.get("parameter_id")))
+        if item.get("operator") not in SUPPORTED_OPERATORS:
+            errors.append("标签规则%s的比较关系无效：%s。" % (rule_id, item.get("operator")))
+
+    for item in data.get("couplings") or []:
+        coupling_id = clean(item.get("coupling_id"))
+        if item.get("coupling_type") not in SUPPORTED_COUPLING_TYPES:
+            errors.append("耦合关系%s的关系类型无效：%s。" % (coupling_id, item.get("coupling_type")))
+        if item.get("parameter_a") not in param_ids or item.get("parameter_b") not in param_ids:
+            errors.append("耦合关系%s引用不存在的指标%s/%s。" % (coupling_id, item.get("parameter_a"), item.get("parameter_b")))
+        if item.get("severity") not in SUPPORTED_SEVERITIES:
+            errors.append("耦合关系%s的提示级别无效：%s。" % (coupling_id, item.get("severity")))
+
+    for item in data.get("constraints") or []:
+        rule_id = clean(item.get("rule_id"))
+        if item.get("operator") not in ("gte", "gt", "lte", "lt", "eq"):
+            errors.append("约束规则%s的比较关系无效：%s。" % (rule_id, item.get("operator")))
+        if item.get("left_parameter") not in param_ids:
+            errors.append("约束规则%s引用不存在的指标%s。" % (rule_id, item.get("left_parameter")))
+        if item.get("right_parameter") and item.get("right_parameter") not in param_ids:
+            errors.append("约束规则%s引用不存在的指标%s。" % (rule_id, item.get("right_parameter")))
+        if item.get("severity") not in SUPPORTED_SEVERITIES:
+            errors.append("约束规则%s的提示级别无效：%s。" % (rule_id, item.get("severity")))
+
+    for item in data.get("agreements") or []:
+        agreement_id = clean(item.get("agreement_id"))
+        if product_code and clean(item.get("product_code")) not in ("", product_code):
+            errors.append("协议%s的成品代号与草稿不一致。" % agreement_id)
+        unknown_tags = sorted(set(item.get("tags") or []) - tag_ids)
+        if unknown_tags:
+            errors.append("协议%s引用不存在的标签：%s" % (agreement_id, "、".join(unknown_tags)))
+
+    return errors, warnings
+
+
 class DataMasterService(object):
     def __init__(self, store, runtime):
         self.store = store
@@ -518,6 +656,14 @@ class DataMasterService(object):
             report["data"]["model_inputs"] = bindings
         except Exception as exc:
             report["errors"].append(str(exc))
+        # Shared structural validation: duplicates / required fields / enum
+        # values / references.  This makes DataMaster preview agree with
+        # product-release validation and with what SQLite can actually accept.
+        shared_errors, shared_warnings = validate_business_data(report.get("data", {}))
+        for error in shared_errors:
+            if error not in report["errors"]:
+                report["errors"].append(error)
+        report["warnings"].extend(shared_warnings)
         for key, values in report.get("data", {}).items(): report["counts"][key]=len(values)
         report["warnings"].insert(0, "DataMaster只检查业务数据结构和本地引用；当前价格/效能HTTP服务不参与本次检查。")
         report["valid"] = not report["errors"]

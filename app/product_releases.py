@@ -27,6 +27,7 @@ from .data_master import (
     normalize_severity,
     normalize_value_type,
     num,
+    validate_business_data,
 )
 from .model_field_types import model_types_compatible
 from .store import safe_id
@@ -643,67 +644,26 @@ class ProductReleaseService(object):
         running price/effectiveness services still describe the old product.
         Comparing those identities here would make the staging workspace
         unusable. Runtime readiness is diagnosed separately by Application.
+
+        Structural checks are delegated to :func:`validate_business_data` so
+        DataMaster preview and this release validation agree on what can be
+        written to SQLite.
         """
         release = self.get(release_id)
         data = release["data"]
-        errors = []
-        warnings = []
+        errors, warnings = validate_business_data(data)
         counts = dict((section, len(data.get(section, []))) for section in SECTIONS)
-        products = data.get("products", [])
-        if len(products) != 1:
-            errors.append("成品信息必须且只能有一条。")
-        product_code = clean(products[0].get("product_code")) if products else clean(release.get("product_code"))
-        for section, key in PRIMARY_KEYS.items():
-            required_fields = REQUIRED_COLUMNS.get(section, ("agreement_id", "agreement_name"))
-            for index, item in enumerate(data.get(section, []), 1):
-                absent_fields = [field for field in required_fields if clean(item.get(field)) == ""]
-                if absent_fields:
-                    errors.append("%s第%d条缺少必填字段：%s" % (
-                        SECTION_TITLES[section], index, "、".join(absent_fields)
-                    ))
-            duplicate = self._duplicates(data.get(section, []), key)
-            if duplicate:
-                errors.append("%s存在重复编号：%s" % (SECTION_TITLES[section], "、".join(duplicate)))
 
+        # Release-specific: a missing *business-required* parameter on an
+        # agreement is a warning, because the target model service decides
+        # whether calculation is possible for that row.
         parameters = dict((clean(item.get("parameter_id")), item) for item in data.get("parameters", []) if clean(item.get("parameter_id")))
-        tags = set(clean(item.get("tag_id")) for item in data.get("tags", []) if clean(item.get("tag_id")))
-        if not parameters:
-            errors.append("至少需要一条指标定义。")
-        supported_types = set(("number", "boolean", "ip_grade", "enum", "text"))
-        supported_search = set(("auto", "continuous", "integer", "ordered_discrete", "unordered_enum", "boolean"))
-        for key, item in parameters.items():
-            if item.get("value_type") not in supported_types:
-                errors.append("指标%s的取值类型无效：%s。" % (key, item.get("value_type")))
-            if item.get("search_type") not in supported_search:
-                errors.append("指标%s的搜索类型无效：%s。" % (key, item.get("search_type")))
-            if item.get("min_value") is not None and item.get("max_value") is not None:
-                try:
-                    if float(item["min_value"]) > float(item["max_value"]):
-                        errors.append("指标%s的工程下限不能高于工程上限。" % key)
-                except (TypeError, ValueError):
-                    errors.append("指标%s的工程上下限必须是数字。" % key)
-        output_fields = set(("__predicted_price_wan", "__capability_score", "__feasibility_probability"))
-        for item in data.get("tag_rules", []):
-            if item.get("tag_id") not in tags:
-                errors.append("标签规则%s引用不存在的标签%s。" % (item.get("rule_id"), item.get("tag_id")))
-            if item.get("parameter_id") not in parameters and item.get("parameter_id") not in output_fields:
-                errors.append("标签规则%s引用不存在的指标%s。" % (item.get("rule_id"), item.get("parameter_id")))
-        for item in data.get("couplings", []):
-            if item.get("parameter_a") not in parameters or item.get("parameter_b") not in parameters:
-                errors.append("耦合关系%s引用不存在的指标%s/%s。" % (item.get("coupling_id"), item.get("parameter_a"), item.get("parameter_b")))
-        for item in data.get("constraints", []):
-            if item.get("left_parameter") not in parameters or (item.get("right_parameter") and item.get("right_parameter") not in parameters):
-                errors.append("约束规则%s引用不存在的指标%s/%s。" % (item.get("rule_id"), item.get("left_parameter"), item.get("right_parameter") or "常数"))
         required = set(key for key, parameter in parameters.items() if parameter.get("required"))
         for item in data.get("agreements", []):
-            if clean(item.get("product_code")) not in ("", product_code):
-                errors.append("协议%s的成品代号与草稿不一致。" % item.get("agreement_id"))
             absent = sorted(key for key in required if (item.get("params") or {}).get(key) in (None, ""))
             if absent:
                 warnings.append("协议%s暂缺业务必填属性：%s；可继续维护，是否能计算由目标HTTP模型服务决定。" % (item.get("agreement_id"), "、".join(absent)))
-            unknown_tags = sorted(set(item.get("tags") or []) - tags)
-            if unknown_tags:
-                errors.append("协议%s引用不存在的标签：%s" % (item.get("agreement_id"), "、".join(unknown_tags)))
+
         warnings.insert(0, "本检查只验证业务数据结构和本地引用，不读取、不比较当前价格或效能HTTP服务Schema。")
         report = {
             "valid": not errors, "errors": errors, "warnings": warnings, "counts": counts,
