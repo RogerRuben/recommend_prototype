@@ -264,49 +264,41 @@ class Store(object):
             conn.close()
 
     def sync_model_schema(self):
-        """Synchronize the union of effectiveness and price product attributes.
+        """Diagnose field-role and type/unit drift without mutating DataMaster.
 
-        Effectiveness attributes remain the primary product definition and must
-        exist in DataMaster. Price-only product attributes are created from the
-        signed model contract so old protocols can be evaluated with the model's
-        explicit fallback value and experts can reveal/edit them in the drawer.
+        DataMaster is the business authority: the operator owns the field set,
+        ``enabled`` / ``required`` / engineering ``min``/``max`` / preference and
+        value mappings.  The model Schema is only a runtime contract.  This
+        method reports mismatches so the operator can fix DataMaster explicitly;
+        it never INSERTs or UPDATEs business rows, and it never flips an
+        operator's ``enabled`` flag back on.
+
+        Field roles (shared / effectiveness-only / price-only) are computed from
+        the two service schemas elsewhere via ``feature_roles``; they never
+        depend on a mirrored table.
         """
         warnings = []
         with self.lock:
             conn = self.connect()
             try:
                 existing = dict((row["parameter_id"], dict(row)) for row in conn.execute("SELECT * FROM parameter_definitions"))
-                roles = self.runtime.feature_roles()
-                effect_keys = set(roles.get("shared_features", [])) | set(roles.get("effectiveness_only_features", []))
                 specs = self.runtime.all_feature_specs()
                 model_keys = set()
-                next_order = max([int(x.get("display_order") or 0) for x in existing.values()] or [0])
                 for spec in specs:
                     key = spec["key"]
                     model_keys.add(key)
                     expected_type = "ip_grade" if spec.get("parser") == "ip_grade" else spec.get("dtype") or spec.get("type", "number")
-                    if expected_type == "integer": expected_type = "number"
+                    if expected_type == "integer":
+                        expected_type = "number"
                     current = existing.get(key)
                     if current is None:
-                        next_order += 1
-                        allowed = spec.get("allowed_values")
-                        conn.execute("""INSERT INTO parameter_definitions
-                            (parameter_id,label,unit,value_type,min_value,max_value,preference,description,adjustment_hint,
-                             allowed_values_json,model_value_mapping_json,search_type,required,auto_adjustable,decimal_places,display_order,enabled,model_bound)
-                            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""", (
-                            key, spec.get("label", key), spec.get("unit", ""), expected_type,
-                            spec.get("min"), spec.get("max"), spec.get("preference", "neutral"),
-                            spec.get("description", ""), spec.get("adjustment_hint", "由当前模型Schema自动补充，可在数据中心继续维护。"),
-                            json.dumps(allowed, ensure_ascii=False) if allowed else None,
-                            None,
-                            spec.get("search_type", "auto"), 1 if spec.get("required", True) else 0,
-                            1 if spec.get("auto_adjustable", True) else 0, int(spec.get("decimal_places", 3)), next_order, 1,
-                        ))
-                        warnings.append("已从模型Schema自动补充字段%s。" % key)
+                        warnings.append(
+                            "模型Schema字段%s不在DataMaster指标定义中；该字段仍会按模型Schema缺省值参与计算，"
+                            "如需在界面上编辑请先在指标定义中补充。" % key
+                        )
                         continue
                     current_type = current.get("value_type")
-                    compatible = model_types_compatible(current_type, expected_type)
-                    if not compatible:
+                    if not model_types_compatible(current_type, expected_type):
                         warnings.append(
                             "指标%s的数据中心类型%s与模型类型%s不同；保留业务定义并在调用时尝试编码。" %
                             (key, current_type, expected_type)
@@ -316,21 +308,10 @@ class Store(object):
                             "指标%s的数据中心单位%s与模型单位%s不同；该差异不阻断API调用。" %
                             (key, current.get("unit"), spec.get("unit"))
                         )
-                    mapping = _json_mapping(current.get("model_value_mapping_json"))
-                    if not mapping:
-                        mapping = _infer_model_value_mapping(current, spec)
-                    conn.execute("""UPDATE parameter_definitions SET min_value=?,max_value=?,preference=?,model_bound=1,
-                        required=?,enabled=1,model_value_mapping_json=? WHERE parameter_id=?""", (
-                        spec.get("min"), spec.get("max"), spec.get("preference", "neutral"),
-                        1 if spec.get("required", True) else 0,
-                        json.dumps(mapping, ensure_ascii=False) if mapping else None, key,
-                    ))
                 extras = sorted(set(existing) - model_keys)
                 if extras:
-                    placeholders = ",".join("?" for _ in extras)
-                    conn.execute(
-                        "UPDATE parameter_definitions SET model_bound=0 WHERE parameter_id IN (%s)" % placeholders,
-                        tuple(extras),
+                    warnings.append(
+                        "以下DataMaster指标当前不在任何模型Schema中，将作为普通业务字段保留：%s" % "、".join(extras)
                     )
                 self._sync_model_registry(conn)
                 conn.commit()
@@ -602,7 +583,7 @@ class Store(object):
     def bootstrap(self):
         conn = self.connect()
         try:
-            product_row = conn.execute("SELECT * FROM products WHERE product_code=? AND enabled=1 LIMIT 1", (self.runtime.schema["product_code"],)).fetchone()
+            product_row = conn.execute("SELECT * FROM products WHERE product_code=? AND enabled=1 LIMIT 1", (self.current_product_code(),)).fetchone()
             product = dict(product_row) if product_row else {}
             parameters = [dict(row) for row in conn.execute("SELECT * FROM parameter_definitions WHERE enabled=1 ORDER BY display_order,label")]
             role_map = self.parameter_roles()
@@ -714,7 +695,7 @@ class Store(object):
             rows = conn.execute(
                 "SELECT historical_price_wan,capability_score,feasibility_probability,params_json "
                 "FROM agreements WHERE product_code=? AND enabled=1",
-                (self.runtime.schema["product_code"],),
+                (self.current_product_code(),),
             ).fetchall()
         finally:
             conn.close()
@@ -865,7 +846,7 @@ class Store(object):
                         capability_score = None
                         feasibility_probability = None
                     values = (
-                        item["agreement_id"], item.get("product_code") or self.runtime.schema["product_code"], item["agreement_name"],
+                        item["agreement_id"], item.get("product_code") or self.current_product_code(), item["agreement_name"],
                         item.get("positioning") or self._positioning(tags), item.get("agreement_source") or "imported",
                         item.get("source_year"), item.get("supplier_type"), item.get("historical_price_wan"),
                         capability_score, feasibility_probability,
@@ -941,7 +922,7 @@ class Store(object):
         # occurs after master tables were committed, restore the pre-import backup
         # so users never end up with a half-applied DataMaster.
         active_product_code = (
-            (data.get("products") or [{}])[0].get("product_code") or self.runtime.schema.get("product_code")
+            (data.get("products") or [{}])[0].get("product_code") or self.current_product_code()
         )
         protocol_rows = []
         for source_item in data.get("agreements", []):
@@ -1200,6 +1181,18 @@ class Store(object):
         data = dict(item or {})
         parameter_ids = set(self.parameter_map())
         tag_ids = set(self.tag_map(include_disabled=True))
+        if section == "products":
+            # Single-product architecture: the products CRUD page must never
+            # create a second product.  Product switching goes exclusively
+            # through the "待发布成品 → 备份并切换" workspace.
+            code = str(data.get("product_code") or "").strip()
+            conn = self.connect()
+            try:
+                exists = conn.execute("SELECT 1 FROM products WHERE product_code=?", (code,)).fetchone()
+            finally:
+                conn.close()
+            if not exists:
+                raise ValueError("成品信息不允许直接新增；请通过“待发布成品”工作区建立并切换业务成品。")
         if section == "tag_rules":
             if data.get("tag_id") and data.get("tag_id") not in tag_ids:
                 raise ValueError("标签规则引用了不存在的标签")

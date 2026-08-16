@@ -73,6 +73,24 @@ def conservative_capability(item):
     return float(value or 0)
 
 
+def _price_value(item):
+    """Return the item's usable price as a float, or None when it has no price.
+
+    A historical sample without ``historical_price_wan`` (and therefore without
+    a re-predicted price) must not be coerced to 0: that would make its
+    cost-effectiveness explode and rank it first.
+    """
+    value = item.get("predicted_price_wan")
+    if value in (None, ""):
+        value = item.get("historical_price_wan")
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def physical_gate_passes(item, request):
     evaluation = item.get("evaluation") or {}
     gate = item.get("physical_gate") or evaluation.get("physical_gate") or {}
@@ -103,14 +121,16 @@ def agreement_matches(item, request):
         # Model-only thresholds cannot be judged for this one legacy row. Keep
         # it visible with an explicit "service unavailable" badge instead.
         return True
-    price = float(item.get("predicted_price_wan", item.get("historical_price_wan", 0)) or 0)
+    price = _price_value(item)
     capability = conservative_capability(item)
-    ce = float(item.get("cost_effectiveness", capability / max(price, 1e-9)) or 0)
+    ce = item.get("cost_effectiveness")
+    if ce is None and price is not None:
+        ce = capability / max(price, 1e-9)
     feasibility = float(item.get("feasibility_probability", 0) or 0)
     if not physical_gate_passes(item, request): return False
-    if request.get("max_price") not in (None, "") and price > float(request["max_price"]): return False
+    if request.get("max_price") not in (None, "") and price is not None and price > float(request["max_price"]): return False
     if request.get("min_capability") not in (None, "") and capability < float(request["min_capability"]): return False
-    if request.get("min_cost_effectiveness") not in (None, "") and ce < float(request["min_cost_effectiveness"]): return False
+    if request.get("min_cost_effectiveness") not in (None, "") and (ce is None or ce < float(request["min_cost_effectiveness"])): return False
     if request.get("min_feasibility") not in (None, "") and feasibility < max(DEFAULT_FEASIBILITY_GATE, float(request["min_feasibility"])): return False
     filters = request.get("indicator_filters") or []
     if filters:
@@ -141,11 +161,11 @@ def rank_agreements(items, request, tag_weights):
     selected_tags = request.get("selected_tags") or []
     for item in candidates:
         model_available = item.get("model_evaluation_available") is not False
-        price = float(item.get("predicted_price_wan", item.get("historical_price_wan", 0)) or 0)
+        price = _price_value(item)
         capability = conservative_capability(item)
         item["conservative_capability_score"] = capability
-        item["predicted_price_wan"] = round(price, 3)
-        item["cost_effectiveness"] = round(capability / max(price, 1e-9), 3)
+        item["predicted_price_wan"] = round(price, 3) if price is not None else None
+        item["cost_effectiveness"] = round(capability / price, 3) if price is not None else None
         own_tags = set(item.get("tags") or [])
         item["matched_tags"] = [tag for tag in selected_tags if tag in own_tags]
         item["missing_tags"] = [tag for tag in selected_tags if tag not in own_tags]
@@ -158,16 +178,18 @@ def rank_agreements(items, request, tag_weights):
             item["feasibility_probability"] = None
     if not candidates:
         return []
-    prices = [float(item.get("predicted_price_wan") or item.get("historical_price_wan") or 0) for item in candidates]
-    ces = [float(item.get("cost_effectiveness") or 0) for item in candidates]
-    pmin, pmax = min(prices), max(prices)
-    cemin, cemax = min(ces), max(ces)
+    prices = [item["predicted_price_wan"] for item in candidates if item.get("predicted_price_wan") is not None]
+    ces = [item["cost_effectiveness"] for item in candidates if item.get("cost_effectiveness") is not None]
+    pmin, pmax = (min(prices), max(prices)) if prices else (0.0, 0.0)
+    cemin, cemax = (min(ces), max(ces)) if ces else (0.0, 0.0)
     for item in candidates:
-        numeric_price = float(item.get("predicted_price_wan") or item.get("historical_price_wan") or 0)
-        numeric_ce = float(item.get("cost_effectiveness") or 0)
-        price_score = 100.0 if pmax == pmin else 100.0 * (pmax - numeric_price) / (pmax - pmin)
-        ce_score = 100.0 if cemax == cemin else 100.0 * (numeric_ce - cemin) / (cemax - cemin)
-        feasibility_score = 100.0 * float(item.get("feasibility_probability", 0.75))
+        numeric_price = item.get("predicted_price_wan")
+        numeric_ce = item.get("cost_effectiveness")
+        # A missing price / cost-effectiveness is "unknown", not "best": give it
+        # a neutral score instead of treating None as 0 (cheapest).
+        price_score = 50.0 if numeric_price is None else (100.0 if pmax == pmin else 100.0 * (pmax - numeric_price) / (pmax - pmin))
+        ce_score = 50.0 if numeric_ce is None else (100.0 if cemax == cemin else 100.0 * (numeric_ce - cemin) / (cemax - cemin))
+        feasibility_score = 100.0 * float(item.get("feasibility_probability") if item.get("feasibility_probability") is not None else 0.75)
         uncertainty_width = float(item.get("score_uncertainty_width", (item.get("evaluation") or {}).get("score_uncertainty_width", 0)) or 0)
         uncertainty_penalty = min(10.0, 0.20 * uncertainty_width)
         item["price_score"] = round(price_score, 3)
@@ -194,7 +216,13 @@ def rank_agreements(items, request, tag_weights):
     }
     key = key_map.get(sort_by, "comprehensive_score")
     reverse = sort_by != "price"
-    candidates.sort(key=lambda item: float(item.get(key) or 0), reverse=reverse)
+    def _sort_value(item):
+        value = item.get(key)
+        if value is None:
+            # Missing price / cost-effectiveness must sort last, never first.
+            return float("inf") if not reverse else float("-inf")
+        return float(value)
+    candidates.sort(key=_sort_value, reverse=reverse)
     for index, item in enumerate(candidates, 1):
         item["rank"] = index
     return candidates

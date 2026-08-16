@@ -201,6 +201,17 @@ class Application(object):
             self._evaluate_batch_with_rules if hasattr(self.runtime, "evaluate_batch") else None,
         )
 
+    def on_business_data_changed(self):
+        """Single hook for every business-data write path.
+
+        Recomputes model readiness (Schema diagnostics + parameter coverage +
+        dual-service probe) and then invalidates the in-memory caches so the
+        management page never shows a stale product_ready / parameter_coverage.
+        """
+        readiness = self._refresh_model_data_readiness()
+        self._invalidate_runtime_caches()
+        return readiness
+
     def _bind_runtime(self, runtime):
         """Switch all runtime consumers together after HTTP services recover."""
         self.runtime = runtime
@@ -1339,8 +1350,7 @@ class Application(object):
 
     def activate_product_release(self, release_id):
         result = self.product_releases.activate(str(release_id or ""))
-        result["runtime_readiness"] = self._refresh_model_data_readiness()
-        self._invalidate_runtime_caches()
+        result["runtime_readiness"] = self.on_business_data_changed()
         return result
 
     def import_product_release_package(self, request):
@@ -1644,27 +1654,27 @@ class Handler(BaseHTTPRequestHandler):
             elif path.startswith("/api/admin/") and self.app.disable_admin: self._admin_forbidden()
             elif path == "/api/admin/upsert":
                 result = self.app.store.admin_upsert(request.get("section"), request.get("item") or {})
-                self.app._invalidate_runtime_caches()
+                self.app.on_business_data_changed()
                 self._json(result)
             elif path == "/api/admin/delete":
                 result = self.app.store.admin_delete(request.get("section"), str(request.get("id")))
-                self.app._invalidate_runtime_caches()
+                self.app.on_business_data_changed()
                 self._json(result)
             elif path == "/api/admin/toggle":
                 result = self.app.store.admin_toggle(request.get("section"), str(request.get("id")), bool(request.get("enabled")))
-                self.app._invalidate_runtime_caches()
+                self.app.on_business_data_changed()
                 self._json(result)
             elif path == "/api/admin/purge":
                 result = self.app.store.admin_purge(request.get("section"), str(request.get("id")))
-                self.app._invalidate_runtime_caches()
+                self.app.on_business_data_changed()
                 self._json(result)
             elif path == "/api/admin/backup": self._json(self.app.store.create_backup("manual"))
             elif path == "/api/admin/restore-backup":
-                result = self.app.store.restore_backup(request.get("name")); self.app._invalidate_runtime_caches(); self._json(result)
+                result = self.app.store.restore_backup(request.get("name")); self.app.on_business_data_changed(); self._json(result)
             elif path == "/api/admin/upload-database":
                 data = base64.b64decode(request.get("database_base64") or ""); target = self.app.root / "uploads" / ("restore_%d.db" % int(time.time()*1000)); target.write_bytes(data)
                 try:
-                    result = self.app.store.restore_uploaded(target); self.app._invalidate_runtime_caches(); self._json(result)
+                    result = self.app.store.restore_uploaded(target); self.app.on_business_data_changed(); self._json(result)
                 finally:
                     try: target.unlink()
                     except OSError: pass
@@ -1700,15 +1710,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.app.activate_product_release(request.get("release_id")))
             elif path == "/api/admin/wide-import/preview": self._json(self.app.parse_wide_table(request, commit=False))
             elif path == "/api/admin/wide-import/commit":
-                result = self.app.parse_wide_table(request, commit=True); self.app._invalidate_runtime_caches(); self._json(result)
+                result = self.app.parse_wide_table(request, commit=True); self.app.on_business_data_changed(); self._json(result)
             elif path == "/api/admin/datamaster/preview":
                 data = base64.b64decode(request.get("file_base64") or ""); self._json(self.app.data_master.parse(request.get("filename") or "DataMaster.xlsx", data))
             elif path == "/api/admin/datamaster/commit":
                 data = base64.b64decode(request.get("file_base64") or "")
                 report = self.app.data_master.parse(request.get("filename") or "DataMaster.xlsx", data)
                 commit_result = self.app.data_master.commit(report)
-                runtime_readiness = self.app._refresh_model_data_readiness()
-                self.app._invalidate_runtime_caches()
+                runtime_readiness = self.app.on_business_data_changed()
                 self._json(dict(report, commit_result=commit_result, runtime_readiness=runtime_readiness))
             else: self._json({"error":"not_found","path":path},404)
         except ModelInputError as exc: self._json({"error":"model_input_error","message":str(exc),"model_kind":exc.model_kind,"missing_features":exc.missing_features},400)
