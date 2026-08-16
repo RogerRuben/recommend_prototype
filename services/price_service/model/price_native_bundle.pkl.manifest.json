@@ -10,8 +10,7 @@
     "attr_004",
     "attr_005",
     "attr_006",
-    "attr_007",
-    "Cluster"
+    "attr_007"
   ],
   "model_count": 6,
   "model_names": [
@@ -27,27 +26,27 @@
     "members": [
       {
         "name": "lasso",
-        "weight": 0.25871790185828375
+        "weight": 0.16666666666666669
       },
       {
         "name": "ridge",
-        "weight": 0.2584548840497163
+        "weight": 0.16666666666666669
       },
       {
         "name": "random_forest",
-        "weight": 0.08039417200701689
+        "weight": 0.16666666666666669
       },
       {
         "name": "extra_trees",
-        "weight": 0.11450410313366705
+        "weight": 0.16666666666666669
       },
       {
         "name": "svr",
-        "weight": 0.25118484190832274
+        "weight": 0.16666666666666669
       },
       {
         "name": "gbdt",
-        "weight": 0.036744097042993105
+        "weight": 0.16666666666666669
       }
     ]
   },
@@ -110,17 +109,17 @@
       "gbdt"
     ],
     "omitted_models": [],
-    "weight_source": "notebook_weights",
+    "weight_source": "explicit",
     "strict_explicit_selection": false,
     "uses_joblib": false,
     "prediction_equivalence": "same saved estimators + same scaler + selected weights + same output transform"
   },
   "residual_calibration": {
     "space": "native",
-    "half_width_native": 2459374.6689752825,
+    "half_width_native": 1.0861486707717132,
     "coverage": 0.95,
     "source": "recomputed_from_selected_models",
-    "sample_count": 4
+    "sample_count": 3
   },
   "training_environment": {
     "python": "3.10.9",
@@ -134,5 +133,5 @@
     "sklearn"
   ],
   "bundle_file": "price_native_bundle.pkl",
-  "bundle_sha256": "dd17a8a7bb73a1212f9c194d737724b125480f03887962393830d0ea67a52101"
+  "bundle_sha256": "26e1f92345112184e90fe07a58b2856f03dfa8fb7071c9f9d980f7beadd5b8bc"
 }

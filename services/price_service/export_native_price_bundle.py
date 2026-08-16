@@ -272,8 +272,15 @@ def _recalculate_residual(namespace, models, names, weights, preprocessor, outpu
     try:
         import numpy as np
         prepared = namespace["X_test"]
+        train_columns = getattr(namespace.get("X_train"), "columns", None)
+        columns = list(train_columns) if train_columns is not None else []
         if preprocessor is not None:
             prepared = preprocessor.transform(prepared)
+            try:
+                import pandas as pd
+                prepared = pd.DataFrame(prepared, columns=columns)
+            except Exception:
+                pass
         member_predictions = []
         for name in names:
             raw = np.asarray(models[name].predict(prepared), dtype=float)
