@@ -303,6 +303,48 @@ def _recalculate_residual(namespace, models, names, weights, preprocessor, outpu
     return residual
 
 
+def _detect_output_transform(models, names, weights, preprocessor, X_test, y_test, default="log"):
+    """Pick the transform that makes predictions match the held-out target.
+
+    The notebook's ``y_train = np.log(y_train)`` may not have executed (or may
+    have been overwritten), leaving estimators trained on raw 万元 while the
+    export metadata still says ``"log"``.  Compare both interpretations against
+    the test target and choose the one with the smaller median absolute error,
+    so the bundle never blindly exponentiates a model that already predicts the
+    native price.
+    """
+    if X_test is None or y_test is None or not names:
+        return default
+    try:
+        import numpy as np
+        prepared = X_test
+        if preprocessor is not None:
+            prepared = preprocessor.transform(prepared)
+            columns = None
+            if hasattr(X_test, "columns"):
+                columns = list(X_test.columns)
+            if columns:
+                try:
+                    import pandas as pd
+                    prepared = pd.DataFrame(prepared, columns=columns)
+                except Exception:
+                    pass
+        actual = np.asarray(y_test, dtype=float).ravel()
+        total = sum(float(weight) for weight in weights) or 1.0
+        ensemble_raw = np.zeros(len(actual), dtype=float)
+        for name, weight in zip(names, weights):
+            raw = np.asarray(models[name].predict(prepared), dtype=float).ravel()
+            ensemble_raw += raw * float(weight)
+        ensemble_raw /= total
+        log_error = float(np.median(np.abs(np.exp(ensemble_raw) - actual)))
+        raw_error = float(np.median(np.abs(ensemble_raw - actual)))
+        if raw_error < log_error:
+            return "identity"
+        return "log"
+    except Exception:
+        return default
+
+
 def _required_modules(models, preprocessor):
     roots = set()
     for obj in list(models.values()) + ([preprocessor] if preprocessor is not None else []):
@@ -391,8 +433,13 @@ def export_from_notebook(namespace, output="price_native_bundle.pkl", product_co
     for item in schema:
         item["field_name"] = source_to_field[item["source_column"]]
 
+    output_transform = _detect_output_transform(
+        models, names, weights, preprocessor,
+        ns.get("X_test"), ns.get("y_test"),
+        default=str(model_output_transform or "log"),
+    )
     residual = _recalculate_residual(
-        ns, models, names, weights, preprocessor, str(model_output_transform or "log")
+        ns, models, names, weights, preprocessor, output_transform
     )
     omitted = [name for name in available_names if name not in names]
     bundle = {
@@ -408,8 +455,8 @@ def export_from_notebook(namespace, output="price_native_bundle.pkl", product_co
             "aggregation": "weighted_mean_price",
             "members": [{"name": name, "weight": weight} for name, weight in zip(names, weights)],
         },
-        "target_transform": str(model_output_transform or "log"),
-        "model_output_transform": str(model_output_transform or "log"),
+        "target_transform": output_transform,
+        "model_output_transform": output_transform,
         "target_divisor_to_wan": float(target_divisor_to_wan),
         "residual_calibration": residual,
         "training_environment": environment_versions(),
@@ -426,6 +473,7 @@ def export_from_notebook(namespace, output="price_native_bundle.pkl", product_co
             "strict_explicit_selection": bool(strict),
             "uses_joblib": False,
             "prediction_equivalence": "same saved estimators + same scaler + selected weights + same output transform",
+            "output_transform_detected": output_transform,
         },
     }
     path = save_bundle(output, bundle)

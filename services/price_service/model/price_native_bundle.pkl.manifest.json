@@ -112,7 +112,8 @@
     "weight_source": "explicit",
     "strict_explicit_selection": false,
     "uses_joblib": false,
-    "prediction_equivalence": "same saved estimators + same scaler + selected weights + same output transform"
+    "prediction_equivalence": "same saved estimators + same scaler + selected weights + same output transform",
+    "output_transform_detected": "log"
   },
   "residual_calibration": {
     "space": "native",
@@ -133,5 +134,5 @@
     "sklearn"
   ],
   "bundle_file": "price_native_bundle.pkl",
-  "bundle_sha256": "26e1f92345112184e90fe07a58b2856f03dfa8fb7071c9f9d980f7beadd5b8bc"
+  "bundle_sha256": "da404cc4940fb287f0d3ba897609fd39201a6216a1026c5d8ed7bf192530157a"
 }
