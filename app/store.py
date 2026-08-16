@@ -157,7 +157,7 @@ class Store(object):
                 );
                 CREATE TABLE IF NOT EXISTS parameter_definitions(
                     parameter_id TEXT PRIMARY KEY, label TEXT NOT NULL, unit TEXT, value_type TEXT NOT NULL,
-                    min_value REAL, max_value REAL, preference TEXT, description TEXT, adjustment_hint TEXT,
+                    min_value REAL, max_value REAL, observed_min REAL, observed_max REAL, preference TEXT, description TEXT, adjustment_hint TEXT,
                     allowed_values_json TEXT, model_value_mapping_json TEXT, search_type TEXT NOT NULL DEFAULT 'auto', required INTEGER NOT NULL DEFAULT 1,
                     auto_adjustable INTEGER NOT NULL DEFAULT 1, decimal_places INTEGER NOT NULL DEFAULT 3,
                     display_order INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, model_bound INTEGER NOT NULL DEFAULT 1
@@ -180,7 +180,7 @@ class Store(object):
                 );
                 CREATE TABLE IF NOT EXISTS saved_schemes(
                     id INTEGER PRIMARY KEY AUTOINCREMENT, scheme_name TEXT NOT NULL, base_agreement_id TEXT,
-                    source_type TEXT, params_json TEXT NOT NULL, evaluation_json TEXT NOT NULL,
+                    product_code TEXT, source_type TEXT, params_json TEXT NOT NULL, evaluation_json TEXT NOT NULL,
                     risk_confirmed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS model_registry(
@@ -228,6 +228,8 @@ class Store(object):
                     ("parameter_definitions", "required INTEGER NOT NULL DEFAULT 1"),
                     ("parameter_definitions", "auto_adjustable INTEGER NOT NULL DEFAULT 1"),
                     ("parameter_definitions", "decimal_places INTEGER NOT NULL DEFAULT 3"),
+                    ("parameter_definitions", "observed_min REAL"),
+                    ("parameter_definitions", "observed_max REAL"),
                     ("tags", "enabled INTEGER NOT NULL DEFAULT 1"),
                     ("tags", "derivation_mode TEXT NOT NULL DEFAULT 'rule'"),
                     ("tags", "description TEXT"),
@@ -240,6 +242,7 @@ class Store(object):
                     ("indicator_couplings", "archived_at TEXT"),
                     ("constraint_rules", "archived_at TEXT"),
                     ("agreements", "archived_at TEXT"),
+                    ("saved_schemes", "product_code TEXT"),
                 ]:
                     self._add_column(conn, table, definition)
                 # Normalize legacy IP-grade definitions. Older packages stored a
@@ -777,9 +780,9 @@ class Store(object):
             conn = self.connect()
             try:
                 cursor = conn.execute("""INSERT INTO saved_schemes
-                    (scheme_name,base_agreement_id,source_type,params_json,evaluation_json,risk_confirmed,created_at)
-                    VALUES(?,?,?,?,?,?,?)""", (
-                    scheme_name, base_agreement_id, source_type, json.dumps(params, ensure_ascii=False),
+                    (scheme_name,base_agreement_id,product_code,source_type,params_json,evaluation_json,risk_confirmed,created_at)
+                    VALUES(?,?,?,?,?,?,?,?)""", (
+                    scheme_name, base_agreement_id, self.current_product_code(), source_type, json.dumps(params, ensure_ascii=False),
                     json.dumps(evaluation, ensure_ascii=False), 1 if risk_confirmed else 0, now_iso()
                 ))
                 self._audit(conn, "create", "saved_scheme", str(cursor.lastrowid), {"name": scheme_name})
@@ -891,10 +894,10 @@ class Store(object):
                     conn.execute("INSERT INTO products(product_code,product_name,product_description,enabled) VALUES(?,?,?,?)", (item["product_code"],item["product_name"],item.get("product_description"),int(item.get("enabled",1))))
                 for item in data.get("parameters", []):
                     conn.execute("""INSERT INTO parameter_definitions
-                        (parameter_id,label,unit,value_type,min_value,max_value,preference,description,adjustment_hint,
+                        (parameter_id,label,unit,value_type,min_value,max_value,observed_min,observed_max,preference,description,adjustment_hint,
                          allowed_values_json,model_value_mapping_json,search_type,required,auto_adjustable,decimal_places,display_order,enabled,model_bound)
-                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
-                        item["parameter_id"],item["label"],item.get("unit"),item["value_type"],item.get("min_value"),item.get("max_value"),item.get("preference"),item.get("description"),item.get("adjustment_hint"),item.get("allowed_values_json"),item.get("model_value_mapping_json"),item.get("search_type") or "auto",int(item.get("required",1)),int(item.get("auto_adjustable",1)),int(item.get("decimal_places",3)),int(item.get("display_order",1)),int(item.get("enabled",1)),int(item.get("model_bound",1))))
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                        item["parameter_id"],item["label"],item.get("unit"),item["value_type"],item.get("min_value"),item.get("max_value"),item.get("observed_min"),item.get("observed_max"),item.get("preference"),item.get("description"),item.get("adjustment_hint"),item.get("allowed_values_json"),item.get("model_value_mapping_json"),item.get("search_type") or "auto",int(item.get("required",1)),int(item.get("auto_adjustable",1)),int(item.get("decimal_places",3)),int(item.get("display_order",1)),int(item.get("enabled",1)),int(item.get("model_bound",1))))
                 for item in data.get("tags", []):
                     conn.execute("INSERT INTO tags(tag_id,tag_name,tag_group,weight,derivation_mode,description,enabled) VALUES(?,?,?,?,?,?,?)", (item["tag_id"],item["tag_name"],item.get("tag_group"),float(item.get("weight",1)),item.get("derivation_mode") or "rule",item.get("description"),int(item.get("enabled",1))))
                 for item in data.get("tag_rules", []):

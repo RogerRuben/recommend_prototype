@@ -106,6 +106,21 @@ def _decimal_places(values):
     return min(max(places, 0), 6)
 
 
+def _generation_range(values):
+    """Widen observed min/max into a default generation (engineering) bound.
+
+    Auto-inference only knows the observed range.  Treating that as the hard
+    engineering bound would block the extrapolation the recommendation engine
+    is designed for, so the generation bound is widened by default and the
+    operator is expected to confirm the real engineering limits.
+    """
+    lo = min(values)
+    hi = max(values)
+    span = hi - lo
+    pad = 0.25 * span if span > 1e-12 else max(abs(lo) * 0.25, 1.0)
+    return lo - pad, hi + pad
+
+
 def _infer_parameter(header, parameter_id, values, missing_tokens, order):
     label, unit = _label_and_unit(header)
     missing_count = sum(1 for value in values if _is_missing(value, missing_tokens))
@@ -122,13 +137,16 @@ def _infer_parameter(header, parameter_id, values, missing_tokens, order):
     search_type = "auto"
     allowed = []
     minimum = maximum = None
+    observed_min = observed_max = None
     decimals = 3
 
     if observed and all(re.match(r"^ip\s*\d+(?:\.\d+)?$", value, re.I) for value in observed):
         numbers = [float(re.sub(r"^ip\s*", "", value, flags=re.I)) for value in observed]
         value_type, search_type = "ip_grade", "integer"
-        minimum, maximum, decimals = min(numbers), max(numbers), 0
-        note = "识别为IP防护等级；上下限暂取历史样本范围，请确认工程边界。"
+        observed_min, observed_max = min(numbers), max(numbers)
+        minimum, maximum = _generation_range(numbers)
+        decimals = 0
+        note = "识别为IP防护等级；经验范围取历史样本，工程/生成边界已外扩，请确认工程边界。"
     elif observed and set(normalized).issubset(TRUE_WORDS | FALSE_WORDS) and not set(normalized).issubset(set(("0", "1"))):
         value_type, search_type, decimals = "boolean", "boolean", 0
         note = "历史值包含有/无或是/否语义，已识别为布尔属性。"
@@ -148,9 +166,10 @@ def _infer_parameter(header, parameter_id, values, missing_tokens, order):
             ints = all(float(value).is_integer() for value in numbers)
             value_type = "number"
             search_type = "integer" if ints else "continuous"
-            minimum, maximum = min(numbers), max(numbers)
+            observed_min, observed_max = min(numbers), max(numbers)
+            minimum, maximum = _generation_range(numbers)
             decimals = 0 if ints else _decimal_places(observed)
-            note = "识别为%s；上下限暂取历史样本范围，请确认工程边界。" % ("整数" if ints else "连续数值")
+            note = "识别为%s；经验范围取历史样本，工程/生成边界已外扩，请确认工程边界。" % ("整数" if ints else "连续数值")
         elif observed and not TEXT_HEADER.search(label) and len(unique) <= 20:
             value_type, search_type = "enum", "unordered_enum"
             allowed = unique
@@ -173,6 +192,8 @@ def _infer_parameter(header, parameter_id, values, missing_tokens, order):
         "search_type": search_type,
         "min_value": minimum,
         "max_value": maximum,
+        "observed_min": observed_min,
+        "observed_max": observed_max,
         "preference": "neutral",
         "description": note,
         "adjustment_hint": "请结合工程含义确认自动推断结果。" if confidence != "high" else "",
