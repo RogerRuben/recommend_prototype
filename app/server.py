@@ -1229,11 +1229,13 @@ class Application(object):
         base = request.get("base_parameters") or request.get("base_params")
         target_protocol = request.get("target_protocol")
         base_agreement_id = request.get("base_agreement_id")
+        is_generated = bool(request.get("is_generated"))
         evaluation = None
-        if base_agreement_id and base:
+        if base_agreement_id and base and not is_generated:
             # An unchanged historical sample keeps its real transaction price;
-            # only the effectiveness model is re-run. Any attribute change (or a
-            # generated/base-less candidate) falls through to full evaluation.
+            # only the effectiveness model is re-run. Generated schemes (which
+            # reuse a historical seed for tag inheritance) always re-predict
+            # their own price, so they never take this path.
             base_item = self.store.get_historical(base_agreement_id, target_protocol=target_protocol, recalculate=False)
             if base_item:
                 historical_price = base_item.get("historical_price_wan")
