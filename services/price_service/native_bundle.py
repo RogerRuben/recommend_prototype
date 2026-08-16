@@ -253,8 +253,16 @@ def _model_prediction(model, prepared):
         return float(value)
 
 
-def predict(bundle, parameters, allow_degraded=False):
-    prepared, input_status = prepare_vector(bundle, parameters)
+def _declared_transform(bundle):
+    return "log" if str(bundle.get("model_output_transform") or "log") == "log" else "identity"
+
+
+def _apply_transform(raw, transform):
+    return math.exp(raw) if transform == "log" else raw
+
+
+def _ensemble_price(bundle, prepared, transform, allow_degraded):
+    """Ensemble price for one prepared row under a given output transform."""
     members = bundle["ensemble"]["members"]
     predictions, skipped = [], []
     for item in members:
@@ -270,11 +278,10 @@ def predict(bundle, parameters, allow_degraded=False):
                 raise
             skipped.append({"name": name, "reason": str(exc)})
             continue
-        if bundle.get("model_output_transform", "log") == "log":
-            price_native = math.exp(raw)
-        else:
-            price_native = raw
-        predictions.append({"name": name, "weight": float(item.get("weight", 1)), "raw": raw, "price_native": price_native})
+        predictions.append({
+            "name": name, "weight": float(item.get("weight", 1)),
+            "raw": raw, "price_native": _apply_transform(raw, transform),
+        })
     if not predictions:
         raise RuntimeError("没有可用的价格子模型")
     total_weight = sum(max(0.0, x["weight"]) for x in predictions)
@@ -286,8 +293,57 @@ def predict(bundle, parameters, allow_degraded=False):
         price_native = math.exp(log_value)
     else:
         price_native = sum(max(0.0, x["weight"]) * x["price_native"] for x in predictions) / total_weight
+    return price_native, predictions, skipped
+
+
+def _self_check_transform(bundle, prepared, transform, price_wan, allow_degraded):
+    """Return the alternative transform when the current one is implausible.
+
+    A bundle whose ``model_output_transform`` is wrong produces prices many
+    orders of magnitude away from the target's typical value.  The exporter
+    stores ``target_reference_wan`` (the median held-out price) for exactly this
+    guard: if the declared transform lands far outside the reference, retry with
+    the opposite transform and keep it only when it is closer.
+    """
+    reference = bundle.get("target_reference_wan")
+    if reference in (None, ""):
+        return None
+    try:
+        reference = float(reference)
+    except (TypeError, ValueError):
+        return None
+    if not (reference > 0 and price_wan > 0):
+        return None
+    ratio = price_wan / reference
+    if 0.01 <= ratio <= 100.0:
+        return None
+    alt = "identity" if transform == "log" else "log"
+    divisor = float(bundle.get("target_divisor_to_wan") or 1.0)
+    try:
+        alt_native, _alt_pred, _alt_skip = _ensemble_price(bundle, prepared, alt, allow_degraded)
+        alt_wan = alt_native / divisor
+    except Exception:
+        return None
+    if alt_wan <= 0:
+        return None
+    alt_ratio = alt_wan / reference
+    if abs(alt_ratio - 1.0) < abs(ratio - 1.0):
+        return alt
+    return None
+
+
+def predict(bundle, parameters, allow_degraded=False):
+    prepared, input_status = prepare_vector(bundle, parameters)
+    transform = _declared_transform(bundle)
+    price_native, predictions, skipped = _ensemble_price(bundle, prepared, transform, allow_degraded)
     divisor = float(bundle.get("target_divisor_to_wan") or 1.0)
     price_wan = price_native / divisor
+    corrected_transform = _self_check_transform(bundle, prepared, transform, price_wan, allow_degraded)
+    corrected = False
+    if corrected_transform is not None and corrected_transform != transform:
+        price_native, predictions, skipped = _ensemble_price(bundle, prepared, corrected_transform, allow_degraded)
+        price_wan = price_native / divisor
+        corrected = True
     residual = bundle.get("residual_calibration") or {}
     if residual.get("space") == "log":
         lower = price_wan * math.exp(float(residual.get("lower", 0)))
@@ -296,7 +352,7 @@ def predict(bundle, parameters, allow_degraded=False):
         delta = float(residual.get("half_width_native", residual.get("half_width", 0))) / divisor
         lower, upper = max(0.0, price_wan - delta), price_wan + delta
     status = "exact" if not skipped else "degraded"
-    return {
+    result = {
         "predicted_price_wan": round(price_wan, 6),
         "price_interval_wan": [round(lower, 6), round(upper, 6)],
         "prediction_mode": "native_pickle_%s" % status,
@@ -305,6 +361,48 @@ def predict(bundle, parameters, allow_degraded=False):
         "input_status": input_status,
         "confidence": "low" if skipped or input_status["warnings"] else "medium",
     }
+    if corrected:
+        result["output_transform_corrected"] = corrected_transform
+    return result
+
+
+def _batch_rows(bundle, member_values, input_statuses, transform, skipped, allow_degraded):
+    method = bundle.get("ensemble", {}).get("aggregation", "weighted_mean_price")
+    divisor = float(bundle.get("target_divisor_to_wan") or 1.0)
+    residual = bundle.get("residual_calibration") or {}
+    total_weight = sum(max(0.0, item["weight"]) for item in member_values) or 1.0
+    results = []
+    for row_index, input_status in enumerate(input_statuses):
+        predictions = []
+        for member in member_values:
+            raw = member["raw_values"][row_index]
+            predictions.append({
+                "name": member["name"], "weight": member["weight"],
+                "raw": raw, "price_native": _apply_transform(raw, transform),
+            })
+        if method == "weighted_mean_log_prediction":
+            log_value = sum(max(0.0, item["weight"]) * item["raw"] for item in predictions) / total_weight
+            price_native = math.exp(log_value)
+        else:
+            price_native = sum(max(0.0, item["weight"]) * item["price_native"] for item in predictions) / total_weight
+        price_wan = price_native / divisor
+        if residual.get("space") == "log":
+            lower = price_wan * math.exp(float(residual.get("lower", 0)))
+            upper = price_wan * math.exp(float(residual.get("upper", 0)))
+        else:
+            delta = float(residual.get("half_width_native", residual.get("half_width", 0))) / divisor
+            lower, upper = max(0.0, price_wan - delta), price_wan + delta
+        status = "exact" if not skipped else "degraded"
+        results.append({
+            "predicted_price_wan": round(price_wan, 6),
+            "price_interval_wan": [round(lower, 6), round(upper, 6)],
+            "prediction_mode": "native_pickle_%s" % status,
+            "member_predictions": predictions,
+            "skipped_members": list(skipped),
+            "input_status": input_status,
+            "confidence": "low" if skipped or input_status["warnings"] else "medium",
+        })
+    return results
 
 
 def predict_batch(bundle, parameter_items, allow_degraded=False):
@@ -355,47 +453,44 @@ def predict_batch(bundle, parameter_items, allow_degraded=False):
         })
     if not member_values:
         raise RuntimeError("没有可用的价格子模型")
-    total_weight = sum(max(0.0, item["weight"]) for item in member_values)
-    if total_weight <= 0:
-        raise RuntimeError("可用模型权重总和为0")
 
-    method = bundle.get("ensemble", {}).get("aggregation", "weighted_mean_price")
-    output_transform = bundle.get("model_output_transform", "log")
-    divisor = float(bundle.get("target_divisor_to_wan") or 1.0)
-    residual = bundle.get("residual_calibration") or {}
-    results = []
-    for row_index, input_status in enumerate(input_statuses):
-        predictions = []
-        for member in member_values:
-            raw = member["raw_values"][row_index]
-            price_native = math.exp(raw) if output_transform == "log" else raw
-            predictions.append({
-                "name": member["name"], "weight": member["weight"],
-                "raw": raw, "price_native": price_native,
-            })
-        if method == "weighted_mean_log_prediction":
-            log_value = sum(max(0.0, item["weight"]) * item["raw"] for item in predictions) / total_weight
-            price_native = math.exp(log_value)
-        else:
-            price_native = sum(max(0.0, item["weight"]) * item["price_native"] for item in predictions) / total_weight
-        price_wan = price_native / divisor
-        if residual.get("space") == "log":
-            lower = price_wan * math.exp(float(residual.get("lower", 0)))
-            upper = price_wan * math.exp(float(residual.get("upper", 0)))
-        else:
-            delta = float(residual.get("half_width_native", residual.get("half_width", 0))) / divisor
-            lower, upper = max(0.0, price_wan - delta), price_wan + delta
-        status = "exact" if not skipped else "degraded"
-        results.append({
-            "predicted_price_wan": round(price_wan, 6),
-            "price_interval_wan": [round(lower, 6), round(upper, 6)],
-            "prediction_mode": "native_pickle_%s" % status,
-            "member_predictions": predictions,
-            "skipped_members": list(skipped),
-            "input_status": input_status,
-            "confidence": "low" if skipped or input_status["warnings"] else "medium",
-        })
+    transform = _declared_transform(bundle)
+    results = _batch_rows(bundle, member_values, input_statuses, transform, skipped, allow_degraded)
+    corrected = _batch_self_check(bundle, member_values, input_statuses, transform, skipped, allow_degraded, results)
+    if corrected is not None:
+        results = _batch_rows(bundle, member_values, input_statuses, corrected, skipped, allow_degraded)
+        for result in results:
+            result["output_transform_corrected"] = corrected
     return results
+
+
+def _batch_self_check(bundle, member_values, input_statuses, transform, skipped, allow_degraded, results):
+    """Flip the batch transform when the first row lands far outside the reference."""
+    if not results:
+        return None
+    reference = bundle.get("target_reference_wan")
+    if reference in (None, ""):
+        return None
+    try:
+        reference = float(reference)
+        first_wan = float(results[0]["predicted_price_wan"])
+    except (TypeError, ValueError):
+        return None
+    if not (reference > 0 and first_wan > 0):
+        return None
+    ratio = first_wan / reference
+    if 0.01 <= ratio <= 100.0:
+        return None
+    alt = "identity" if transform == "log" else "log"
+    alt_results = _batch_rows(bundle, member_values, input_statuses, alt, skipped, allow_degraded)
+    if not alt_results:
+        return None
+    alt_wan = float(alt_results[0]["predicted_price_wan"])
+    if alt_wan <= 0:
+        return None
+    if abs(alt_wan / reference - 1.0) < abs(ratio - 1.0):
+        return alt
+    return None
 
 
 def file_sha256(path):

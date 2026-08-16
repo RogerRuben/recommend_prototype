@@ -134,5 +134,5 @@
     "sklearn"
   ],
   "bundle_file": "price_native_bundle.pkl",
-  "bundle_sha256": "da404cc4940fb287f0d3ba897609fd39201a6216a1026c5d8ed7bf192530157a"
+  "bundle_sha256": "df848c993eff5cc0c21f882ae601f0213c6f25e18db25dd007ffb201de9d2ced"
 }

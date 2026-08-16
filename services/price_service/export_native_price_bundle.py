@@ -345,6 +345,21 @@ def _detect_output_transform(models, names, weights, preprocessor, X_test, y_tes
         return default
 
 
+def _target_reference(y_test, divisor):
+    """Median of the target in final 万元 space, for the runtime self-check."""
+    if y_test is None:
+        return None
+    try:
+        import numpy as np
+        arr = np.asarray(y_test, dtype=float).ravel()
+        if arr.size == 0:
+            return None
+        divisor = divisor if divisor and divisor > 0 else 1.0
+        return float(np.median(arr)) / divisor
+    except Exception:
+        return None
+
+
 def _required_modules(models, preprocessor):
     roots = set()
     for obj in list(models.values()) + ([preprocessor] if preprocessor is not None else []):
@@ -441,6 +456,7 @@ def export_from_notebook(namespace, output="price_native_bundle.pkl", product_co
     residual = _recalculate_residual(
         ns, models, names, weights, preprocessor, output_transform
     )
+    target_reference_wan = _target_reference(ns.get("y_test"), float(target_divisor_to_wan))
     omitted = [name for name in available_names if name not in names]
     bundle = {
         "product_code": str(product_code),
@@ -458,6 +474,7 @@ def export_from_notebook(namespace, output="price_native_bundle.pkl", product_co
         "target_transform": output_transform,
         "model_output_transform": output_transform,
         "target_divisor_to_wan": float(target_divisor_to_wan),
+        "target_reference_wan": target_reference_wan,
         "residual_calibration": residual,
         "training_environment": environment_versions(),
         "required_modules": _required_modules(models, preprocessor),
