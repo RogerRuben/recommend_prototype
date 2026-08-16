@@ -1,32 +1,27 @@
 {
   "format_version": "effectiveness-original-runtime-package-1.0",
-  "product_code": "VIRTUAL_COUPLED_ACTUATOR",
-  "product_name": "多类型耦合执行机构（虚拟验收成品）",
-  "model_version": "effect-v11-355494cea084-fa079a21179c",
+  "product_code": "AIRCRAFT_DOOR_LOCK_BASIC_DEMO",
+  "workbook_product_code": "AIRCRAFT_DOOR_LOCK_BASIC_DEMO",
+  "product_code_overridden": false,
+  "product_name": "基础航空舱门锁（编码表12样本）",
+  "model_version": "effect-v11-f77f92ef4c05-93381a354d48",
   "algorithm_version": "V11-PAR-UTA",
   "profile_version": 11,
   "source_root": "source",
-  "workbook": "data/virtual_effectiveness_project.xlsx",
-  "state": "state/state_355494cea084c779.json",
-  "workbook_fingerprint": "701e424f742ae017",
-  "learning_fingerprint": "355494cea084c779",
-  "state_sha256": "fa079a21179c6fe22596ed16ab2b12ccd824950581cacecdcf44899838bfdc91",
+  "workbook": "data/基础航空舱门锁_效能项目_12样本.xlsx",
+  "state": "state/expert_state_v11_12样本.json",
+  "workbook_fingerprint": "c560ac4ca7f98831",
+  "learning_fingerprint": "f77f92ef4c05b2cc",
+  "state_sha256": "93381a354d487488d5c859481935d4854f0cd576c8ce090dc69d0160adef78ad",
   "active_protocol": {
-    "profile_id": "VCA-REQ-001",
-    "profile_name": "虚拟执行机构综合技术协议",
+    "profile_id": "BADL-REQ-001",
+    "profile_name": "基础航空舱门锁目标协议",
     "reference_score": 100.0,
-    "reference_digest": "f9114a0348c416308accb0eed1420611477a05f0a5839800d59f2d542cf5a90f",
+    "reference_digest": "8da24935579a92c9754f191fbbd10d7a2125668e6c1c15ab1c867b9e5f1e313a",
     "reference_values": {
-      "rated_thrust_n": 6045.0,
-      "stroke_mm": 74.4,
-      "speed_mm_s": 15.5,
-      "protection_grade": 55.0,
-      "overload_protection": 0.0,
-      "mass_kg": 16.57,
-      "accuracy_mm": 0.158,
-      "response_time_ms": 311.8,
-      "duty_cycle_pct": 30.8,
-      "redundancy_level": 3.0
+      "attr_001": 1.0,
+      "attr_005": 11500.0,
+      "attr_007": 56.0
     },
     "mode": "fixed_packaged_protocol"
   },
@@ -35,8 +30,8 @@
     "dynamic_target_protocol": true,
     "packaged_protocol_count": 1,
     "counterfactual_improvement": true,
-    "coupling_model_count": 2,
-    "coupling_edge_count": 6,
+    "coupling_model_count": 0,
+    "coupling_edge_count": 0,
     "learned_boundary_count": 0
   },
   "files": [
@@ -46,7 +41,7 @@
     },
     {
       "path": "source/project_excel.py",
-      "sha256": "dc0f6cf5e14b6fd80776070e657ffaf5a91718a0575f7a499aea91f41cf03728"
+      "sha256": "12763b20fb59d1d60d21f5730484a94c3c96b66b5b03353ccdced4eb79a35e03"
     },
     {
       "path": "source/coupling_model.py",
@@ -65,12 +60,12 @@
       "sha256": "35285e1deee360bd97738275f48030e5824d69136289863d1d7939f564f213e8"
     },
     {
-      "path": "data/virtual_effectiveness_project.xlsx",
-      "sha256": "701e424f742ae017ae4adf21ae23a5ec73f54c6a9e19acdebd40b016bd403c17"
+      "path": "data/基础航空舱门锁_效能项目_12样本.xlsx",
+      "sha256": "c560ac4ca7f98831365e990700752993e19b80042d01e8e3c7394a9bdb027ee5"
     },
     {
-      "path": "state/state_355494cea084c779.json",
-      "sha256": "fa079a21179c6fe22596ed16ab2b12ccd824950581cacecdcf44899838bfdc91"
+      "path": "state/expert_state_v11_12样本.json",
+      "sha256": "93381a354d487488d5c859481935d4854f0cd576c8ce090dc69d0160adef78ad"
     }
   ],
   "prediction_equivalence": "loads the same source modules + Workbook + State and calls ProjectApp.evaluate"
