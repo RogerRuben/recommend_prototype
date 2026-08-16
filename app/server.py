@@ -1194,12 +1194,60 @@ class Application(object):
         item["price_source"] = current.get("price_source", "historical")
         return item
 
+    @staticmethod
+    def _parameters_changed(params, base):
+        """True when a business attribute actually differs from its base value.
+
+        The editor may round-trip values through Number() while the stored
+        historical JSON keeps strings, so compare tolerantly (string-equal or
+        numeric-equal).  A field that the historical sample left unset is not a
+        user modification, so it never counts as "changed"; clearing a field the
+        sample did set does count.
+        """
+        params = dict(params or {})
+        base = dict(base or {})
+        for key in set(params) | set(base):
+            a = params.get(key)
+            b = base.get(key)
+            if b in (None, ""):
+                continue
+            if a == b:
+                continue
+            if a in (None, ""):
+                return True
+            try:
+                if float(a) == float(b):
+                    continue
+            except (TypeError, ValueError):
+                pass
+            return True
+        return False
+
     def evaluate(self, request):
         self._require_product_ready()
         params = request.get("parameters") or request.get("params") or {}
         base = request.get("base_parameters") or request.get("base_params")
         target_protocol = request.get("target_protocol")
-        evaluation = self._evaluate_with_rules(params, base, target_protocol=target_protocol)
+        base_agreement_id = request.get("base_agreement_id")
+        evaluation = None
+        if base_agreement_id and base:
+            # An unchanged historical sample keeps its real transaction price;
+            # only the effectiveness model is re-run. Any attribute change (or a
+            # generated/base-less candidate) falls through to full evaluation.
+            base_item = self.store.get_historical(base_agreement_id, target_protocol=target_protocol, recalculate=False)
+            if base_item:
+                historical_price = base_item.get("historical_price_wan")
+                if historical_price not in (None, ""):
+                    # Compare only the current business field set so stale keys
+                    # left in older agreement JSON never look like a user edit.
+                    defined_keys = set(self.store.parameter_map().keys())
+                    base_defined = {k: v for k, v in (base or {}).items() if k in defined_keys}
+                    if not self._parameters_changed(params, base_defined):
+                        evaluation = self._evaluate_historical_with_rules(
+                            params, historical_price, target_protocol=target_protocol,
+                        )
+        if evaluation is None:
+            evaluation = self._evaluate_with_rules(params, base, target_protocol=target_protocol)
         context = dict(request.get("recommendation_context") or {})
         if not context:
             return self._register_evaluation(params, evaluation, target_protocol)
