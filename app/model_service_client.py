@@ -42,6 +42,28 @@ def _json_request(url, payload=None, timeout=15.0):
         raise ModelServiceUnavailable("%s: %s" % (url, exc))
 
 
+def build_model_request(kind, business_parameters, request_id=None, target_protocol=None,
+                        product_code=None, scenario="recommendation_evaluation",
+                        context_source="industrial_recommendation_system"):
+    """Build one model-service HTTP request envelope (single source of truth).
+
+    ``kind`` is ``"price"`` or ``"effectiveness"`` (informational; both services
+    accept the same envelope).  ``product_code`` is the *wire* code actually
+    sent on the wire — the business product the recommendation is operating on.
+    The model's own declared code is a diagnostic and is not what gets sent.
+    """
+    envelope = {
+        "request_id": request_id or ("REQ-%s" % uuid.uuid4().hex[:16]),
+        "product_code": product_code,
+        "scenario": scenario,
+        "parameters": dict(business_parameters or {}),
+        "context": {"source": context_source, "locale": "zh-CN"},
+    }
+    if target_protocol not in (None, ""):
+        envelope["target_protocol"] = target_protocol
+    return envelope
+
+
 class ModelServiceGateway(object):
     def __init__(self, local_runtime=None, price_url=None, effectiveness_url=None, timeout=15.0, fallback=False):
         self.local_runtime = local_runtime
@@ -117,13 +139,11 @@ class ModelServiceGateway(object):
         return _json_request(self.price_url + "/api/v1/schema", None, self.timeout)
 
     def predict_price(self, params, product_code=None):
-        envelope = {
-            "request_id": "PRICE-WORKBENCH-%s" % uuid.uuid4().hex[:16],
-            "product_code": product_code or self.product_code,
-            "scenario": "operator_price_workbench",
-            "parameters": dict(params or {}),
-            "context": {"source": "price_workbench", "locale": "zh-CN"},
-        }
+        envelope = build_model_request(
+            "price", params, request_id="PRICE-WORKBENCH-%s" % uuid.uuid4().hex[:16],
+            product_code=product_code or self.product_code,
+            scenario="operator_price_workbench", context_source="price_workbench",
+        )
         return _json_request(self.price_url + "/api/v1/predict", envelope, self.timeout)
 
     def evaluate_effectiveness(self, params, target_protocol=None):
@@ -136,15 +156,11 @@ class ModelServiceGateway(object):
             )
             if not dynamic_protocol:
                 target_protocol = None
-        envelope = {
-            "request_id": "EFFECT-WORKBENCH-%s" % uuid.uuid4().hex[:16],
-            "product_code": None,
-            "scenario": "operator_effectiveness_workbench",
-            "parameters": dict(params or {}),
-            "context": {"source": "effectiveness_workbench", "locale": "zh-CN"},
-        }
-        if target_protocol not in (None, ""):
-            envelope["target_protocol"] = target_protocol
+        envelope = build_model_request(
+            "effectiveness", params, request_id="EFFECT-WORKBENCH-%s" % uuid.uuid4().hex[:16],
+            product_code=None, target_protocol=target_protocol,
+            scenario="operator_effectiveness_workbench", context_source="effectiveness_workbench",
+        )
         return _json_request(
             self.effectiveness_url + "/api/v1/evaluate", envelope, self.timeout
         )
@@ -158,16 +174,10 @@ class ModelServiceGateway(object):
             return self.local_runtime.evaluate(params)
 
     def evaluate(self, params, target_protocol=None):
-        request_id = "REC-%s" % uuid.uuid4().hex[:16]
-        envelope = {
-            "request_id": request_id,
-            "product_code": self.product_code,
-            "scenario": "recommendation_evaluation",
-            "parameters": dict(params or {}),
-            "context": {"source": "industrial_recommendation_system", "locale": "zh-CN"},
-        }
-        if target_protocol not in (None, ""):
-            envelope["target_protocol"] = target_protocol
+        envelope = build_model_request(
+            "recommendation", params, request_id="REC-%s" % uuid.uuid4().hex[:16],
+            product_code=self.product_code, target_protocol=target_protocol,
+        )
         started = time.time()
         try:
             with ThreadPoolExecutor(max_workers=2) as pool:
@@ -242,15 +252,11 @@ class ModelServiceGateway(object):
         the price service is deliberately not called. Only effectiveness is
         computed; the stored historical price is used for ranking.
         """
-        envelope = {
-            "request_id": "REC-EFFECT-ONLY-%s" % uuid.uuid4().hex[:16],
-            "product_code": self.product_code,
-            "scenario": "historical_effectiveness_only",
-            "parameters": dict(params or {}),
-            "context": {"source": "industrial_recommendation_system", "locale": "zh-CN"},
-        }
-        if target_protocol not in (None, ""):
-            envelope["target_protocol"] = target_protocol
+        envelope = build_model_request(
+            "effectiveness", params, request_id="REC-EFFECT-ONLY-%s" % uuid.uuid4().hex[:16],
+            product_code=self.product_code, target_protocol=target_protocol,
+            scenario="historical_effectiveness_only",
+        )
         started = time.time()
         try:
             effect = _json_request(self.effectiveness_url + "/api/v1/evaluate", envelope, self.timeout)
@@ -303,15 +309,11 @@ class ModelServiceGateway(object):
         return results
 
     def improve(self, params, target_protocol=None):
-        envelope = {
-            "request_id": "IMPROVE-%s" % uuid.uuid4().hex[:16],
-            "product_code": self.product_code,
-            "scenario": "counterfactual_improvement",
-            "parameters": dict(params or {}),
-            "context": {"source": "industrial_recommendation_system", "locale": "zh-CN"},
-        }
-        if target_protocol not in (None, ""):
-            envelope["target_protocol"] = target_protocol
+        envelope = build_model_request(
+            "effectiveness", params, request_id="IMPROVE-%s" % uuid.uuid4().hex[:16],
+            product_code=self.product_code, target_protocol=target_protocol,
+            scenario="counterfactual_improvement",
+        )
         response = _json_request(
             self.effectiveness_url + "/api/v1/improve",
             envelope,

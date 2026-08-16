@@ -128,7 +128,7 @@ def agreement_matches(item, request):
         ce = capability / max(price, 1e-9)
     feasibility = float(item.get("feasibility_probability", 0) or 0)
     if not physical_gate_passes(item, request): return False
-    if request.get("max_price") not in (None, "") and price is not None and price > float(request["max_price"]): return False
+    if request.get("max_price") not in (None, "") and (price is None or price > float(request["max_price"])): return False
     if request.get("min_capability") not in (None, "") and capability < float(request["min_capability"]): return False
     if request.get("min_cost_effectiveness") not in (None, "") and (ce is None or ce < float(request["min_cost_effectiveness"])): return False
     if request.get("min_feasibility") not in (None, "") and feasibility < max(DEFAULT_FEASIBILITY_GATE, float(request["min_feasibility"])): return False

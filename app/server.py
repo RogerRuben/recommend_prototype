@@ -19,7 +19,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from .model_runtime import IntegratedModelRuntime, ModelInputError
-from .model_service_client import DegradedServiceRuntime, ModelServiceGateway, ServiceBackedRuntime
+from .model_service_client import DegradedServiceRuntime, ModelServiceGateway, ServiceBackedRuntime, build_model_request
 from .recommender import agreement_matches, rank_agreements, rank_historical_products
 from .store import Store
 from .wide_import import WideTableParser
@@ -164,6 +164,7 @@ class Application(object):
         )
         self.data_master = DataMasterService(self.store, self.runtime)
         self.product_releases = ProductReleaseService(self.store, self.runtime)
+        self._sync_wire_product_code()
         # A newly created installation is initialized from an operator-visible
         # DataMaster workbook, never from product-specific Python constants.
         if not self.demo_read_only and self.store.is_empty():
@@ -201,6 +202,20 @@ class Application(object):
             self._evaluate_batch_with_rules if hasattr(self.runtime, "evaluate_batch") else None,
         )
 
+    def _sync_wire_product_code(self):
+        """Point the wire product code at the current business product.
+
+        The model services declare their own ``product_code`` in their Schema;
+        that is a diagnostic only.  The recommendation system operates on the
+        business product in the database, so every request envelope carries that
+        code instead of the model's declared code.
+        """
+        if self.model_gateway is None:
+            return
+        business = self.store.current_product_code() if hasattr(self, "store") else ""
+        if business:
+            self.model_gateway.product_code = business
+
     def on_business_data_changed(self):
         """Single hook for every business-data write path.
 
@@ -208,6 +223,7 @@ class Application(object):
         dual-service probe) and then invalidates the in-memory caches so the
         management page never shows a stale product_ready / parameter_coverage.
         """
+        self._sync_wire_product_code()
         readiness = self._refresh_model_data_readiness()
         self._invalidate_runtime_caches()
         return readiness
@@ -221,6 +237,7 @@ class Application(object):
             self.data_master.runtime = runtime
         if hasattr(self, "product_releases"):
             self.product_releases.runtime = runtime
+        self._sync_wire_product_code()
         if hasattr(self, "sessions"):
             self._invalidate_runtime_caches()
 
@@ -600,20 +617,30 @@ class Application(object):
         effect_fields = (((inspected.get("effectiveness") or {}).get("schema") or {}).get("fields") or [])
         business, sources = self._complete_business_parameters(price_fields + effect_fields)
         encoded = self.store.runtime_parameters(business)
-        product_code = self.store.current_product_code()
+        business_code = self.store.current_product_code()
+        price_declared = str((((inspected.get("price") or {}).get("schema") or {}).get("product_code")) or "")
+        effect_declared = str((((inspected.get("effectiveness") or {}).get("schema") or {}).get("product_code")) or "")
+        wire_code = self.model_gateway.product_code
         examples = {}
         for kind in ("price", "effectiveness"):
             service = inspected.get(kind) or {}
-            parameters = dict(encoded)
             endpoint = "/api/v1/predict" if kind == "price" else "/api/v1/evaluate"
+            # The example body is built by the same envelope builder used for the
+            # real recommendation request, so it is the exact wire JSON.
+            envelope = build_model_request(kind, encoded, request_id="DATA-CENTER-EXAMPLE", product_code=wire_code)
             examples[kind] = {
                 "method": "POST", "url": service.get("url", "") + endpoint,
-                "body": {"request_id": "DATA-CENTER-EXAMPLE", "product_code": product_code,
-                         "parameters": parameters},
+                "body": envelope,
             }
         return {
             "source": "independent_http_services", "local_model_files_read": False,
-            "current_business_product_code": product_code,
+            "current_business_product_code": business_code,
+            "identity": {
+                "business_product_code": business_code,
+                "price_declared_product_code": price_declared,
+                "effectiveness_declared_product_code": effect_declared,
+                "wire_product_code": wire_code,
+            },
             "business_parameters": business, "value_sources": sources,
             "parameter_coverage": self._parameter_coverage_diagnostics(
                 encoded, price_fields=price_fields, effect_fields=effect_fields
