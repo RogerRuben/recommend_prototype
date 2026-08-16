@@ -1,0 +1,3420 @@
+{
+  "version": 1,
+  "profile_version": 11,
+  "project_name": "基础航空舱门锁（虚拟功能演示）",
+  "workbook_path": "D:\\pycodes\\IndustrialProtocolDemo_V19_6_Codex_Baseline_Hotfixed\\outputs\\019fb26c_basic_aircraft_door_lock_models_20260812\\基础航空舱门锁_效能项目.xlsx",
+  "workbook_fingerprint": "7b698fc20e23f463",
+  "learning_fingerprint": "86271d2fcf62121d",
+  "created_at": "2026-08-12T00:52:32",
+  "updated_at": "2026-08-14T01:35:37",
+  "data_mode": "final_encoded_prediction_virtual_expert_v11",
+  "demo_profile": {
+    "name": "阶段 8 固定展示数据",
+    "source": "系统模拟专家，仅用于演示，不得视为真实专家结论",
+    "prepared_at": "2026-08-12T00:52:35",
+    "seed": 20260812,
+    "active_preference_pairs": 20,
+    "feasibility_evidence": 6,
+    "resolved_reviews": 1
+  },
+  "active_protocol_profile_id": "BADL-REQ-001",
+  "generated_index": 3,
+  "existing_samples": [
+    {
+      "id": "BADL-E001",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 8500.0,
+        "attr_007": 54
+      }
+    },
+    {
+      "id": "BADL-E002",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 9200.0,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E003",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 10800.0,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E004",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 9800.0,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E005",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 12000.0,
+        "attr_007": 57
+      }
+    },
+    {
+      "id": "BADL-E006",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 10000.0,
+        "attr_007": 54
+      }
+    },
+    {
+      "id": "BADL-E007",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 13500.0,
+        "attr_007": 58
+      }
+    },
+    {
+      "id": "BADL-E008",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 11200.0,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E009",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 12800.0,
+        "attr_007": 57
+      }
+    },
+    {
+      "id": "BADL-E010",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 9000.0,
+        "attr_007": 54
+      }
+    },
+    {
+      "id": "BADL-E011",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 14500.0,
+        "attr_007": 59
+      }
+    },
+    {
+      "id": "BADL-E012",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 11800.0,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E013",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 8313.51,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E014",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 8893.91,
+        "attr_007": 54
+      }
+    },
+    {
+      "id": "BADL-E015",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 10875.86,
+        "attr_007": 57
+      }
+    },
+    {
+      "id": "BADL-E016",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 10218.36,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E017",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 11678.83,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E018",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 9890.84,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E019",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 13121.69,
+        "attr_007": 57
+      }
+    },
+    {
+      "id": "BADL-E020",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 10971.78,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E021",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 13196.13,
+        "attr_007": 57
+      }
+    },
+    {
+      "id": "BADL-E022",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 9364.41,
+        "attr_007": 53
+      }
+    },
+    {
+      "id": "BADL-E023",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 14857.72,
+        "attr_007": 58
+      }
+    },
+    {
+      "id": "BADL-E024",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 11976.37,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E025",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 8578.04,
+        "attr_007": 54
+      }
+    },
+    {
+      "id": "BADL-E026",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 8838.29,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E027",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 10688.78,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E028",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 9629.62,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E029",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 12327.71,
+        "attr_007": 57
+      }
+    },
+    {
+      "id": "BADL-E030",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 10283.74,
+        "attr_007": 53
+      }
+    },
+    {
+      "id": "BADL-E031",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 13614.99,
+        "attr_007": 57
+      }
+    },
+    {
+      "id": "BADL-E032",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 10789.82,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E033",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 12721.4,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E034",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 8807.19,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E035",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 14244.32,
+        "attr_007": 60
+      }
+    },
+    {
+      "id": "BADL-E036",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 11595.43,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E037",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 8907.66,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E038",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 9434.91,
+        "attr_007": 54
+      }
+    },
+    {
+      "id": "BADL-E039",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 10621.26,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E040",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 9450.32,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E041",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 12277.52,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E042",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 9609.02,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E043",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 13847.62,
+        "attr_007": 58
+      }
+    },
+    {
+      "id": "BADL-E044",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 11337.27,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E045",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 13107.94,
+        "attr_007": 58
+      }
+    },
+    {
+      "id": "BADL-E046",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 9414.77,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E047",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 14301.72,
+        "attr_007": 60
+      }
+    },
+    {
+      "id": "BADL-E048",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 12180.27,
+        "attr_007": 55
+      }
+    }
+  ],
+  "known_schemes": [
+    {
+      "id": "BADL-E001",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 8500.0,
+        "attr_007": 54
+      }
+    },
+    {
+      "id": "BADL-E002",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 9200.0,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E003",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 10800.0,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E004",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 9800.0,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E005",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 12000.0,
+        "attr_007": 57
+      }
+    },
+    {
+      "id": "BADL-E006",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 10000.0,
+        "attr_007": 54
+      }
+    },
+    {
+      "id": "BADL-E007",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 13500.0,
+        "attr_007": 58
+      }
+    },
+    {
+      "id": "BADL-E008",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 11200.0,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E009",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 12800.0,
+        "attr_007": 57
+      }
+    },
+    {
+      "id": "BADL-E010",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 9000.0,
+        "attr_007": 54
+      }
+    },
+    {
+      "id": "BADL-E011",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 14500.0,
+        "attr_007": 59
+      }
+    },
+    {
+      "id": "BADL-E012",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 11800.0,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E013",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 8313.51,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E014",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 8893.91,
+        "attr_007": 54
+      }
+    },
+    {
+      "id": "BADL-E015",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 10875.86,
+        "attr_007": 57
+      }
+    },
+    {
+      "id": "BADL-E016",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 10218.36,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E017",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 11678.83,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E018",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 9890.84,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E019",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 13121.69,
+        "attr_007": 57
+      }
+    },
+    {
+      "id": "BADL-E020",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 10971.78,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E021",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 13196.13,
+        "attr_007": 57
+      }
+    },
+    {
+      "id": "BADL-E022",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 9364.41,
+        "attr_007": 53
+      }
+    },
+    {
+      "id": "BADL-E023",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 14857.72,
+        "attr_007": 58
+      }
+    },
+    {
+      "id": "BADL-E024",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 11976.37,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E025",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 8578.04,
+        "attr_007": 54
+      }
+    },
+    {
+      "id": "BADL-E026",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 8838.29,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E027",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 10688.78,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E028",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 9629.62,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E029",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 12327.71,
+        "attr_007": 57
+      }
+    },
+    {
+      "id": "BADL-E030",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 10283.74,
+        "attr_007": 53
+      }
+    },
+    {
+      "id": "BADL-E031",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 13614.99,
+        "attr_007": 57
+      }
+    },
+    {
+      "id": "BADL-E032",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 10789.82,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E033",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 12721.4,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E034",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 8807.19,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E035",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 14244.32,
+        "attr_007": 60
+      }
+    },
+    {
+      "id": "BADL-E036",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 11595.43,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E037",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 8907.66,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E038",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 9434.91,
+        "attr_007": 54
+      }
+    },
+    {
+      "id": "BADL-E039",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 10621.26,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E040",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 9450.32,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E041",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 12277.52,
+        "attr_007": 56
+      }
+    },
+    {
+      "id": "BADL-E042",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 9609.02,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E043",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 13847.62,
+        "attr_007": 58
+      }
+    },
+    {
+      "id": "BADL-E044",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 11337.27,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E045",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 13107.94,
+        "attr_007": 58
+      }
+    },
+    {
+      "id": "BADL-E046",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 9414.77,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "BADL-E047",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 14301.72,
+        "attr_007": 60
+      }
+    },
+    {
+      "id": "BADL-E048",
+      "source": "existing_sample",
+      "source_detail": "基础历史表增强虚拟样本",
+      "known_feasibility": "未标注",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 12180.27,
+        "attr_007": 55
+      }
+    },
+    {
+      "id": "G-001",
+      "source": "global_space_fill",
+      "source_detail": "基于 Excel 生成范围进行全域探索",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 8079.0,
+        "attr_007": 60
+      },
+      "generation_explanation": {
+        "purpose": "用控制变量方式探索历史方案未覆盖的区域",
+        "detail": "先用单位无关采样定位远端目标，本轮只改变 2 到 3 个上游属性，再按已知因果方向补全下游属性，便于专家判断。",
+        "base_scheme_id": "BADL-E047",
+        "mode": "global_space_fill",
+        "probe_target": null,
+        "probe_source": null,
+        "probe_side": null,
+        "changed_sources": [
+          "额定载荷-6223N"
+        ],
+        "target_bands": {},
+        "design_sequence": [
+          {
+            "stage": 1,
+            "attributes": [
+              "额定载荷",
+              "是否应急解锁"
+            ]
+          }
+        ],
+        "predicted_feasibility": 0.941,
+        "query_signature": "attr_005:-:0",
+        "candidate_pool_size": 192,
+        "selection_objective": 0.4931,
+        "predicted_bt_score": 69.1,
+        "probability_b_better": 0.2,
+        "bt_uncertainty": 0.399,
+        "normalized_novelty": 0.338,
+        "distance_to_base": 0.513,
+        "coverage_scarcity": 0.132,
+        "repeated_question_count": 0,
+        "recent_effective_yield": null,
+        "selection_strategy": "优先填补生成空间中覆盖不足的区域"
+      }
+    },
+    {
+      "id": "G-002",
+      "source": "maximin_exploration",
+      "source_detail": "基于 Excel 生成范围进行全域探索",
+      "params": {
+        "attr_001": 0,
+        "attr_005": 8015.0,
+        "attr_007": 60
+      },
+      "generation_explanation": {
+        "purpose": "用控制变量方式探索历史方案未覆盖的区域",
+        "detail": "先用单位无关采样定位远端目标，本轮只改变 2 到 3 个上游属性，再按已知因果方向补全下游属性，便于专家判断。",
+        "base_scheme_id": "BADL-E047",
+        "mode": "maximin_exploration",
+        "probe_target": null,
+        "probe_source": null,
+        "probe_side": null,
+        "changed_sources": [
+          "是否应急解锁-1-",
+          "额定载荷-6287N"
+        ],
+        "target_bands": {},
+        "design_sequence": [
+          {
+            "stage": 1,
+            "attributes": [
+              "是否应急解锁",
+              "额定载荷"
+            ]
+          }
+        ],
+        "predicted_feasibility": 0.941,
+        "query_signature": "attr_001:-:0|attr_005:-:0",
+        "candidate_pool_size": 192,
+        "selection_objective": 0.4673,
+        "predicted_bt_score": 28.89,
+        "probability_b_better": 0.033,
+        "bt_uncertainty": 0.066,
+        "normalized_novelty": 0.356,
+        "distance_to_base": 0.776,
+        "coverage_scarcity": 0.115,
+        "repeated_question_count": 0,
+        "recent_effective_yield": 1.0,
+        "selection_strategy": "优先选择距离全部已见方案最远的候选"
+      }
+    }
+  ],
+  "current_best_id": "BADL-E047",
+  "active_pair": {
+    "a": "BADL-E047",
+    "b": "G-002"
+  },
+  "interactions": [
+    {
+      "id": "D-P-001",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E011",
+      "scheme_b": "BADL-E015",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "A",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-002",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E032",
+      "scheme_b": "BADL-E042",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "A",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-003",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E022",
+      "scheme_b": "BADL-E039",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "B",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-004",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E037",
+      "scheme_b": "BADL-E047",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "B",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-005",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E024",
+      "scheme_b": "BADL-E028",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "A",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-006",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E038",
+      "scheme_b": "BADL-E044",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "A",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-007",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E013",
+      "scheme_b": "BADL-E032",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "B",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-008",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E043",
+      "scheme_b": "BADL-E046",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "A",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-009",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E024",
+      "scheme_b": "BADL-E044",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "A",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-010",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E040",
+      "scheme_b": "BADL-E041",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "A",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-011",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E019",
+      "scheme_b": "BADL-E034",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "A",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-012",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E043",
+      "scheme_b": "BADL-E047",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "B",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-013",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E025",
+      "scheme_b": "BADL-E041",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "A",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-014",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E013",
+      "scheme_b": "BADL-E014",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "A",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-015",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E007",
+      "scheme_b": "BADL-E024",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "A",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-016",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E005",
+      "scheme_b": "BADL-E018",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "A",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-017",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E001",
+      "scheme_b": "BADL-E043",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "B",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-018",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E008",
+      "scheme_b": "BADL-E048",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "B",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-019",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E029",
+      "scheme_b": "BADL-E042",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "A",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "D-P-020",
+      "created_at": "2026-08-12T00:52:39",
+      "scheme_a": "BADL-E006",
+      "scheme_b": "BADL-E012",
+      "feasibility_a": "feasible",
+      "feasibility_b": "feasible",
+      "preference": "B",
+      "source": "fixed_demo_simulation"
+    }
+  ],
+  "feasibility_evidence": [
+    {
+      "id": "F-001",
+      "created_at": "2026-08-12T00:52:35",
+      "interaction_id": "D-F-001",
+      "scheme_id": "BADL-E001",
+      "scheme_side": "A",
+      "label": "feasible",
+      "reason_codes": [],
+      "reason_text": "固定展示数据中的模拟可行判断",
+      "coupling_feedback": null,
+      "params": {
+        "attr_001": 1,
+        "attr_005": 8500.0,
+        "attr_007": 54
+      },
+      "source": "fixed_demo_simulation",
+      "status": "active",
+      "expert_id": "demo_simulated_expert"
+    },
+    {
+      "id": "F-002",
+      "created_at": "2026-08-12T00:52:35",
+      "interaction_id": "D-F-002",
+      "scheme_id": "BADL-E002",
+      "scheme_side": "A",
+      "label": "feasible",
+      "reason_codes": [],
+      "reason_text": "固定展示数据中的模拟可行判断",
+      "coupling_feedback": null,
+      "params": {
+        "attr_001": 0,
+        "attr_005": 9200.0,
+        "attr_007": 55
+      },
+      "source": "fixed_demo_simulation",
+      "status": "active",
+      "expert_id": "demo_simulated_expert"
+    },
+    {
+      "id": "F-003",
+      "created_at": "2026-08-12T00:52:35",
+      "interaction_id": "D-F-003",
+      "scheme_id": "BADL-E003",
+      "scheme_side": "A",
+      "label": "feasible",
+      "reason_codes": [],
+      "reason_text": "固定展示数据中的模拟可行判断",
+      "coupling_feedback": null,
+      "params": {
+        "attr_001": 1,
+        "attr_005": 10800.0,
+        "attr_007": 56
+      },
+      "source": "fixed_demo_simulation",
+      "status": "active",
+      "expert_id": "demo_simulated_expert"
+    },
+    {
+      "id": "F-004",
+      "created_at": "2026-08-12T00:52:35",
+      "interaction_id": "D-F-004",
+      "scheme_id": "BADL-E004",
+      "scheme_side": "A",
+      "label": "feasible",
+      "reason_codes": [],
+      "reason_text": "固定展示数据中的模拟可行判断",
+      "coupling_feedback": null,
+      "params": {
+        "attr_001": 0,
+        "attr_005": 9800.0,
+        "attr_007": 55
+      },
+      "source": "fixed_demo_simulation",
+      "status": "active",
+      "expert_id": "demo_simulated_expert"
+    },
+    {
+      "id": "F-005",
+      "created_at": "2026-08-12T00:52:35",
+      "interaction_id": "D-F-005",
+      "scheme_id": "BADL-E005",
+      "scheme_side": "A",
+      "label": "feasible",
+      "reason_codes": [],
+      "reason_text": "固定展示数据中的模拟可行判断",
+      "coupling_feedback": null,
+      "params": {
+        "attr_001": 1,
+        "attr_005": 12000.0,
+        "attr_007": 57
+      },
+      "source": "fixed_demo_simulation",
+      "status": "active",
+      "expert_id": "demo_simulated_expert"
+    },
+    {
+      "id": "F-006",
+      "created_at": "2026-08-12T00:52:35",
+      "interaction_id": "D-F-006",
+      "scheme_id": "BADL-E006",
+      "scheme_side": "A",
+      "label": "feasible",
+      "reason_codes": [],
+      "reason_text": "固定展示数据中的模拟可行判断",
+      "coupling_feedback": null,
+      "params": {
+        "attr_001": 0,
+        "attr_005": 10000.0,
+        "attr_007": 54
+      },
+      "source": "fixed_demo_simulation",
+      "status": "active",
+      "expert_id": "demo_simulated_expert"
+    }
+  ],
+  "preference_evidence": [
+    {
+      "id": "P-001",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-001",
+      "scheme_a": "BADL-E011",
+      "scheme_b": "BADL-E015",
+      "relation": "A",
+      "winner_id": "BADL-E011",
+      "loser_id": "BADL-E015",
+      "params_a": {
+        "attr_001": 1,
+        "attr_005": 14500.0,
+        "attr_007": 59
+      },
+      "params_b": {
+        "attr_001": 1,
+        "attr_005": 10875.86,
+        "attr_007": 57
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-002",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-002",
+      "scheme_a": "BADL-E032",
+      "scheme_b": "BADL-E042",
+      "relation": "A",
+      "winner_id": "BADL-E032",
+      "loser_id": "BADL-E042",
+      "params_a": {
+        "attr_001": 1,
+        "attr_005": 10789.82,
+        "attr_007": 55
+      },
+      "params_b": {
+        "attr_001": 0,
+        "attr_005": 9609.02,
+        "attr_007": 55
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-003",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-003",
+      "scheme_a": "BADL-E022",
+      "scheme_b": "BADL-E039",
+      "relation": "B",
+      "winner_id": "BADL-E039",
+      "loser_id": "BADL-E022",
+      "params_a": {
+        "attr_001": 1,
+        "attr_005": 9364.41,
+        "attr_007": 53
+      },
+      "params_b": {
+        "attr_001": 1,
+        "attr_005": 10621.26,
+        "attr_007": 56
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-004",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-004",
+      "scheme_a": "BADL-E037",
+      "scheme_b": "BADL-E047",
+      "relation": "B",
+      "winner_id": "BADL-E047",
+      "loser_id": "BADL-E037",
+      "params_a": {
+        "attr_001": 0,
+        "attr_005": 8907.66,
+        "attr_007": 55
+      },
+      "params_b": {
+        "attr_001": 1,
+        "attr_005": 14301.72,
+        "attr_007": 60
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-005",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-005",
+      "scheme_a": "BADL-E024",
+      "scheme_b": "BADL-E028",
+      "relation": "A",
+      "winner_id": "BADL-E024",
+      "loser_id": "BADL-E028",
+      "params_a": {
+        "attr_001": 1,
+        "attr_005": 11976.37,
+        "attr_007": 55
+      },
+      "params_b": {
+        "attr_001": 0,
+        "attr_005": 9629.62,
+        "attr_007": 56
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-006",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-006",
+      "scheme_a": "BADL-E038",
+      "scheme_b": "BADL-E044",
+      "relation": "A",
+      "winner_id": "BADL-E038",
+      "loser_id": "BADL-E044",
+      "params_a": {
+        "attr_001": 1,
+        "attr_005": 9434.91,
+        "attr_007": 54
+      },
+      "params_b": {
+        "attr_001": 0,
+        "attr_005": 11337.27,
+        "attr_007": 55
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-007",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-007",
+      "scheme_a": "BADL-E013",
+      "scheme_b": "BADL-E032",
+      "relation": "B",
+      "winner_id": "BADL-E032",
+      "loser_id": "BADL-E013",
+      "params_a": {
+        "attr_001": 1,
+        "attr_005": 8313.51,
+        "attr_007": 55
+      },
+      "params_b": {
+        "attr_001": 1,
+        "attr_005": 10789.82,
+        "attr_007": 55
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-008",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-008",
+      "scheme_a": "BADL-E043",
+      "scheme_b": "BADL-E046",
+      "relation": "A",
+      "winner_id": "BADL-E043",
+      "loser_id": "BADL-E046",
+      "params_a": {
+        "attr_001": 0,
+        "attr_005": 13847.62,
+        "attr_007": 58
+      },
+      "params_b": {
+        "attr_001": 1,
+        "attr_005": 9414.77,
+        "attr_007": 55
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-009",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-009",
+      "scheme_a": "BADL-E024",
+      "scheme_b": "BADL-E044",
+      "relation": "A",
+      "winner_id": "BADL-E024",
+      "loser_id": "BADL-E044",
+      "params_a": {
+        "attr_001": 1,
+        "attr_005": 11976.37,
+        "attr_007": 55
+      },
+      "params_b": {
+        "attr_001": 0,
+        "attr_005": 11337.27,
+        "attr_007": 55
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-010",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-010",
+      "scheme_a": "BADL-E040",
+      "scheme_b": "BADL-E041",
+      "relation": "A",
+      "winner_id": "BADL-E040",
+      "loser_id": "BADL-E041",
+      "params_a": {
+        "attr_001": 1,
+        "attr_005": 9450.32,
+        "attr_007": 55
+      },
+      "params_b": {
+        "attr_001": 0,
+        "attr_005": 12277.52,
+        "attr_007": 56
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-011",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-011",
+      "scheme_a": "BADL-E019",
+      "scheme_b": "BADL-E034",
+      "relation": "A",
+      "winner_id": "BADL-E019",
+      "loser_id": "BADL-E034",
+      "params_a": {
+        "attr_001": 0,
+        "attr_005": 13121.69,
+        "attr_007": 57
+      },
+      "params_b": {
+        "attr_001": 0,
+        "attr_005": 8807.19,
+        "attr_007": 55
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-012",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-012",
+      "scheme_a": "BADL-E043",
+      "scheme_b": "BADL-E047",
+      "relation": "B",
+      "winner_id": "BADL-E047",
+      "loser_id": "BADL-E043",
+      "params_a": {
+        "attr_001": 0,
+        "attr_005": 13847.62,
+        "attr_007": 58
+      },
+      "params_b": {
+        "attr_001": 1,
+        "attr_005": 14301.72,
+        "attr_007": 60
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-013",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-013",
+      "scheme_a": "BADL-E025",
+      "scheme_b": "BADL-E041",
+      "relation": "A",
+      "winner_id": "BADL-E025",
+      "loser_id": "BADL-E041",
+      "params_a": {
+        "attr_001": 1,
+        "attr_005": 8578.04,
+        "attr_007": 54
+      },
+      "params_b": {
+        "attr_001": 0,
+        "attr_005": 12277.52,
+        "attr_007": 56
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-014",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-014",
+      "scheme_a": "BADL-E013",
+      "scheme_b": "BADL-E014",
+      "relation": "A",
+      "winner_id": "BADL-E013",
+      "loser_id": "BADL-E014",
+      "params_a": {
+        "attr_001": 1,
+        "attr_005": 8313.51,
+        "attr_007": 55
+      },
+      "params_b": {
+        "attr_001": 1,
+        "attr_005": 8893.91,
+        "attr_007": 54
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-015",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-015",
+      "scheme_a": "BADL-E007",
+      "scheme_b": "BADL-E024",
+      "relation": "A",
+      "winner_id": "BADL-E007",
+      "loser_id": "BADL-E024",
+      "params_a": {
+        "attr_001": 1,
+        "attr_005": 13500.0,
+        "attr_007": 58
+      },
+      "params_b": {
+        "attr_001": 1,
+        "attr_005": 11976.37,
+        "attr_007": 55
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-016",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-016",
+      "scheme_a": "BADL-E005",
+      "scheme_b": "BADL-E018",
+      "relation": "A",
+      "winner_id": "BADL-E005",
+      "loser_id": "BADL-E018",
+      "params_a": {
+        "attr_001": 1,
+        "attr_005": 12000.0,
+        "attr_007": 57
+      },
+      "params_b": {
+        "attr_001": 1,
+        "attr_005": 9890.84,
+        "attr_007": 55
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-017",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-017",
+      "scheme_a": "BADL-E001",
+      "scheme_b": "BADL-E043",
+      "relation": "B",
+      "winner_id": "BADL-E043",
+      "loser_id": "BADL-E001",
+      "params_a": {
+        "attr_001": 1,
+        "attr_005": 8500.0,
+        "attr_007": 54
+      },
+      "params_b": {
+        "attr_001": 0,
+        "attr_005": 13847.62,
+        "attr_007": 58
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-018",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-018",
+      "scheme_a": "BADL-E008",
+      "scheme_b": "BADL-E048",
+      "relation": "B",
+      "winner_id": "BADL-E048",
+      "loser_id": "BADL-E008",
+      "params_a": {
+        "attr_001": 0,
+        "attr_005": 11200.0,
+        "attr_007": 56
+      },
+      "params_b": {
+        "attr_001": 1,
+        "attr_005": 12180.27,
+        "attr_007": 55
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-019",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-019",
+      "scheme_a": "BADL-E029",
+      "scheme_b": "BADL-E042",
+      "relation": "A",
+      "winner_id": "BADL-E029",
+      "loser_id": "BADL-E042",
+      "params_a": {
+        "attr_001": 1,
+        "attr_005": 12327.71,
+        "attr_007": 57
+      },
+      "params_b": {
+        "attr_001": 0,
+        "attr_005": 9609.02,
+        "attr_007": 55
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-020",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-020",
+      "scheme_a": "BADL-E006",
+      "scheme_b": "BADL-E012",
+      "relation": "B",
+      "winner_id": "BADL-E012",
+      "loser_id": "BADL-E006",
+      "params_a": {
+        "attr_001": 0,
+        "attr_005": 10000.0,
+        "attr_007": 54
+      },
+      "params_b": {
+        "attr_001": 0,
+        "attr_005": 11800.0,
+        "attr_007": 56
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [],
+      "status": "used_bt_uta",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    },
+    {
+      "id": "P-021",
+      "created_at": "2026-08-12T00:52:39",
+      "interaction_id": "D-P-CONFLICT",
+      "scheme_a": "BADL-E011",
+      "scheme_b": "BADL-E015",
+      "relation": "B",
+      "winner_id": "BADL-E015",
+      "loser_id": "BADL-E011",
+      "params_a": {
+        "attr_001": 1,
+        "attr_005": 14500.0,
+        "attr_007": 59
+      },
+      "params_b": {
+        "attr_001": 1,
+        "attr_005": 10875.86,
+        "attr_007": 57
+      },
+      "confidence": 0.92,
+      "expert_id": "demo_simulated_expert",
+      "revision_history": [
+        {
+          "created_at": "2026-08-12T00:52:40",
+          "review_id": "R-001",
+          "action": "withdraw",
+          "previous": {
+            "status": "used_bt_uta",
+            "relation": "B",
+            "label": null,
+            "winner_id": "BADL-E015",
+            "loser_id": "BADL-E011"
+          }
+        }
+      ],
+      "status": "withdrawn",
+      "learning_context": "generic_product_effectiveness",
+      "source": "fixed_demo_simulation"
+    }
+  ],
+  "review_evidence": [
+    {
+      "id": "R-001",
+      "created_at": "2026-08-12T00:52:40",
+      "type": "preference_pair_conflict",
+      "review_key": "preference_pair_conflict:BADL-E011:BADL-E015:P-001,P-021",
+      "evidence_ids": [
+        "P-001",
+        "P-021"
+      ],
+      "target_evidence_id": "P-021",
+      "status": "resolved_withdraw",
+      "allowed_actions": [
+        "keep",
+        "tie",
+        "reverse",
+        "withdraw"
+      ],
+      "message": "方案对 BADL-E011 / BADL-E015 出现相反胜负判断。默认复核最近证据 P-021。",
+      "diagnostic_active": true,
+      "resolved_at": "2026-08-12T00:52:40",
+      "resolution": {
+        "action": "withdraw",
+        "target_evidence_id": "P-021",
+        "previous": {
+          "status": "used_bt_uta",
+          "relation": "B",
+          "label": null,
+          "winner_id": "BADL-E015",
+          "loser_id": "BADL-E011"
+        }
+      }
+    }
+  ],
+  "review_history": [
+    {
+      "created_at": "2026-08-12T00:52:40",
+      "review_id": "R-001",
+      "review_type": "preference_pair_conflict",
+      "action": "withdraw",
+      "target_evidence_id": "P-021",
+      "previous": {
+        "status": "used_bt_uta",
+        "relation": "B",
+        "label": null,
+        "winner_id": "BADL-E015",
+        "loser_id": "BADL-E011"
+      }
+    }
+  ],
+  "feasibility_weights": {
+    "bias": 2.857041268476324,
+    "range_violation": -3.2,
+    "range_edge": -0.18,
+    "experience_distance": 0.0,
+    "expert_boundary_attr_001_low": -4.0,
+    "expert_boundary_attr_001_high": -4.0,
+    "expert_boundary_attr_005_low": -4.0,
+    "expert_boundary_attr_005_high": -4.0,
+    "expert_boundary_attr_007_low": -4.0,
+    "expert_boundary_attr_007_high": -4.0
+  },
+  "feasibility_model": {
+    "model_type": "explainable_logistic_feasibility_v2_boundary",
+    "training_samples": 54,
+    "expert_samples": 6,
+    "weak_existing_samples": 48,
+    "positive_samples": 54,
+    "negative_samples": 0,
+    "reason_guided_samples": 0,
+    "accuracy": null,
+    "weighted_accuracy": null,
+    "log_loss": 0.0558,
+    "epochs": 240,
+    "feature_labels": {
+      "bias": "基础可行先验",
+      "range_violation": "超出生成范围的硬违反度",
+      "range_edge": "超出已有样本经验范围",
+      "experience_distance": "远离已有工程样本（只表示未知）",
+      "expert_boundary_attr_001_low": "是否应急解锁低于专家反复确认的可行下边界",
+      "expert_boundary_attr_001_high": "是否应急解锁高于专家反复确认的可行上边界",
+      "expert_boundary_attr_005_low": "额定载荷低于专家反复确认的可行下边界",
+      "expert_boundary_attr_005_high": "额定载荷高于专家反复确认的可行上边界",
+      "expert_boundary_attr_007_low": "防护等级低于专家反复确认的可行下边界",
+      "expert_boundary_attr_007_high": "防护等级高于专家反复确认的可行上边界"
+    },
+    "learned_boundaries": [],
+    "mature_boundary_count": 0,
+    "frontier_evidence": 0
+  },
+  "uta_segments": 3,
+  "bt_weights": [
+    0.3410411956,
+    0.3708397356,
+    0.2881190688
+  ],
+  "bt_model": {
+    "model_type": "constrained_feature_bradley_terry",
+    "update_mode": "每条有效偏好后立即用全部有效证据重训",
+    "training_pairs": 20,
+    "strict_pairs": 20,
+    "training_accuracy": 1.0,
+    "log_loss": 0.294,
+    "attribute_weights": {
+      "attr_001": 0.341041,
+      "attr_005": 0.37084,
+      "attr_007": 0.288119
+    },
+    "stage_prior_weights": {
+      "attr_001": 0.3125,
+      "attr_005": 0.3125,
+      "attr_007": 0.375
+    },
+    "requirement_profile_id": null,
+    "weights": [
+      0.3410411956,
+      0.3708397356,
+      0.2881190688
+    ],
+    "status": "online_learning",
+    "learning_context": "generic_product_effectiveness",
+    "generic_preference_pairs": 20,
+    "protocol_used_for_training": false
+  },
+  "uta_increments": [
+    0.1041666667,
+    0.1041666667,
+    0.1041666667,
+    0.1041666667,
+    0.1041666667,
+    0.1041666667,
+    0.125,
+    0.125,
+    0.125
+  ],
+  "uta_model": {
+    "model_type": "additive_piecewise_linear_lp_uta",
+    "requirement_profile_id": null,
+    "segments": 3,
+    "attribute_count": 3,
+    "utility_increment_variables": 9,
+    "free_parameters": 8,
+    "recommended_training_pairs": 12,
+    "evidence_pairs": 20,
+    "training_pairs": 16,
+    "test_pairs": 4,
+    "split_method": "固定哈希 80/20 留出；不足 8 条时暂不留出",
+    "status": "validated",
+    "m1_consistent": true,
+    "m1_label": "通过",
+    "m1_solver_status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+    "m2_total_slack": 0.0,
+    "m2_max_slack": 0.0,
+    "high_tolerance_threshold": 0.004,
+    "high_tolerance_pairs": 0,
+    "m3": {
+      "status": "not_required",
+      "success": true,
+      "minimum_conflicts": 0,
+      "conflicting_evidence_ids": []
+    },
+    "training_accuracy": 1.0,
+    "test_accuracy": 1.0,
+    "judgment_consistency": 1.0,
+    "judgment_consistency_definition": "全体有效判断在最小容忍UTA模型下的拟合正确率",
+    "cross_validation": {
+      "status": "completed",
+      "folds": 3,
+      "evaluated_pairs": 20,
+      "accuracy": 1.0,
+      "fold_results": [
+        {
+          "fold": 1,
+          "training_pairs": 11,
+          "test_pairs": 9,
+          "accuracy": 1.0
+        },
+        {
+          "fold": 2,
+          "training_pairs": 15,
+          "test_pairs": 5,
+          "accuracy": 1.0
+        },
+        {
+          "fold": 3,
+          "training_pairs": 14,
+          "test_pairs": 6,
+          "accuracy": 1.0
+        }
+      ]
+    },
+    "whole_scheme_holdout": {
+      "status": "completed",
+      "held_out_schemes": [
+        "BADL-E012",
+        "BADL-E014",
+        "BADL-E025",
+        "BADL-E037",
+        "BADL-E044",
+        "BADL-E046",
+        "BADL-E047",
+        "BADL-E048"
+      ],
+      "training_pairs": 11,
+      "test_pairs": 9,
+      "accuracy": 1.0
+    },
+    "generalization_status": "whole_scheme_supported",
+    "validation_increments": [
+      [
+        0.1041666667,
+        0.1041666667,
+        0.1041666667,
+        0.1041666667,
+        0.1041666667,
+        0.1041666667,
+        0.125,
+        0.125,
+        0.125
+      ],
+      [
+        0.1041666667,
+        0.1041666667,
+        0.1041666667,
+        0.1041666667,
+        0.1041666667,
+        0.1041666667,
+        0.125,
+        0.125,
+        0.125
+      ],
+      [
+        0.1041666667,
+        0.1041666667,
+        0.1041666667,
+        0.1041666667,
+        0.1041666667,
+        0.1041666667,
+        0.125,
+        0.125,
+        0.125
+      ],
+      [
+        0.1041666667,
+        0.1041666667,
+        0.1041666667,
+        0.1041666667,
+        0.1041666667,
+        0.1041666667,
+        0.125,
+        0.125,
+        0.125
+      ]
+    ],
+    "robust_models": [
+      {
+        "source": "main_training",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      },
+      {
+        "source": "full_evidence_minimum_tolerance",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      },
+      {
+        "source": "cross_validation_01",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      },
+      {
+        "source": "cross_validation_02",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      },
+      {
+        "source": "cross_validation_03",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      },
+      {
+        "source": "whole_scheme_holdout",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      },
+      {
+        "source": "bootstrap_01",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      },
+      {
+        "source": "bootstrap_02",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      },
+      {
+        "source": "bootstrap_03",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      },
+      {
+        "source": "bootstrap_04",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      },
+      {
+        "source": "bootstrap_05",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      },
+      {
+        "source": "bootstrap_06",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      },
+      {
+        "source": "bootstrap_07",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      },
+      {
+        "source": "bootstrap_08",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      },
+      {
+        "source": "bootstrap_09",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      },
+      {
+        "source": "bootstrap_10",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      },
+      {
+        "source": "bootstrap_11",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      },
+      {
+        "source": "bootstrap_12",
+        "accuracy": 1.0,
+        "increments": [
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.1041666667,
+          0.125,
+          0.125,
+          0.125
+        ]
+      }
+    ],
+    "robust_model_count": 18,
+    "robust_unique_model_count": 1,
+    "robust_method": "主UTA解、全证据最小容忍解、交叉验证、整方案留出和确定性Bootstrap重训集合",
+    "rank_stability": [
+      {
+        "scheme_id": "BADL-E047",
+        "mean_score": 96.88,
+        "p10": 96.88,
+        "p90": 96.88,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E011",
+        "mean_score": 92.41,
+        "p10": 92.41,
+        "p90": 92.41,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E007",
+        "mean_score": 82.59,
+        "p10": 82.59,
+        "p90": 82.59,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E045",
+        "mean_score": 80.84,
+        "p10": 80.84,
+        "p90": 80.84,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E031",
+        "mean_score": 77.75,
+        "p10": 77.75,
+        "p90": 77.75,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E009",
+        "mean_score": 74.11,
+        "p10": 74.11,
+        "p90": 74.11,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E029",
+        "mean_score": 72.0,
+        "p10": 72.0,
+        "p90": 72.0,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E005",
+        "mean_score": 70.54,
+        "p10": 70.54,
+        "p90": 70.54,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E015",
+        "mean_score": 65.52,
+        "p10": 65.52,
+        "p90": 65.52,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E035",
+        "mean_score": 65.38,
+        "p10": 65.38,
+        "p90": 65.38,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E017",
+        "mean_score": 63.74,
+        "p10": 63.74,
+        "p90": 63.74,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E048",
+        "mean_score": 60.63,
+        "p10": 60.63,
+        "p90": 60.63,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E003",
+        "mean_score": 59.82,
+        "p10": 59.82,
+        "p90": 59.82,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E024",
+        "mean_score": 59.72,
+        "p10": 59.72,
+        "p90": 59.72,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E039",
+        "mean_score": 59.02,
+        "p10": 59.02,
+        "p90": 59.02,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E036",
+        "mean_score": 58.02,
+        "p10": 58.02,
+        "p90": 58.02,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E023",
+        "mean_score": 57.4,
+        "p10": 57.4,
+        "p90": 57.4,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E016",
+        "mean_score": 57.22,
+        "p10": 57.22,
+        "p90": 57.22,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E032",
+        "mean_score": 54.42,
+        "p10": 54.42,
+        "p90": 54.42,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E043",
+        "mean_score": 52.89,
+        "p10": 52.89,
+        "p90": 52.89,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E018",
+        "mean_score": 50.41,
+        "p10": 50.41,
+        "p90": 50.41,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E040",
+        "mean_score": 48.44,
+        "p10": 48.44,
+        "p90": 48.44,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E046",
+        "mean_score": 48.28,
+        "p10": 48.28,
+        "p90": 48.28,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E026",
+        "mean_score": 45.71,
+        "p10": 45.71,
+        "p90": 45.71,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E021",
+        "mean_score": 44.63,
+        "p10": 44.63,
+        "p90": 44.63,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E019",
+        "mean_score": 44.29,
+        "p10": 44.29,
+        "p90": 44.29,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E013",
+        "mean_score": 43.36,
+        "p10": 43.36,
+        "p90": 43.36,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E038",
+        "mean_score": 43.01,
+        "p10": 43.01,
+        "p90": 43.01,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E014",
+        "mean_score": 40.6,
+        "p10": 40.6,
+        "p90": 40.6,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E025",
+        "mean_score": 39.19,
+        "p10": 39.19,
+        "p90": 39.19,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E001",
+        "mean_score": 38.84,
+        "p10": 38.84,
+        "p90": 38.84,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E022",
+        "mean_score": 37.34,
+        "p10": 37.34,
+        "p90": 37.34,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E033",
+        "mean_score": 37.15,
+        "p10": 37.15,
+        "p90": 37.15,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E041",
+        "mean_score": 35.17,
+        "p10": 35.17,
+        "p90": 35.17,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E012",
+        "mean_score": 33.04,
+        "p10": 33.04,
+        "p90": 33.04,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E008",
+        "mean_score": 30.36,
+        "p10": 30.36,
+        "p90": 30.36,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E020",
+        "mean_score": 29.34,
+        "p10": 29.34,
+        "p90": 29.34,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E044",
+        "mean_score": 25.61,
+        "p10": 25.61,
+        "p90": 25.61,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E028",
+        "mean_score": 23.35,
+        "p10": 23.35,
+        "p90": 23.35,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E027",
+        "mean_score": 22.72,
+        "p10": 22.72,
+        "p90": 22.72,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E004",
+        "mean_score": 18.75,
+        "p10": 18.75,
+        "p90": 18.75,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E042",
+        "mean_score": 17.9,
+        "p10": 17.9,
+        "p90": 17.9,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E002",
+        "mean_score": 16.07,
+        "p10": 16.07,
+        "p90": 16.07,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E037",
+        "mean_score": 14.77,
+        "p10": 14.77,
+        "p90": 14.77,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E034",
+        "mean_score": 14.32,
+        "p10": 14.32,
+        "p90": 14.32,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E006",
+        "mean_score": 14.29,
+        "p10": 14.29,
+        "p90": 14.29,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E030",
+        "mean_score": 10.2,
+        "p10": 10.2,
+        "p90": 10.2,
+        "width": 0.0
+      },
+      {
+        "scheme_id": "BADL-E010",
+        "mean_score": 9.82,
+        "p10": 9.82,
+        "p90": 9.82,
+        "width": 0.0
+      }
+    ],
+    "mean_rank_interval_width": 0.0,
+    "tolerances": [
+      {
+        "evidence_id": "P-001",
+        "relation": "A",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-002",
+        "relation": "A",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-003",
+        "relation": "B",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-004",
+        "relation": "B",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-005",
+        "relation": "A",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-006",
+        "relation": "A",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-007",
+        "relation": "B",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-008",
+        "relation": "A",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-009",
+        "relation": "A",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-010",
+        "relation": "A",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-011",
+        "relation": "A",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-012",
+        "relation": "B",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-013",
+        "relation": "A",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-014",
+        "relation": "A",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-015",
+        "relation": "A",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-016",
+        "relation": "A",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-017",
+        "relation": "B",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-018",
+        "relation": "B",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-019",
+        "relation": "A",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      },
+      {
+        "evidence_id": "P-020",
+        "relation": "B",
+        "slack": 0.0,
+        "high_tolerance": false,
+        "m3_conflict": false
+      }
+    ],
+    "attribute_weights": {
+      "attr_001": 0.3125,
+      "attr_005": 0.3125,
+      "attr_007": 0.375
+    },
+    "stage_prior_weights": {
+      "attr_001": 0.3125,
+      "attr_005": 0.3125,
+      "attr_007": 0.375
+    },
+    "marginal_curves": [
+      {
+        "key": "attr_001",
+        "label": "是否应急解锁",
+        "unit": "-",
+        "preference_direction": "higher_better",
+        "marginal_trend": "具备应急解锁作为虚拟正向偏好",
+        "attribute_weight": 0.3125,
+        "requirement_type": null,
+        "points": [
+          {
+            "benefit": 0.0,
+            "raw_value": 0.0,
+            "utility": 0.0
+          },
+          {
+            "benefit": 0.333333,
+            "raw_value": 0.0,
+            "utility": 0.104167
+          },
+          {
+            "benefit": 0.666667,
+            "raw_value": 1.0,
+            "utility": 0.208333
+          },
+          {
+            "benefit": 1.0,
+            "raw_value": 1.0,
+            "utility": 0.3125
+          }
+        ],
+        "increments": [
+          0.10416667,
+          0.10416667,
+          0.10416667
+        ]
+      },
+      {
+        "key": "attr_005",
+        "label": "额定载荷",
+        "unit": "N",
+        "preference_direction": "higher_better",
+        "marginal_trend": "边际收益递减",
+        "attribute_weight": 0.3125,
+        "requirement_type": null,
+        "points": [
+          {
+            "benefit": 0.0,
+            "raw_value": 8000.0,
+            "utility": 0.0
+          },
+          {
+            "benefit": 0.333333,
+            "raw_value": 10333.0,
+            "utility": 0.104167
+          },
+          {
+            "benefit": 0.666667,
+            "raw_value": 12667.0,
+            "utility": 0.208333
+          },
+          {
+            "benefit": 1.0,
+            "raw_value": 15000.0,
+            "utility": 0.3125
+          }
+        ],
+        "increments": [
+          0.10416667,
+          0.10416667,
+          0.10416667
+        ]
+      },
+      {
+        "key": "attr_007",
+        "label": "防护等级",
+        "unit": "IP",
+        "preference_direction": "higher_better",
+        "marginal_trend": "边际收益递减",
+        "attribute_weight": 0.375,
+        "requirement_type": null,
+        "points": [
+          {
+            "benefit": 0.0,
+            "raw_value": 53.0,
+            "utility": 0.0
+          },
+          {
+            "benefit": 0.333333,
+            "raw_value": 55.0,
+            "utility": 0.125
+          },
+          {
+            "benefit": 0.666667,
+            "raw_value": 58.0,
+            "utility": 0.25
+          },
+          {
+            "benefit": 1.0,
+            "raw_value": 60.0,
+            "utility": 0.375
+          }
+        ],
+        "increments": [
+          0.125,
+          0.125,
+          0.125
+        ]
+      }
+    ],
+    "increments": [
+      0.1041666667,
+      0.1041666667,
+      0.1041666667,
+      0.1041666667,
+      0.1041666667,
+      0.1041666667,
+      0.125,
+      0.125,
+      0.125
+    ],
+    "learning_context": "generic_product_effectiveness",
+    "generic_preference_pairs": 20,
+    "protocol_used_for_training": false
+  },
+  "unknown_evaluations": [
+    {
+      "id": "DEMO-U-01",
+      "created_at": "2026-08-12T00:52:40",
+      "params": {
+        "attr_001": 1,
+        "attr_005": 14301.72,
+        "attr_007": 60
+      },
+      "result": {
+        "status": "likely_feasible_learned",
+        "risk": 0.1,
+        "physics_status": "likely_feasible_by_coupling",
+        "physics_risk": 0.1,
+        "learned_feasibility_probability": 0.946,
+        "feasibility_risk_contributors": [],
+        "learned_boundary_violations": [],
+        "baseline_score": 133.94,
+        "bt_score": 96.3,
+        "bt_training_pairs": 20,
+        "uta_score": 96.88,
+        "uta_score_interval": [
+          96.88,
+          96.88
+        ],
+        "uta_contributions": [
+          {
+            "key": "attr_001",
+            "label": "是否应急解锁",
+            "unit": "-",
+            "raw_value": 1,
+            "utility": 0.3125,
+            "score_points": 31.25
+          },
+          {
+            "key": "attr_005",
+            "label": "额定载荷",
+            "unit": "N",
+            "raw_value": 14301.72,
+            "utility": 0.281327,
+            "score_points": 28.133
+          },
+          {
+            "key": "attr_007",
+            "label": "防护等级",
+            "unit": "IP",
+            "raw_value": 60,
+            "utility": 0.375,
+            "score_points": 37.5
+          }
+        ],
+        "uta_status": "validated",
+        "generalization_status": "whole_scheme_supported",
+        "feasibility_confidence": "初步：专家证据较少",
+        "effectiveness_confidence": "较高：整方案留出与交叉验证提供支持",
+        "assessment_basis": [
+          "48 个 Excel 已有方案形成经验分布",
+          "0 条有向耦合关系和 0 个条件代理",
+          "6 条专家可行性证据",
+          "20 条有效偏好用于 BT，16 条用于 UTA 训练"
+        ],
+        "effectiveness_score": 133.94,
+        "effectiveness_source": "新技术协议100分相对评分（通用LP-UTA学习权重）",
+        "effectiveness_status": "protocol_relative",
+        "score_label": "新技术协议100分相对评分（通用LP-UTA学习权重）（protocol_relative）",
+        "hard_violations": [],
+        "experience_extrapolations": [],
+        "top_contributors": [
+          {
+            "feature": "attr_001",
+            "label": "是否应急解锁",
+            "value": 1.0,
+            "contribution": 0.333
+          },
+          {
+            "feature": "attr_007",
+            "label": "防护等级",
+            "value": 1.0,
+            "contribution": 0.333
+          },
+          {
+            "feature": "attr_005",
+            "label": "额定载荷",
+            "value": 0.9,
+            "contribution": 0.3
+          }
+        ],
+        "coupling_status": "0 个耦合目标均位于已有样本条件经验带内。",
+        "coupling_assessments": [],
+        "requirement_assessment": {
+          "profile_id": "BADL-REQ-001",
+          "profile_name": "基础航空舱门锁虚拟目标协议",
+          "coverage": 1.339363,
+          "coverage_percent": 133.94,
+          "decision": "direct_reuse",
+          "decision_label": "达到或超过协议，具备直接复用基础",
+          "hard_gap_count": 0,
+          "hard_gaps": [],
+          "attributes": [
+            {
+              "attribute_key": "attr_001",
+              "attribute_label": "是否应急解锁",
+              "unit": "-",
+              "value": 1.0,
+              "requirement_type": "higher_better",
+              "requirement_label": "越大越好",
+              "requirement_text": "协议100分参考值 1 -",
+              "satisfaction": 1.0,
+              "weight": 0.3125,
+              "weighted_score": 0.3125,
+              "met": true,
+              "hard_requirement": false,
+              "hard_gap": false,
+              "gap": 0.0,
+              "explanation": "是否应急解锁达到100分参考值；该属性相对得分 100.0 分。",
+              "design_stage": 1,
+              "reference_value": 1.0,
+              "relative_score_percent": 100.0,
+              "better_than_reference": false
+            },
+            {
+              "attribute_key": "attr_005",
+              "attribute_label": "额定载荷",
+              "unit": "N",
+              "value": 14301.72,
+              "requirement_type": "higher_better",
+              "requirement_label": "越大越好",
+              "requirement_text": "协议100分参考值 11500 N",
+              "satisfaction": 1.400246,
+              "weight": 0.3125,
+              "weighted_score": 0.437577,
+              "met": true,
+              "hard_requirement": false,
+              "hard_gap": false,
+              "gap": 0.0,
+              "explanation": "额定载荷达到100分参考值，优于协议参考；该属性相对得分 140.0 分。",
+              "design_stage": 1,
+              "reference_value": 11500.0,
+              "relative_score_percent": 140.02,
+              "better_than_reference": true
+            },
+            {
+              "attribute_key": "attr_007",
+              "attribute_label": "防护等级",
+              "unit": "IP",
+              "value": 60.0,
+              "requirement_type": "higher_better",
+              "requirement_label": "越大越好",
+              "requirement_text": "协议100分参考值 56 IP",
+              "satisfaction": 1.571429,
+              "weight": 0.375,
+              "weighted_score": 0.589286,
+              "met": true,
+              "hard_requirement": false,
+              "hard_gap": false,
+              "gap": 0.0,
+              "explanation": "防护等级达到100分参考值，优于协议参考；该属性相对得分 157.1 分。",
+              "design_stage": 2,
+              "reference_value": 56.0,
+              "relative_score_percent": 157.14,
+              "better_than_reference": true
+            }
+          ],
+          "stage_weight_share": {
+            "1": 0.625,
+            "2": 0.37499999999999994
+          },
+          "thresholds": {
+            "direct_reuse": 1.0,
+            "improvement": 0.8,
+            "redesign": 0.6
+          },
+          "reference_score": 100.0,
+          "scoring_mode": "protocol_reference_100",
+          "weight_source": "通用LP-UTA学习权重"
+        },
+        "reuse_recommendation": "达到或超过协议，具备直接复用基础"
+      },
+      "source": "fixed_demo_simulation"
+    }
+  ],
+  "range_update_history": [],
+  "learning_events": [
+    {
+      "id": "E-001",
+      "created_at": "2026-08-12T00:52:32",
+      "type": "project_loaded",
+      "title": "Excel 项目已载入",
+      "detail": "识别 3 个属性、48 个已有方案和 0 条耦合边；已拟合 0 个单调条件代理，0 个目标以方向先验模式启动。"
+    },
+    {
+      "id": "E-002",
+      "created_at": "2026-08-12T00:52:40",
+      "type": "review_resolved",
+      "title": "复核项已处理",
+      "detail": "R-001 对证据 P-021 执行 withdraw；相关模型已按当前有效证据更新。"
+    },
+    {
+      "id": "E-003",
+      "created_at": "2026-08-12T00:52:40",
+      "type": "fixed_demo_loaded",
+      "title": "固定展示数据已载入",
+      "detail": "已载入 20 条模拟有效偏好、6 条模拟可行性证据，并保留一次已处理的冲突复核历史。所有证据均标记为模拟来源。"
+    },
+    {
+      "id": "E-004",
+      "created_at": "2026-08-14T01:35:33",
+      "type": "protocol_anchored_robust_uta_upgrade",
+      "title": "未知方案评分已升级为协议锚定稳健UTA",
+      "detail": "已从状态版本 10 升级；原专家判断全部保留并重新训练。协议固定为100分，未知方案使用完整UTA边际曲线和稳健模型集合评分。"
+    }
+  ],
+  "virtual_fixture": {
+    "product_code": "AIRCRAFT_DOOR_LOCK_BASIC_DEMO",
+    "source": "basic_aircraft_door_lock_history_demo.xlsx",
+    "disclaimer": "虚拟专家状态，仅用于最终接口兼容性测试"
+  },
+  "compatibility_note": "V11 state produced by official V10-to-V11 migration and retraining path"
+}

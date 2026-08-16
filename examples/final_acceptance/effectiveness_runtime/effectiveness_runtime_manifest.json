@@ -1,0 +1,70 @@
+{
+  "format_version": "effectiveness-original-runtime-package-1.0",
+  "product_code": "AIRCRAFT_DOOR_LOCK_BASIC_DEMO",
+  "product_name": "基础航空舱门锁（虚拟功能演示）",
+  "model_version": "effect-v10-86271d2fcf62-4a3bcb603e81",
+  "algorithm_version": "V10-effectiveness-runtime",
+  "profile_version": 10,
+  "source_root": "source",
+  "workbook": "data/基础航空舱门锁_效能项目.xlsx",
+  "state": "state/state_86271d2fcf62121d.json",
+  "workbook_fingerprint": "7b698fc20e23f463",
+  "learning_fingerprint": "86271d2fcf62121d",
+  "state_sha256": "4a3bcb603e814e95138775b883f0c7fb894afd2f53e23702d84567a65ffebd05",
+  "active_protocol": {
+    "profile_id": "BADL-REQ-001",
+    "profile_name": "基础航空舱门锁虚拟目标协议",
+    "reference_score": 100.0,
+    "reference_digest": "639538d86d9ebd7e137304e8982ddef5eb355ec8bf434d1ef1dced24f7e7c07e",
+    "reference_values": {
+      "attr_001": 1.0,
+      "attr_005": 11500.0,
+      "attr_007": 56.0
+    },
+    "mode": "fixed_packaged_protocol"
+  },
+  "state_mode": "learned_state",
+  "capabilities": {
+    "dynamic_target_protocol": false,
+    "packaged_protocol_count": 1,
+    "counterfactual_improvement": false,
+    "coupling_model_count": 0,
+    "coupling_edge_count": 0,
+    "learned_boundary_count": 0
+  },
+  "files": [
+    {
+      "path": "source/interactive_project_app.py",
+      "sha256": "8b67e9ab1cf344467b5213a15d0a4378eda0d9d6af0823ceb0efeb27b6ec502d"
+    },
+    {
+      "path": "source/project_excel.py",
+      "sha256": "dc0f6cf5e14b6fd80776070e657ffaf5a91718a0575f7a499aea91f41cf03728"
+    },
+    {
+      "path": "source/coupling_model.py",
+      "sha256": "6f9255a72b84374675d273b15a9f19073851d26c017d399d01e563a4e4f58c82"
+    },
+    {
+      "path": "source/feasibility_model.py",
+      "sha256": "374ea3606fe894d655ff98a5cac08f368ec75df7cca15e66bdd4e1c6519556f3"
+    },
+    {
+      "path": "source/preference_models.py",
+      "sha256": "e727692a98521edab92fce889d2cb837f929890eac2a50af6308a00805495cbf"
+    },
+    {
+      "path": "source/requirement_model.py",
+      "sha256": "87b10548ec2323fdb443bf65ae5787200a393ff26b7f9f3cfa4c7da8e70f169b"
+    },
+    {
+      "path": "data/基础航空舱门锁_效能项目.xlsx",
+      "sha256": "7b698fc20e23f463f2f911a7141cbca7d750d6086b698008b29a0a525126f518"
+    },
+    {
+      "path": "state/state_86271d2fcf62121d.json",
+      "sha256": "4a3bcb603e814e95138775b883f0c7fb894afd2f53e23702d84567a65ffebd05"
+    }
+  ],
+  "prediction_equivalence": "loads the same source modules + Workbook + State and calls ProjectApp.evaluate"
+}

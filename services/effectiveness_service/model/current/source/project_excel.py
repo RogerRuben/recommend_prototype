@@ -362,7 +362,7 @@ def parse_design_stage(value: Any) -> Optional[int]:
 
 
 def stable_default_key(index: int) -> str:
-    return f"attr_{index:02d}"
+    return f"attr_{index:03d}"
 
 
 def validate_key(value: str, label: str) -> str:

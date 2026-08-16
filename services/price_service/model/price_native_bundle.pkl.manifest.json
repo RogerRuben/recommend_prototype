@@ -1,26 +1,138 @@
 {
-  "format_version": "price-native-bundle-manifest-1.0",
-  "product_code": "VIRTUAL_COUPLED_ACTUATOR",
-  "product_name": "多类型耦合执行机构（虚拟验收成品）",
-  "model_version": "virtual-native-price-20260730",
-  "virtual_fixture": true,
-  "training_seed": 20260730,
-  "training_rows": 520,
-  "feature_roles": {
-    "shared": [
-      "rated_thrust_n",
-      "stroke_mm",
-      "speed_mm_s",
-      "protection_grade",
-      "overload_protection",
-      "mass_kg"
-    ],
-    "price_only": [
-      "material_grade",
-      "imported_ratio_pct",
-      "warranty_years",
-      "batch_size"
+  "format_version": "price-native-bundle-1.0",
+  "product_code": "AIRCRAFT_DOOR_LOCK_BASIC_DEMO",
+  "product_name": "AIRCRAFT_DOOR_LOCK_BASIC_DEMO",
+  "model_version": "price-native-notebook",
+  "feature_order": [
+    "attr_001",
+    "attr_002",
+    "attr_003",
+    "attr_004",
+    "attr_005",
+    "attr_006",
+    "attr_007",
+    "Cluster"
+  ],
+  "model_count": 6,
+  "model_names": [
+    "lasso",
+    "ridge",
+    "random_forest",
+    "extra_trees",
+    "svr",
+    "gbdt"
+  ],
+  "ensemble": {
+    "aggregation": "weighted_mean_price",
+    "members": [
+      {
+        "name": "lasso",
+        "weight": 0.25871790185828375
+      },
+      {
+        "name": "ridge",
+        "weight": 0.2584548840497163
+      },
+      {
+        "name": "random_forest",
+        "weight": 0.08039417200701689
+      },
+      {
+        "name": "extra_trees",
+        "weight": 0.11450410313366705
+      },
+      {
+        "name": "svr",
+        "weight": 0.25118484190832274
+      },
+      {
+        "name": "gbdt",
+        "weight": 0.036744097042993105
+      }
     ]
   },
-  "sha256": "c99c1fec3a2f4745b854f20abff64bdcbd73b2696118ae3893cf330a4c187287"
+  "model_sources": [
+    {
+      "name": "lasso",
+      "source": "notebook_namespace",
+      "variable": "lasso_model",
+      "class": "sklearn.linear_model._coordinate_descent.Lasso"
+    },
+    {
+      "name": "ridge",
+      "source": "notebook_namespace",
+      "variable": "ridge_model",
+      "class": "sklearn.linear_model._ridge.Ridge"
+    },
+    {
+      "name": "random_forest",
+      "source": "notebook_namespace",
+      "variable": "rf_model",
+      "class": "sklearn.ensemble._forest.RandomForestRegressor"
+    },
+    {
+      "name": "extra_trees",
+      "source": "notebook_namespace",
+      "variable": "et_model",
+      "class": "sklearn.ensemble._forest.ExtraTreesRegressor"
+    },
+    {
+      "name": "svr",
+      "source": "notebook_namespace",
+      "variable": "svr_model",
+      "class": "sklearn.svm._classes.SVR"
+    },
+    {
+      "name": "gbdt",
+      "source": "notebook_namespace",
+      "variable": "gbdt_model",
+      "class": "sklearn.ensemble._gb.GradientBoostingRegressor"
+    }
+  ],
+  "export_notes": {
+    "discovery_mode": "namespace",
+    "detected_model_count": 6,
+    "detected_models": [
+      "lasso",
+      "ridge",
+      "random_forest",
+      "extra_trees",
+      "svr",
+      "gbdt"
+    ],
+    "included_model_count": 6,
+    "included_models": [
+      "lasso",
+      "ridge",
+      "random_forest",
+      "extra_trees",
+      "svr",
+      "gbdt"
+    ],
+    "omitted_models": [],
+    "weight_source": "notebook_weights",
+    "strict_explicit_selection": false,
+    "uses_joblib": false,
+    "prediction_equivalence": "same saved estimators + same scaler + selected weights + same output transform"
+  },
+  "residual_calibration": {
+    "space": "native",
+    "half_width_native": 2459374.6689752825,
+    "coverage": 0.95,
+    "source": "recomputed_from_selected_models",
+    "sample_count": 4
+  },
+  "training_environment": {
+    "python": "3.10.9",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "numpy": "1.23.5",
+    "scikit_learn": "1.2.1",
+    "xgboost": "1.7.6",
+    "joblib": "1.1.1"
+  },
+  "required_modules": [
+    "sklearn"
+  ],
+  "bundle_file": "price_native_bundle.pkl",
+  "bundle_sha256": "dd17a8a7bb73a1212f9c194d737724b125480f03887962393830d0ea67a52101"
 }

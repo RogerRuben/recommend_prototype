@@ -1,0 +1,111 @@
+{
+  "virtual_fixture": true,
+  "product_code": "AIRCRAFT_DOOR_LOCK_BASIC_DEMO",
+  "model_version": "basic-aircraft-door-lock-price-20260812",
+  "source_rows": 12,
+  "augmented_training_rows": 432,
+  "augmented_test_rows": 96,
+  "models": {
+    "ridge": {
+      "rmse_wan": 0.26510786104394424,
+      "mae_wan": 0.21030451634014646,
+      "r2": 0.9821602156734295
+    },
+    "gbdt": {
+      "rmse_wan": 0.1719729992667722,
+      "mae_wan": 0.1373743926116425,
+      "r2": 0.9924930258677814
+    },
+    "random_forest": {
+      "rmse_wan": 0.17323432108523998,
+      "mae_wan": 0.14245324145545488,
+      "r2": 0.9923825034713298
+    }
+  },
+  "ensemble_weights": {
+    "ridge": 0.24558503382532712,
+    "gbdt": 0.3785857274073648,
+    "random_forest": 0.37582923876730806
+  },
+  "source_known_price_mae_wan": 0.057025090909090116,
+  "source_known_price_max_error_wan": 0.1434459999999973,
+  "source_predictions": [
+    {
+      "scheme_id": "LOCK-B001",
+      "historical_price_wan": 12.6,
+      "predicted_price_wan": 12.652601,
+      "filled_inputs": {}
+    },
+    {
+      "scheme_id": "LOCK-B002",
+      "historical_price_wan": 13.8,
+      "predicted_price_wan": 13.805042,
+      "filled_inputs": {}
+    },
+    {
+      "scheme_id": "LOCK-B003",
+      "historical_price_wan": 15.2,
+      "predicted_price_wan": 15.166628,
+      "filled_inputs": {}
+    },
+    {
+      "scheme_id": "LOCK-B004",
+      "historical_price_wan": null,
+      "predicted_price_wan": 14.420573,
+      "filled_inputs": {}
+    },
+    {
+      "scheme_id": "LOCK-B005",
+      "historical_price_wan": 16.9,
+      "predicted_price_wan": 16.867494,
+      "filled_inputs": {}
+    },
+    {
+      "scheme_id": "LOCK-B006",
+      "historical_price_wan": 14.7,
+      "predicted_price_wan": 14.600225,
+      "filled_inputs": {}
+    },
+    {
+      "scheme_id": "LOCK-B007",
+      "historical_price_wan": 18.3,
+      "predicted_price_wan": 18.370789,
+      "filled_inputs": {}
+    },
+    {
+      "scheme_id": "LOCK-B008",
+      "historical_price_wan": 15.8,
+      "predicted_price_wan": 15.856886,
+      "filled_inputs": {}
+    },
+    {
+      "scheme_id": "LOCK-B009",
+      "historical_price_wan": 17.5,
+      "predicted_price_wan": 17.430257,
+      "filled_inputs": {}
+    },
+    {
+      "scheme_id": "LOCK-B010",
+      "historical_price_wan": 13.4,
+      "predicted_price_wan": 13.431171,
+      "filled_inputs": {}
+    },
+    {
+      "scheme_id": "LOCK-B011",
+      "historical_price_wan": 19.6,
+      "predicted_price_wan": 19.631945,
+      "filled_inputs": {}
+    },
+    {
+      "scheme_id": "LOCK-B012",
+      "historical_price_wan": 16.1,
+      "predicted_price_wan": 16.243446,
+      "filled_inputs": {}
+    }
+  ],
+  "bundle_sha256": "dffa3e6e73061df93ec549f4f4fe6c15ac2db1b958b27832f50ed8074f0376d5",
+  "required_modules": [
+    "sklearn"
+  ],
+  "disclaimer": "确定性虚拟功能模型，不代表真实航空产品价格。"
+}

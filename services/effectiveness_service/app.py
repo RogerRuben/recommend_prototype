@@ -114,10 +114,11 @@ def _physical_gate(probability, status, hard_violations, boundary_violations, co
 class OriginalRuntimeBackend(object):
     name = "original_effectiveness_runtime"
 
-    def __init__(self, source_root, workbook, state_path=None, state_dir=None):
+    def __init__(self, source_root, workbook, state_path=None, state_dir=None, product_code_override=None):
         self.source_root = Path(source_root).resolve()
         self.workbook = Path(workbook).resolve()
         self.state_path = Path(state_path).resolve() if state_path else None
+        self.product_code_override = str(product_code_override or "").strip()
         required = ["interactive_project_app.py", "project_excel.py", "coupling_model.py", "feasibility_model.py", "preference_models.py", "requirement_model.py"]
         missing = [name for name in required if not (self.source_root / name).is_file()]
         if missing:
@@ -148,7 +149,8 @@ class OriginalRuntimeBackend(object):
             self.state = self.app.load_state()
         else:
             self.state = self.app.load_state(reset=True)
-        self.product_code = str(getattr(self.app.project, "project_code", None) or getattr(self.app.project, "product_code", None) or self.app.project.learning_fingerprint[:16])
+        workbook_code = str(getattr(self.app.project, "project_code", None) or getattr(self.app.project, "product_code", None) or self.app.project.learning_fingerprint[:16])
+        self.product_code = self.product_code_override or workbook_code
         self.product_name = str(getattr(self.app.project, "project_name", None) or getattr(self.app.project, "product_name", None) or "效能项目")
         self.state_sha256 = _sha(self.app.state_path) if self.app.state_path.is_file() else _json_sha(self.state)
         self.algorithm_version = "V%d-PAR-UTA" % self.profile_version if self.profile_version >= 11 else "V%d-effectiveness-runtime" % self.profile_version
@@ -558,7 +560,10 @@ def backend_from_package(manifest_path):
     state = root / raw.get("state") if raw.get("state") else None
     # Use a private temporary State copy so the installed artifact directory can
     # be mounted read-only. The packaged state file itself is never modified.
-    backend = OriginalRuntimeBackend(source, workbook, state)
+    backend = OriginalRuntimeBackend(
+        source, workbook, state,
+        product_code_override=raw.get("product_code") if raw.get("product_code_overridden") else None,
+    )
     if str(backend.app.project.learning_fingerprint) != str(raw.get("learning_fingerprint")):
         raise RuntimeError("效能运行包学习指纹校验失败")
     if raw.get("profile_version") is not None and int(raw.get("profile_version")) != backend.profile_version:

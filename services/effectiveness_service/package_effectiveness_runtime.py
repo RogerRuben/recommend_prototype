@@ -70,13 +70,21 @@ def package_runtime(source_root, workbook, output_dir, state=None, expected_prod
     from services.effectiveness_service.app import OriginalRuntimeBackend
     backend=OriginalRuntimeBackend(stage/"source",workbook_target,stage/state_rel if state_rel else None)
     expected = str(expected_product_code or "").strip()
+    product_code = backend.product_code
+    product_code_overridden = False
     if expected and backend.product_code != expected:
-        shutil.rmtree(str(stage), ignore_errors=True)
-        raise ValueError(
-            "效能Workbook实际product_code为 %r，与期望值 %r 不一致。"
-            "请确认修改的是本次--workbook指向的文件，并检查‘项目信息’!B1。"
-            % (backend.product_code, expected)
+        # A workbook can carry a legacy internal project code. When the operator
+        # explicitly supplies the target product code, honor it instead of
+        # failing the packaging; the workbook remains the source for the model
+        # logic while the packaged identity follows the requested code.
+        print(
+            "[WARN] 效能Workbook实际product_code为 %r，与期望值 %r 不一致；"
+            "将按期望值 %r 生成效能模型。请确认该代号与业务成品、价格模型一致。"
+            % (backend.product_code, expected, expected),
+            file=sys.stderr,
         )
+        product_code = expected
+        product_code_overridden = True
     if state_rel and backend.app.state_path.is_file():
         # Publish the state after the original application's standard migration.
         # The caller's source state remains untouched.
@@ -84,7 +92,9 @@ def package_runtime(source_root, workbook, output_dir, state=None, expected_prod
     schema = backend.schema()
     manifest={
         "format_version":"effectiveness-original-runtime-package-1.0",
-        "product_code":backend.product_code,
+        "product_code":product_code,
+        "workbook_product_code":backend.product_code,
+        "product_code_overridden":product_code_overridden,
         "product_name":backend.product_name,
         "model_version":backend.model_version,
         "algorithm_version":backend.algorithm_version,

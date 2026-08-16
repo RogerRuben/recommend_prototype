@@ -10,6 +10,7 @@ import json
 import re
 
 from .wide_import import read_table_bytes, split_tags
+from .model_field_types import canonical_field_id
 
 
 def _clean(value):
@@ -91,16 +92,7 @@ def _label_and_unit(header):
 
 def _parameter_id(header, index, used):
     label, _unit = _label_and_unit(header)
-    candidate = re.sub(r"[^a-zA-Z0-9]+", "_", label).strip("_").lower()
-    if not candidate or candidate[0].isdigit():
-        candidate = "attr_%03d" % index
-    base = candidate
-    suffix = 2
-    while candidate in used:
-        candidate = "%s_%d" % (base, suffix)
-        suffix += 1
-    used.add(candidate)
-    return candidate
+    return canonical_field_id(label, index, used)
 
 
 def _decimal_places(values):

@@ -1,0 +1,28 @@
+﻿{
+    "package_name":  "IndustrialProtocolDemo_V19_6_14_Clean_WIN7_Source_NoWheels_20260814",
+    "generated_at":  "2026-08-14T15:15:45+08:00",
+    "package_type":  "installable-source-with-model-artifacts",
+    "wheels_included":  false,
+    "virtual_environment_included":  false,
+    "effectiveness_runtime":  "services/effectiveness_service/model/current/effectiveness_runtime_manifest.json",
+    "price_runtime":  "services/price_service/model/price_native_bundle.pkl",
+    "production_candidate_generator":  "V19.6.14 coupling-aware fast/deep beam search",
+    "effectiveness_model_install":  "INSTALL_FROZEN_EFFECTIVENESS_MODEL_WIN7.bat (recommended frozen ZIP) or PACKAGE_EFFECTIVENESS_SERVICE_MODEL_WIN7.bat (legacy compatible)",
+    "effectiveness_workbench":  "http://127.0.0.1:17891/effectiveness",
+    "price_workbench":  "http://127.0.0.1:17891/price",
+    "install_script":  "INSTALL_SOURCE_DEPENDENCIES_WIN7.bat",
+    "start_script":  "START_ALL_SERVICES_WIN7.bat",
+    "excluded":  [
+                     "wheelhouse_win7",
+                     "runtime/venvs",
+                     "backups",
+                     "logs",
+                     "*.whl",
+                     "*.pyc",
+                     "*.log",
+                     "handoff archives",
+                     "historical upgrade docs",
+                     "experimental generators",
+                     "legacy demo runtimes"
+                 ]
+}

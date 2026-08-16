@@ -1,2 +1,0 @@
-将Cloudflare Dashboard创建的Tunnel Token粘贴到同目录的 tunnel_token.txt 中。
-不要把真实Token上传到公共仓库或发给无关人员。

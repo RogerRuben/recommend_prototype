@@ -56,6 +56,19 @@ def _json_mapping(value):
         return {}
 
 
+def _json_object(value):
+    """Parse a JSON object defensively; a malformed blob never crashes the UI."""
+    if value in (None, ""):
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    try:
+        parsed = json.loads(value)
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
 def _infer_model_value_mapping(parameter, model_spec):
     """Infer only unambiguous business-label to canonical-model encodings."""
     value_type = str(parameter.get("value_type") or "").lower()
@@ -237,7 +250,6 @@ class Store(object):
                     "WHERE value_type='ip_grade' AND (search_type IS NULL OR search_type='' OR search_type='auto')"
                 )
                 self._sync_model_registry(conn)
-                self._sync_model_input_bindings(conn)
                 conn.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", ("database_version", "V19.6.8-hybrid-deep-extrapolation-search"))
                 conn.execute("INSERT OR IGNORE INTO metadata VALUES(?,?)", ("master_data_version", "0"))
                 conn.commit()
@@ -321,7 +333,6 @@ class Store(object):
                         tuple(extras),
                     )
                 self._sync_model_registry(conn)
-                self._sync_model_input_bindings(conn)
                 conn.commit()
             finally:
                 conn.close()
@@ -346,77 +357,16 @@ class Store(object):
                 item.get("artifact_sha256"), "valid" if manifest.get("contract_valid") else "invalid", now_iso()
             ))
 
-    def _sync_model_input_bindings(self, conn):
-        """Mirror model input contracts into SQLite without overwriting operator values."""
-        manifest = self.runtime.manifest()
-        if manifest.get("calculation_available") is False:
-            return
-        conn.execute("UPDATE model_input_bindings SET enabled=0")
-        rows = []
-        for spec in self.runtime.effectiveness.features:
-            rows.append({
-                "binding_id": "effectiveness:%s" % spec["key"], "model_kind": "effectiveness",
-                "parameter_id": spec["key"], "label": spec.get("label", spec["key"]),
-                "source_type": "product_parameter", "data_type": "ip_grade" if spec.get("parser") == "ip_grade" else spec.get("type", "number"),
-                "unit": spec.get("unit", ""), "required": 1 if spec.get("required", True) else 0,
-                "missing_policy": spec.get("missing_policy", "reject"), "training_mean": None,
-                "model_version": manifest["effectiveness"]["model_version"],
-            })
-        for item in self.runtime.price.raw_contract:
-            rows.append({
-                "binding_id": "price:%s" % item["key"], "model_kind": "price",
-                "parameter_id": item["key"], "label": item.get("label", item["key"]),
-                "source_type": item.get("source", "product_parameter"), "data_type": item.get("dtype") or ("ip_grade" if item.get("parser") == "ip_grade" else item.get("type", "number")),
-                "unit": item.get("unit", ""), "required": 1 if item.get("required", item.get("missing_policy", "reject") == "reject") else 0,
-                "missing_policy": item.get("missing_policy", "reject"), "training_mean": item.get("training_mean"),
-                "model_version": manifest["price"]["model_version"],
-            })
-        for item in rows:
-            conn.execute("""INSERT INTO model_input_bindings
-                (binding_id,model_kind,parameter_id,label,source_type,data_type,unit,required,missing_policy,
-                 configured_value,training_mean,model_version,enabled,updated_at)
-                VALUES(?,?,?,?,?,?,?,?,?,NULL,?,?,1,?)
-                ON CONFLICT(binding_id) DO UPDATE SET
-                 model_kind=excluded.model_kind,parameter_id=excluded.parameter_id,label=excluded.label,
-                 source_type=excluded.source_type,data_type=excluded.data_type,unit=excluded.unit,
-                 required=excluded.required,missing_policy=excluded.missing_policy,
-                 training_mean=excluded.training_mean,model_version=excluded.model_version,
-                 enabled=1,updated_at=excluded.updated_at""", (
-                item["binding_id"], item["model_kind"], item["parameter_id"], item["label"],
-                item["source_type"], item["data_type"], item["unit"], item["required"],
-                item["missing_policy"], item["training_mean"], item["model_version"], now_iso()
-            ))
-
-    def configured_model_inputs(self, model_kind="price"):
-        """Return centrally configured model-only inputs from the admin database."""
-        conn = self.connect()
-        try:
-            rows = conn.execute("""SELECT parameter_id,data_type,configured_value FROM model_input_bindings
-                WHERE model_kind=? AND enabled=1 AND configured_value IS NOT NULL AND TRIM(configured_value)!=''""", (model_kind,)).fetchall()
-        finally:
-            conn.close()
-        result = {}
-        for row in rows:
-            value = row["configured_value"]
-            try:
-                if row["data_type"] == "boolean":
-                    text = str(value).strip().lower()
-                    result[row["parameter_id"]] = 1 if text in ("1","true","yes","有","是","启用") else 0
-                elif row["data_type"] in ("number", "numeric", "integer", "ip_grade"):
-                    result[row["parameter_id"]] = float(str(value).strip().upper().replace("IP", ""))
-                else:
-                    result[row["parameter_id"]] = value
-            except (TypeError, ValueError):
-                # Invalid configured values are ignored here and will be exposed
-                # by model input validation if the field is actually required.
-                continue
-        return result
-
     def runtime_parameters(self, params):
+        """Prepare business parameters for a model call.
+
+        Field roles (shared / effectiveness-only / price-only) are derived from
+        the two service schemas by ``parameter_roles`` and ``feature_roles``.
+        Every business field is forwarded as-is; the target service owns field
+        selection, parsing and missing-value policy. No operator-maintained
+        "model field binding" table is consulted.
+        """
         merged = dict(params or {})
-        for key, value in self.configured_model_inputs("price").items():
-            if merged.get(key) in (None, ""):
-                merged[key] = value
         conn = self.connect()
         try:
             rows = conn.execute("SELECT parameter_id,model_value_mapping_json FROM parameter_definitions WHERE enabled=1").fetchall()
@@ -666,8 +616,7 @@ class Store(object):
                 "saved": conn.execute("SELECT COUNT(*) FROM saved_schemes").fetchone()[0],
             }
             version_row = conn.execute("SELECT value FROM metadata WHERE key='master_data_version'").fetchone()
-            bindings = [dict(row) for row in conn.execute("SELECT * FROM model_input_bindings WHERE enabled=1 ORDER BY model_kind,parameter_id")]
-            return {"product": product, "parameters": parameters, "parameter_roles": role_map, "model_input_bindings": bindings,
+            return {"product": product, "parameters": parameters, "parameter_roles": role_map,
                     "tags": tags, "models": models, "counts": counts, "master_data_version": version_row[0] if version_row else "0"}
         finally:
             conn.close()
@@ -702,18 +651,22 @@ class Store(object):
                 "candidate_id": item["agreement_id"],
                 "parameters": self.runtime_parameters(item["params"]),
                 "target_protocol": target_protocol,
+                "historical_price_wan": item.get("historical_price_wan"),
             }
             for item in items
         ]
         try:
-            if hasattr(self.runtime, "evaluate_batch"):
+            if hasattr(self.runtime, "evaluate_batch_effectiveness_only"):
+                # Unchanged historical samples keep their stored transaction price;
+                # only effectiveness is re-evaluated against the current model.
+                evaluations = self.runtime.evaluate_batch_effectiveness_only(requests, target_protocol=target_protocol)
+            elif hasattr(self.runtime, "evaluate_batch"):
                 evaluations = self.runtime.evaluate_batch(requests, target_protocol=target_protocol)
             else:
                 evaluations = [
-                    (
-                        self.runtime.evaluate(request["parameters"], target_protocol=target_protocol)
-                        if target_protocol not in (None, "")
-                        else self.runtime.evaluate(request["parameters"])
+                    self._evaluate_historical_one(
+                        request["parameters"], target_protocol=target_protocol,
+                        historical_price_wan=request.get("historical_price_wan"),
                     )
                     for request in requests
                 ]
@@ -726,10 +679,9 @@ class Store(object):
             result = []
             for item, request in zip(items, requests):
                 try:
-                    evaluation = (
-                        self.runtime.evaluate(request["parameters"], target_protocol=target_protocol)
-                        if target_protocol not in (None, "")
-                        else self.runtime.evaluate(request["parameters"])
+                    evaluation = self._evaluate_historical_one(
+                        request["parameters"], target_protocol=target_protocol,
+                        historical_price_wan=request.get("historical_price_wan"),
                     )
                     result.append(self._apply_agreement_evaluation(item, evaluation))
                 except Exception as exc:
@@ -739,6 +691,16 @@ class Store(object):
                     preserved["batch_evaluation_error"] = str(batch_error)
                     result.append(preserved)
             return result
+
+    def _evaluate_historical_one(self, params, target_protocol=None, historical_price_wan=None):
+        """Evaluate one unchanged historical sample (effectiveness-only when available)."""
+        if hasattr(self.runtime, "evaluate_effectiveness_only"):
+            return self.runtime.evaluate_effectiveness_only(
+                params, target_protocol=target_protocol, historical_price_wan=historical_price_wan,
+            )
+        if target_protocol not in (None, ""):
+            return self.runtime.evaluate(params, target_protocol=target_protocol)
+        return self.runtime.evaluate(params)
 
     def historical_boundary_profile(self):
         """Return a model-free historical envelope for generation preflight.
@@ -795,15 +757,14 @@ class Store(object):
 
     def _agreement_row(self, row, recalculate=False, target_protocol=None):
         item = dict(row)
-        item["params"] = json.loads(item.pop("params_json"))
-        item["tags"] = json.loads(item.pop("tags_json"))
+        item["params"] = _json_object(item.pop("params_json"))
+        item["tags"] = _json_list(item.pop("tags_json"))
         item["is_generated"] = item["agreement_source"] in ("live_generated", "generated_model", "generated")
         if recalculate:
             runtime_params = self.runtime_parameters(item["params"])
-            evaluation = (
-                self.runtime.evaluate(runtime_params, target_protocol=target_protocol)
-                if target_protocol not in (None, "")
-                else self.runtime.evaluate(runtime_params)
+            evaluation = self._evaluate_historical_one(
+                runtime_params, target_protocol=target_protocol,
+                historical_price_wan=item.get("historical_price_wan"),
             )
             item = self._apply_agreement_evaluation(item, evaluation)
         return item
@@ -824,6 +785,7 @@ class Store(object):
         item["feasibility_probability"] = evaluation["feasibility_probability"]
         item["physical_gate"] = evaluation.get("physical_gate") or {}
         item["cost_effectiveness"] = evaluation["cost_effectiveness"]
+        item["price_source"] = evaluation.get("price_source", "predicted")
         item["evaluation"] = evaluation
         item["model_evaluation_available"] = True
         item["tags"] = self.derive_tags(item["params"], evaluation, item.get("tags") or [])
@@ -848,7 +810,10 @@ class Store(object):
         try:
             result = []
             for row in conn.execute("SELECT * FROM saved_schemes ORDER BY id DESC LIMIT 200"):
-                item = dict(row); item["params"] = json.loads(item.pop("params_json")); item["evaluation"] = json.loads(item.pop("evaluation_json")); result.append(item)
+                item = dict(row)
+                item["params"] = _json_object(item.pop("params_json"))
+                item["evaluation"] = _json_object(item.pop("evaluation_json"))
+                result.append(item)
             return result
         finally: conn.close()
 
@@ -859,8 +824,8 @@ class Store(object):
             if not row:
                 return None
             item = dict(row)
-            item["params"] = json.loads(item.pop("params_json"))
-            item["saved_evaluation"] = json.loads(item.pop("evaluation_json"))
+            item["params"] = _json_object(item.pop("params_json"))
+            item["saved_evaluation"] = _json_object(item.pop("evaluation_json"))
             item["evaluation"] = self.runtime.evaluate(self.runtime_parameters(item["params"])) if recalculate else item["saved_evaluation"]
             if recalculate:
                 item["params"] = dict(item["evaluation"].get("parameters") or item["params"])
@@ -965,9 +930,6 @@ class Store(object):
                     # Runtime contract rows describe external model services and
                     # are not part of the business DataMaster authority.
                     self._sync_model_registry(conn)
-                    self._sync_model_input_bindings(conn)
-                    for item in data.get("model_inputs", []):
-                        conn.execute("UPDATE model_input_bindings SET configured_value=?,enabled=? WHERE binding_id=?", (item.get("configured_value"),int(item.get("enabled",1)),item["binding_id"]))
                 conn.execute("INSERT OR REPLACE INTO metadata(key,value) VALUES('master_data_version',?)", (version,))
                 conn.commit()
             except Exception:
@@ -1211,7 +1173,6 @@ class Store(object):
         "constraints": ("constraint_rules", "rule_id"),
         "agreements": ("agreements", "agreement_id"),
         "models": ("model_registry", "model_kind"),
-        "model_inputs": ("model_input_bindings", "binding_id"),
     }
 
     def admin_snapshot(self):
@@ -1223,7 +1184,8 @@ class Store(object):
                 rows = [dict(row) for row in conn.execute("SELECT * FROM %s ORDER BY %s" % (table, order))]
                 if key == "agreements":
                     for row in rows:
-                        row["params"] = json.loads(row.pop("params_json")); row["tags"] = json.loads(row.pop("tags_json"))
+                        row["params"] = _json_object(row.pop("params_json", "{}"))
+                        row["tags"] = _json_list(row.pop("tags_json", "[]"))
                 payload[key] = rows
             payload["saved_schemes"] = self.list_saved()
             payload["audit_log"] = [dict(row) for row in conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT 100")]
@@ -1239,20 +1201,43 @@ class Store(object):
         parameter_ids = set(self.parameter_map())
         tag_ids = set(self.tag_map(include_disabled=True))
         if section == "tag_rules":
-            if data.get("tag_id") not in tag_ids:
+            if data.get("tag_id") and data.get("tag_id") not in tag_ids:
                 raise ValueError("标签规则引用了不存在的标签")
-            if data.get("parameter_id") not in parameter_ids and data.get("parameter_id") not in ("__predicted_price_wan", "__capability_score", "__feasibility_probability"):
+            if data.get("parameter_id") and data.get("parameter_id") not in parameter_ids and data.get("parameter_id") not in ("__predicted_price_wan", "__capability_score", "__feasibility_probability"):
                 raise ValueError("标签规则引用了不存在的指标")
         if section == "couplings":
-            if data.get("parameter_a") not in parameter_ids or data.get("parameter_b") not in parameter_ids:
+            if (data.get("parameter_a") and data.get("parameter_a") not in parameter_ids) or (data.get("parameter_b") and data.get("parameter_b") not in parameter_ids):
                 raise ValueError("耦合关系引用了不存在的指标")
         if section == "constraints":
-            if data.get("left_parameter") not in parameter_ids or (data.get("right_parameter") and data.get("right_parameter") not in parameter_ids):
+            if (data.get("left_parameter") and data.get("left_parameter") not in parameter_ids) or (data.get("right_parameter") and data.get("right_parameter") not in parameter_ids):
                 raise ValueError("约束规则引用了不存在的指标")
         if section == "agreements":
             params = data.pop("params", {})
-            data["params_json"] = json.dumps(dict(params or {}), ensure_ascii=False)
-            data["tags_json"] = json.dumps(data.pop("tags", []) or [], ensure_ascii=False)
+            if isinstance(params, str):
+                text = params.strip()
+                if text:
+                    try:
+                        params = json.loads(text)
+                    except (TypeError, ValueError):
+                        raise ValueError("协议属性必须是JSON对象，或在界面上按指标逐项填写。")
+                else:
+                    params = {}
+            if not isinstance(params, dict):
+                raise ValueError("协议属性必须是JSON对象。")
+            data["params_json"] = json.dumps(params, ensure_ascii=False)
+            tags = data.pop("tags", [])
+            if isinstance(tags, str):
+                text = tags.strip()
+                if text:
+                    try:
+                        tags = json.loads(text)
+                    except (TypeError, ValueError):
+                        tags = [x.strip() for x in re.split(r"[、,，;；|]+", text) if x.strip()]
+                else:
+                    tags = []
+            if not isinstance(tags, (list, tuple)):
+                tags = [] if tags in (None, "") else [tags]
+            data["tags_json"] = json.dumps(list(tags), ensure_ascii=False)
             # Business-data editing never invokes the current external model.
             # Existing computed results are invalidated until an explicit user
             # calculation is requested in the recommendation system.
@@ -1265,6 +1250,54 @@ class Store(object):
                 data["allowed_values_json"] = json.dumps(data["allowed_values_json"], ensure_ascii=False)
             if isinstance(data.get("model_value_mapping_json"), dict):
                 data["model_value_mapping_json"] = json.dumps(data["model_value_mapping_json"], ensure_ascii=False)
+            try:
+                allowed = json.loads(data.get("allowed_values_json") or "[]")
+            except (TypeError, ValueError):
+                raise ValueError("业务允许值必须是JSON数组，例如：[\"类型1\",\"类型2\"]")
+            if not isinstance(allowed, list):
+                raise ValueError("业务允许值必须是JSON数组。")
+            try:
+                mapping = json.loads(data.get("model_value_mapping_json") or "{}")
+            except (TypeError, ValueError):
+                raise ValueError("业务值到模型值的映射必须是JSON对象，例如：{\"类型1\":0}")
+            if not isinstance(mapping, dict):
+                raise ValueError("业务值到模型值的映射必须是JSON对象。")
+            data["allowed_values_json"] = json.dumps(allowed, ensure_ascii=False) if allowed else None
+            data["model_value_mapping_json"] = json.dumps(mapping, ensure_ascii=False) if mapping else None
+
+        defaults = {
+            "products": {"enabled": 1},
+            "parameters": {"value_type": "number", "search_type": "auto", "required": 0,
+                           "auto_adjustable": 1, "decimal_places": 3, "display_order": 1,
+                           "enabled": 1, "model_bound": 0},
+            "tags": {"weight": 1.0, "derivation_mode": "rule", "enabled": 1},
+            "tag_rules": {"operator": "gte", "rule_group": "default", "enabled": 1},
+            "couplings": {"coupling_type": "positive", "domain_operator": "gte", "multiplier": 1.0,
+                          "offset": 0.0, "strength": 1.0, "severity": "info", "display_order": 1,
+                          "enabled": 1},
+            "constraints": {"operator": "gte", "multiplier": 1.0, "offset": 0.0,
+                            "severity": "warning", "display_order": 1, "enabled": 1},
+            "agreements": {"agreement_source": "historical", "enabled": 1},
+        }.get(section, {})
+        for key, value in defaults.items():
+            if data.get(key) in (None, ""):
+                data[key] = value
+
+        required = {
+            "products": (("product_name", "成品名称"),),
+            "parameters": (("label", "指标名称"),),
+            "tags": (("tag_name", "标签名称"),),
+            "tag_rules": (("tag_id", "标签"), ("parameter_id", "指标")),
+            "couplings": (("coupling_name", "耦合名称"), ("parameter_a", "指标A"), ("parameter_b", "指标B")),
+            "constraints": (("rule_name", "约束名称"), ("left_parameter", "左侧指标")),
+            "agreements": (("agreement_name", "协议名称"),),
+        }.get(section, ())
+        missing = [label for key, label in required if data.get(key) in (None, "")]
+        if missing:
+            raise ValueError("请填写必填项：%s" % "、".join(missing))
+        if section == "parameters" and data.get("min_value") is not None and data.get("max_value") is not None:
+            if float(data["min_value"]) > float(data["max_value"]):
+                raise ValueError("指标下限不能大于上限。")
         columns = self._table_columns(table)
         data = dict((k, v) for k, v in data.items() if k in columns)
         if not data.get(pk):
@@ -1299,7 +1332,7 @@ class Store(object):
                 for table, column, label in [
                     ("tag_rules","parameter_id","标签规则"), ("indicator_couplings","parameter_a","耦合关系A"),
                     ("indicator_couplings","parameter_b","耦合关系B"), ("constraint_rules","left_parameter","约束左侧"),
-                    ("constraint_rules","right_parameter","约束右侧"), ("model_input_bindings","parameter_id","模型字段绑定")]:
+                    ("constraint_rules","right_parameter","约束右侧")]:
                     count = conn.execute("SELECT COUNT(*) FROM %s WHERE %s=?" % (table,column), (object_id,)).fetchone()[0]
                     if count: refs.append({"type":label,"count":count})
             elif section == "products":
@@ -1338,7 +1371,7 @@ class Store(object):
 
     def admin_delete(self, section, object_id):
         """User-facing delete means archive/disable, never physical DELETE."""
-        if section not in self.ADMIN_TABLES or section in ("models", "products", "parameters", "model_inputs"):
+        if section not in self.ADMIN_TABLES or section in ("models", "products", "parameters"):
             raise ValueError("该数据类型不允许归档")
         result = self.admin_toggle(section, object_id, False)
         result.update({"deleted":False,"archived":True})
@@ -1346,7 +1379,7 @@ class Store(object):
 
     def admin_purge(self, section, object_id):
         """Permanently delete an already disabled record after dependency checks."""
-        if section not in self.ADMIN_TABLES or section in ("models", "products", "parameters", "model_inputs"):
+        if section not in self.ADMIN_TABLES or section in ("models", "products", "parameters"):
             raise ValueError("该数据类型不允许永久删除")
         table, pk = self.ADMIN_TABLES[section]
         dependencies = self.admin_dependencies(section, object_id)
