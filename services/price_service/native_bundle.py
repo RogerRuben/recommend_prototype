@@ -136,6 +136,56 @@ def _field_map(bundle):
     return dict((str(x.get("field_name") or x.get("key")), x) for x in bundle.get("feature_schema", []))
 
 
+def _named_matrix(bundle, rows):
+    """Build a column-named frame so fitted estimators can validate feature order.
+
+    The bundled scaler and every estimator were fitted on a pandas DataFrame, so
+    they carry ``feature_names_in_``.  Feeding them a bare numpy array produces
+    the ``X does not have valid feature names`` warning and, more importantly,
+    skips sklearn's column-order validation.  Return a named frame when pandas is
+    available, otherwise fall back to a plain numeric array (order is preserved).
+    """
+    columns = [str(x) for x in bundle.get("feature_order") or []]
+    try:
+        import pandas as pd
+        return pd.DataFrame(rows, columns=columns)
+    except Exception:
+        try:
+            import numpy as np
+            return np.asarray(rows, dtype=float)
+        except Exception:
+            return list(rows)
+
+
+def _named_transform(preprocessor, frame, fallback_names):
+    """Transform a named frame and re-attach feature names on the output."""
+    transformed = preprocessor.transform(frame)
+    if hasattr(transformed, "columns"):
+        return transformed
+    names = list(fallback_names or [])
+    try:
+        names = list(preprocessor.get_feature_names_out())
+    except Exception:
+        pass
+    try:
+        import pandas as pd
+        return pd.DataFrame(transformed, columns=names)
+    except Exception:
+        return transformed
+
+
+def _matrix_rows(matrix):
+    """Convert a frame/array to a list of row lists for rebuilding a matrix."""
+    try:
+        import numpy as np
+        arr = np.asarray(matrix)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        return arr.tolist()
+    except Exception:
+        return list(matrix)
+
+
 def prepare_vector(bundle, parameters):
     parameters = dict(parameters or {})
     specs = _field_map(bundle)
@@ -188,14 +238,10 @@ def prepare_vector(bundle, parameters):
             warnings.append("%s高于训练范围上限%s" % (spec.get("field_label", key), hi))
         values.append(numeric)
     ignored = sorted(set(parameters) - set(bundle["feature_order"]))
-    try:
-        import numpy as np
-        array = np.asarray([values], dtype=float)
-    except Exception:
-        array = [values]
+    array = _named_matrix(bundle, [values])
     preprocessor = bundle.get("preprocessor")
     if preprocessor is not None:
-        array = preprocessor.transform(array)
+        array = _named_transform(preprocessor, array, bundle.get("feature_order"))
     return array, {"filled_fields": filled, "ignored_fields": ignored, "warnings": warnings}
 
 
@@ -278,20 +324,12 @@ def predict_batch(bundle, parameter_items, allow_degraded=False):
         prepared, input_status = prepare_vector(bundle, parameters)
         prepared_rows.append(prepared)
         input_statuses.append(input_status)
-    try:
-        from scipy import sparse
-        if any(sparse.issparse(row) for row in prepared_rows):
-            prepared_matrix = sparse.vstack(prepared_rows)
-        else:
-            import numpy as np
-            prepared_matrix = np.vstack(prepared_rows)
-    except Exception:
-        prepared_matrix = []
-        for row in prepared_rows:
-            try:
-                prepared_matrix.append(list(row[0]))
-            except Exception:
-                prepared_matrix.append(list(row))
+    # Rebuild one named frame from the per-row prepared matrices so every
+    # estimator receives a DataFrame and can validate feature order.
+    flat_rows = []
+    for row in prepared_rows:
+        flat_rows.extend(_matrix_rows(row))
+    prepared_matrix = _named_matrix(bundle, flat_rows)
 
     member_values, skipped = [], []
     for item in bundle["ensemble"]["members"]:

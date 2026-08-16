@@ -1331,6 +1331,10 @@ class Store(object):
                     ("constraint_rules","right_parameter","约束右侧")]:
                     count = conn.execute("SELECT COUNT(*) FROM %s WHERE %s=?" % (table,column), (object_id,)).fetchone()[0]
                     if count: refs.append({"type":label,"count":count})
+                # Agreements store parameters as JSON text; a conservative LIKE
+                # scan keeps a still-referenced field from being orphaned.
+                count = conn.execute("SELECT COUNT(*) FROM agreements WHERE params_json LIKE ?", ('%%"%s"%%' % object_id,)).fetchone()[0]
+                if count: refs.append({"type":"协议属性","count":count})
             elif section == "products":
                 count = conn.execute("SELECT COUNT(*) FROM agreements WHERE product_code=?", (object_id,)).fetchone()[0]
                 if count: refs.append({"type":"协议数据","count":count})
@@ -1367,7 +1371,7 @@ class Store(object):
 
     def admin_delete(self, section, object_id):
         """User-facing delete means archive/disable, never physical DELETE."""
-        if section not in self.ADMIN_TABLES or section in ("models", "products", "parameters"):
+        if section not in self.ADMIN_TABLES or section in ("models", "products"):
             raise ValueError("该数据类型不允许归档")
         result = self.admin_toggle(section, object_id, False)
         result.update({"deleted":False,"archived":True})
@@ -1375,7 +1379,7 @@ class Store(object):
 
     def admin_purge(self, section, object_id):
         """Permanently delete an already disabled record after dependency checks."""
-        if section not in self.ADMIN_TABLES or section in ("models", "products", "parameters"):
+        if section not in self.ADMIN_TABLES or section in ("models", "products"):
             raise ValueError("该数据类型不允许永久删除")
         table, pk = self.ADMIN_TABLES[section]
         dependencies = self.admin_dependencies(section, object_id)
