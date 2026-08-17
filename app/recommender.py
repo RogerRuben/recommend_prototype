@@ -127,11 +127,23 @@ def agreement_matches(item, request):
     if ce is None and price is not None:
         ce = capability / max(price, 1e-9)
     feasibility = float(item.get("feasibility_probability", 0) or 0)
-    if not physical_gate_passes(item, request): return False
+
+    is_historical = (
+        not item.get("is_generated")
+        and item.get("agreement_source") in ("historical", "imported")
+    )
+
+    # Newly generated schemes must pass the model's engineering gate.  A real
+    # historical product is never dropped by the model's opinion — only by the
+    # user's own explicit filters; model risk stays visible as a warning.
+    if not is_historical:
+        if not physical_gate_passes(item, request):
+            return False
+
     if request.get("max_price") not in (None, "") and (price is None or price > float(request["max_price"])): return False
     if request.get("min_capability") not in (None, "") and capability < float(request["min_capability"]): return False
     if request.get("min_cost_effectiveness") not in (None, "") and (ce is None or ce < float(request["min_cost_effectiveness"])): return False
-    if request.get("min_feasibility") not in (None, "") and feasibility < max(DEFAULT_FEASIBILITY_GATE, float(request["min_feasibility"])): return False
+    if request.get("min_feasibility") not in (None, "") and feasibility < float(request["min_feasibility"]): return False
     filters = request.get("indicator_filters") or []
     if filters:
         results = [filter_match(item.get("params", {}), rule) for rule in filters]
