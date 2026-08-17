@@ -582,15 +582,41 @@ class HistorySeededGenerator(object):
             da, db = float(params[a]) - float(reference[a]), float(params[b]) - float(reference[b])
             if coupling_type in ("positive", "negative"):
                 expected_sign = 1.0 if coupling_type == "positive" else -1.0
-                mismatch = abs(da) > 1e-9 and (abs(db) <= 1e-9 or da * db * expected_sign < 0)
-                if mismatch:
-                    span_a = max(float(definitions[a].get("max_value") or 1) - float(definitions[a].get("min_value") or 0), 1e-9)
-                    span_b = max(float(definitions[b].get("max_value") or 1) - float(definitions[b].get("min_value") or 0), 1e-9)
-                    strength = max(float(item.get("strength") if item.get("strength") is not None else 0.35), 1e-6)
-                    if b not in locked and definitions.get(b, {}).get("auto_adjustable", 1):
+                a_moved = abs(da) > 1e-9
+                b_moved = abs(db) > 1e-9
+                if not a_moved and not b_moved:
+                    continue
+                if a_moved and not b_moved:
+                    violated = True
+                elif b_moved and not a_moved:
+                    violated = True
+                else:
+                    violated = da * db * expected_sign < 0
+                if not violated:
+                    continue
+                span_a = max(float(definitions[a].get("max_value") or 1) - float(definitions[a].get("min_value") or 0), 1e-9)
+                span_b = max(float(definitions[b].get("max_value") or 1) - float(definitions[b].get("min_value") or 0), 1e-9)
+                strength = max(float(item.get("strength") if item.get("strength") is not None else 0.35), 1e-6)
+                a_locked = a in locked or not definitions.get(a, {}).get("auto_adjustable", 1)
+                b_locked = b in locked or not definitions.get(b, {}).get("auto_adjustable", 1)
+                # Symmetric local compensation: whichever side the current move
+                # touched, the untouched side follows it (relative to the parent
+                # centre), unless that side is locked.
+                if a_moved and not b_moved:
+                    if not b_locked:
                         params[b] = float(reference[b]) + expected_sign * strength * (da / span_a) * span_b
                         repairs.append(item.get("coupling_id"))
-                    elif a not in locked and definitions.get(a, {}).get("auto_adjustable", 1) and abs(db) > 1e-9:
+                elif b_moved and not a_moved:
+                    if not a_locked:
+                        params[a] = float(reference[a]) + expected_sign * (db / span_b) * span_a / strength
+                        repairs.append(item.get("coupling_id"))
+                else:
+                    # Both sides moved but in the wrong relative direction; fix
+                    # the unlocked side, preferring B (the historical follower).
+                    if not b_locked:
+                        params[b] = float(reference[b]) + expected_sign * strength * (da / span_a) * span_b
+                        repairs.append(item.get("coupling_id"))
+                    elif not a_locked:
                         params[a] = float(reference[a]) + expected_sign * (db / span_b) * span_a / strength
                         repairs.append(item.get("coupling_id"))
             if coupling_type == "feasible_domain":
@@ -1583,20 +1609,32 @@ class HistorySeededGenerator(object):
             if emergency is not None:
                 emergency["_base"] = emergency_base
                 emergency["_changed"] = self._changed_parameters(emergency["params"], emergency_base["params"], definitions)
-                usable.append(emergency)
+                if emergency["_changed"]:
+                    usable.append(emergency)
 
         if not usable and all_records:
             # Last-resort no-empty guarantee: return the closest successfully
-            # evaluated record, clearly flagged as a best-effort exploration
-            # result, even when it duplicates history or fails the engineering
-            # gate.  Only a model service that could not evaluate anything at all
-            # is allowed to produce an empty result.
+            # evaluated record, clearly flagged as a fallback exploration result,
+            # even when it duplicates history or has no changed parameter.  Its
+            # true strict/best-effort status is preserved — a duplicate-only
+            # fallback can still be a genuine strict solution.
             closest = min(all_records, key=lambda record: record["_search_key"])
-            closest["_base"] = closest.get("_base") or seeds[0]
-            closest["_changed"] = self._changed_parameters(closest["params"], closest["_base"]["params"], definitions)
-            closest["best_effort"] = True
-            closest["strict_filter_satisfied"] = False
+            closest_base = closest.get("_base") or seeds[0]
+            changed = self._changed_parameters(closest["params"], closest_base["params"], definitions)
+            is_duplicate = any(
+                self._normalized_distance(closest["params"], historical["params"], definitions) < 0.002
+                for historical in history
+            )
+            if not changed:
+                fallback_reason = "no_changed_parameter"
+            elif is_duplicate:
+                fallback_reason = "duplicate_only"
+            else:
+                fallback_reason = "no_usable_best_effort"
+            closest["_base"] = closest_base
+            closest["_changed"] = changed
             closest["fallback_kind"] = "closest_evaluated_result"
+            closest["fallback_reason"] = fallback_reason
             usable.append(closest)
 
         strict_candidates = [item for item in usable if item.get("strict_filter_satisfied")]
