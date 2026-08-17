@@ -419,6 +419,11 @@ class Store(object):
         for tag_id, tag in tags.items():
             mode = str(tag.get("derivation_mode") or "rule").lower()
             if mode == "manual":
+                # A manually confirmed tag cannot be re-derived from parameters,
+                # but it is an established human fact: preserve it when inherited
+                # from the base scheme, never silently drop it.
+                if tag_id in inherited:
+                    result.append(tag_id)
                 continue
             if mode == "inherit":
                 if tag_id in inherited:
@@ -493,7 +498,8 @@ class Store(object):
             mode = str(tag.get("derivation_mode") or "rule").lower()
             entry = {"tag_id": tag_id, "tag_name": tag.get("tag_name", tag_id), "mode": mode, "matched": False, "status": "unmatched", "matched_group": None, "rules": []}
             if mode == "manual":
-                entry["status"] = "expert_confirmation_required"
+                entry["matched"] = tag_id in inherited
+                entry["status"] = "manual_confirmed" if entry["matched"] else "expert_confirmation_required"
             elif mode == "inherit":
                 entry["matched"] = tag_id in inherited
                 entry["status"] = "inherited" if entry["matched"] else "not_inherited"

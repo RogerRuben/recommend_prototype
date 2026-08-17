@@ -18,9 +18,11 @@ class GenerationTaskManager(object):
         self.by_fingerprint = {}
 
     def fingerprint(self, request):
+        # sort_by / page / page_size / source_mode are presentation-only and must
+        # never trigger a new generation: they re-rank an existing batch.
         relevant = dict((key, request.get(key)) for key in (
             "session_id", "selected_tags", "max_price", "min_capability", "min_cost_effectiveness",
-            "min_feasibility", "indicator_filter_mode", "indicator_filters", "sort_by", "count",
+            "min_feasibility", "indicator_filter_mode", "indicator_filters", "count",
             "target_protocol"
         ))
         relevant["product_code"] = self.app.runtime.schema["product_code"]
