@@ -564,15 +564,22 @@ class HistorySeededGenerator(object):
     def _boundary_value(operator, rhs):
         return rhs + (1e-6 if operator == "gt" else -1e-6 if operator == "lt" else 0.0)
 
-    def _repair_relations(self, params, seed, definitions, locked):
-        """Repair explicit relations while preserving every user-anchored value."""
+    def _repair_relations(self, params, reference, definitions, locked):
+        """Repair explicit relations while preserving every user-anchored value.
+
+        ``reference`` is the search centre the current move was generated from
+        (the parent candidate in iterative rounds, or the historical seed in the
+        first round).  Local compensation therefore measures the current move
+        relative to that parent, so a previous round's valid change is never
+        silently pulled back toward the historical seed.
+        """
         repairs = []
         for item in self.store.coupling_rows():
             a, b = item.get("parameter_a"), item.get("parameter_b")
-            if a not in params or b not in params or a not in seed or b not in seed or a not in definitions or b not in definitions:
+            if a not in params or b not in params or a not in reference or b not in reference or a not in definitions or b not in definitions:
                 continue
             coupling_type = item.get("coupling_type")
-            da, db = float(params[a]) - float(seed[a]), float(params[b]) - float(seed[b])
+            da, db = float(params[a]) - float(reference[a]), float(params[b]) - float(reference[b])
             if coupling_type in ("positive", "negative"):
                 expected_sign = 1.0 if coupling_type == "positive" else -1.0
                 mismatch = abs(da) > 1e-9 and (abs(db) <= 1e-9 or da * db * expected_sign < 0)
@@ -581,10 +588,10 @@ class HistorySeededGenerator(object):
                     span_b = max(float(definitions[b].get("max_value") or 1) - float(definitions[b].get("min_value") or 0), 1e-9)
                     strength = max(float(item.get("strength") if item.get("strength") is not None else 0.35), 1e-6)
                     if b not in locked and definitions.get(b, {}).get("auto_adjustable", 1):
-                        params[b] = float(seed[b]) + expected_sign * strength * (da / span_a) * span_b
+                        params[b] = float(reference[b]) + expected_sign * strength * (da / span_a) * span_b
                         repairs.append(item.get("coupling_id"))
                     elif a not in locked and definitions.get(a, {}).get("auto_adjustable", 1) and abs(db) > 1e-9:
-                        params[a] = float(seed[a]) + expected_sign * (db / span_b) * span_a / strength
+                        params[a] = float(reference[a]) + expected_sign * (db / span_b) * span_a / strength
                         repairs.append(item.get("coupling_id"))
             if coupling_type == "feasible_domain":
                 # Only relations explicitly marked severe are hard generation
@@ -632,10 +639,10 @@ class HistorySeededGenerator(object):
             target = edge.get("target")
             if target in fitted_targets or source not in params or target not in params:
                 continue
-            if source not in seed or target not in seed or source not in definitions or target not in definitions:
+            if source not in reference or target not in reference or source not in definitions or target not in definitions:
                 continue
-            source_delta = float(params[source]) - float(seed[source])
-            target_delta = float(params[target]) - float(seed[target])
+            source_delta = float(params[source]) - float(reference[source])
+            target_delta = float(params[target]) - float(reference[target])
             if abs(source_delta) <= 1e-9:
                 continue
             expected_sign = 1.0 if edge.get("direction") == "positive" else -1.0
@@ -649,7 +656,7 @@ class HistorySeededGenerator(object):
                 source_span = max(float(definitions[source].get("max_value") or 1) - float(definitions[source].get("min_value") or 0), 1e-9)
                 target_span = max(float(definitions[target].get("max_value") or 1) - float(definitions[target].get("min_value") or 0), 1e-9)
                 adjustment = expected_sign * 0.22 * (source_delta / source_span) * target_span
-            params[target] = float(seed[target]) + adjustment
+            params[target] = float(reference[target]) + adjustment
             repairs.append("direction_prior:%s->%s" % (source, target))
         self._restore_locked(params, locked)
         return repairs
@@ -920,7 +927,7 @@ class HistorySeededGenerator(object):
         return 0.38 * capability + 0.27 * feasibility + 0.18 * ce_utility + 0.17 * price_utility - gate_penalty
 
     def _record_from_params(self, params, base, request, definitions, tag_map, locked, anchor_conflicts,
-                            repairs, soft_moves, iteration, attempt, search_move, evaluation=None):
+                            repairs, soft_moves, iteration, attempt, search_move, evaluation=None, parent_record=None):
         if evaluation is None:
             evaluation = self._evaluate_for_request(params, base.get("params"), request)
         contour_details, _ = self._contour_diagnostics(evaluation.get("parameters") or params, locked)
@@ -997,6 +1004,12 @@ class HistorySeededGenerator(object):
                 "seed_tags": list(base.get("tags") or []),
                 "iteration": iteration,
                 "attempt": attempt,
+                "origin_seed_id": base["agreement_id"],
+                "parent_iteration": (parent_record or {}).get("generation_trace", {}).get("iteration"),
+                "parent_attempt": (parent_record or {}).get("generation_trace", {}).get("attempt"),
+                "parameters_before_move": dict((parent_record or {}).get("params") or {}),
+                "changed_from_parent": self._changed_parameters(params, (parent_record or {}).get("params") or {}, definitions) if parent_record else [],
+                "changed_from_origin": self._changed_parameters(params, base["params"], definitions),
             },
         })
         gate = evaluation.get("physical_gate") or {}
@@ -1186,11 +1199,12 @@ class HistorySeededGenerator(object):
                     return proposals
         return proposals
 
-    def _finalize_params(self, params, base, locked, definitions, soft_strength=0.30):
+    def _finalize_params(self, params, base, locked, definitions, soft_strength=0.30, repair_reference=None):
         self._restore_locked(params, locked)
         boundary_repairs = self._repair_learned_boundaries(params, locked, definitions)
         soft_moves = self._soft_adjust_unlocked_contours(params, locked, definitions, strength=soft_strength)
-        repairs = self._repair_relations(params, base["params"], definitions, locked)
+        reference = repair_reference if repair_reference is not None else base["params"]
+        repairs = self._repair_relations(params, reference, definitions, locked)
         repairs.extend(self._repair_learned_boundaries(params, locked, definitions))
         repairs.extend(boundary_repairs)
         repairs = list(dict.fromkeys(value for value in repairs if value))
@@ -1415,7 +1429,7 @@ class HistorySeededGenerator(object):
                 )
                 center_pending = []
                 for proposal_index, (params, move_label) in enumerate(proposals):
-                    repairs, soft_moves = self._finalize_params(params, base, locked, definitions, soft_strength=0.32)
+                    repairs, soft_moves = self._finalize_params(params, base, locked, definitions, soft_strength=0.32, repair_reference=center_record["params"])
                     changed = self._changed_parameters(params, base["params"], definitions)
                     if len(changed) < 1:
                         rejection["not_changed"] += 1
@@ -1440,6 +1454,7 @@ class HistorySeededGenerator(object):
                     locked = center_record["_locked"]
                     repairs, soft_moves = self._finalize_params(
                         params, base, locked, definitions, soft_strength=0.24,
+                        repair_reference=center_record["params"],
                     )
                     signature = tuple((key, params[key]) for key in sorted(params))
                     if signature in seen or signature in proposed_signatures:
@@ -1515,6 +1530,7 @@ class HistorySeededGenerator(object):
                         item["params"], item["base"], item["request"], definitions, tag_map,
                         item["locked"], item["anchor_conflicts"], item["repairs"], item["soft_moves"],
                         iteration, evaluations + 1, item["move_label"], evaluation=evaluation,
+                        parent_record=item.get("center_record"),
                     )
                 except Exception:
                     rejection["model_input"] += 1
@@ -1568,6 +1584,20 @@ class HistorySeededGenerator(object):
                 emergency["_base"] = emergency_base
                 emergency["_changed"] = self._changed_parameters(emergency["params"], emergency_base["params"], definitions)
                 usable.append(emergency)
+
+        if not usable and all_records:
+            # Last-resort no-empty guarantee: return the closest successfully
+            # evaluated record, clearly flagged as a best-effort exploration
+            # result, even when it duplicates history or fails the engineering
+            # gate.  Only a model service that could not evaluate anything at all
+            # is allowed to produce an empty result.
+            closest = min(all_records, key=lambda record: record["_search_key"])
+            closest["_base"] = closest.get("_base") or seeds[0]
+            closest["_changed"] = self._changed_parameters(closest["params"], closest["_base"]["params"], definitions)
+            closest["best_effort"] = True
+            closest["strict_filter_satisfied"] = False
+            closest["fallback_kind"] = "closest_evaluated_result"
+            usable.append(closest)
 
         strict_candidates = [item for item in usable if item.get("strict_filter_satisfied")]
         strict_available = bool(strict_candidates)
@@ -1634,6 +1664,11 @@ class HistorySeededGenerator(object):
             "candidates": public_selected,
             "requested_count": count,
             "evaluated_count": evaluations,
+            "all_records_count": len(all_records),
+            "usable_count": len(usable),
+            "best_effort_candidate_count": len(usable) - len(strict_candidates),
+            "final_selected_count": len(public_selected),
+            "fallback_used": any(item.get("fallback_kind") == "closest_evaluated_result" for item in public_selected),
             "seed_agreements": [item["agreement_id"] for item in seeds],
             "rejection_statistics": rejection,
             "strict_filter_satisfied": strict_available,

@@ -111,11 +111,13 @@ class GenerationTaskManager(object):
         if task.get("status") == "completed":
             result = task.get("result") or {}
             payload["result"] = dict((key,result.get(key)) for key in (
-                "count", "requested_count", "evaluated_count", "strict_filter_satisfied",
-                "strict_candidate_count", "best_effort_used", "rejection_statistics",
+                "count", "requested_count", "evaluated_count", "all_records_count", "usable_count",
+                "best_effort_candidate_count", "final_selected_count", "fallback_used",
+                "strict_filter_satisfied", "strict_candidate_count", "best_effort_used", "rejection_statistics",
                 "seed_agreements", "message", "batch_id", "search_profile", "search_warning",
                 "search_iterations", "generation_method"
             ))
+            payload["candidates_count"] = len(result.get("candidates") or [])
         return payload
 
     def invalidate_all(self):
