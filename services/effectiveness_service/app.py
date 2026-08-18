@@ -415,20 +415,23 @@ class OriginalRuntimeBackend(object):
             raw.get("hard_violations") or [], learned_boundaries,
             raw.get("coupling_assessments") or [],
         )
+        def _biz(value):
+            return round(float(value), 3) if value is not None else None
+
         return {
             "parameters": canonical,
-            "effectiveness_score": center_score,
-            "capability_score": center_score,
-            "conservative_capability_score": conservative_score,
-            "protocol_score_interval": protocol_interval,
+            "effectiveness_score": _biz(center_score),
+            "capability_score": _biz(center_score),
+            "conservative_capability_score": _biz(conservative_score),
+            "protocol_score_interval": [_biz(v) for v in protocol_interval] if protocol_interval else None,
             "support_at_80": requirement.get("support_at_80", raw.get("protocol_support_at_80")),
             "support_at_100": requirement.get("support_at_100", raw.get("protocol_support_at_100")),
             "robust_model_count": requirement.get("robust_model_count", 0),
             "robust_unique_model_count": requirement.get("robust_unique_model_count", 0),
             "robust_conclusion": requirement.get("robust_conclusion"),
             "robust_conclusion_label": requirement.get("robust_conclusion_label", raw.get("protocol_robust_conclusion")),
-            "score_uncertainty_width": uncertainty_width,
-            "feasibility_probability": raw.get("learned_feasibility_probability"),
+            "score_uncertainty_width": _biz(uncertainty_width),
+            "feasibility_probability": _biz(raw.get("learned_feasibility_probability")),
             "feasibility_status": raw.get("status"),
             "physical_gate": physical_gate,
             "effectiveness_source": raw.get("effectiveness_source"),

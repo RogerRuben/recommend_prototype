@@ -353,8 +353,8 @@ def predict(bundle, parameters, allow_degraded=False):
         lower, upper = max(0.0, price_wan - delta), price_wan + delta
     status = "exact" if not skipped else "degraded"
     result = {
-        "predicted_price_wan": round(price_wan, 6),
-        "price_interval_wan": [round(lower, 6), round(upper, 6)],
+        "predicted_price_wan": round(price_wan, 3),
+        "price_interval_wan": [round(lower, 3), round(upper, 3)],
         "prediction_mode": "native_pickle_%s" % status,
         "member_predictions": predictions,
         "skipped_members": skipped,
