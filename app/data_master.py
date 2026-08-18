@@ -12,11 +12,11 @@ from .xlsx_utils import read_workbook_bytes, write_workbook_bytes
 
 SHEETS = OrderedDict([
     ("成品信息", ["成品代号", "成品名称", "成品说明", "是否启用"]),
-    ("指标定义", ["指标编号", "指标名称", "单位", "取值类型", "搜索类型", "工程下限", "工程上限", "效能方向", "指标说明", "调整提示", "允许值", "是否必填", "允许自动调整", "显示小数位", "显示顺序", "是否启用", "模型取值映射(JSON)"]),
+    ("指标定义", ["指标编号", "指标名称", "指标分组", "单位", "取值类型", "搜索类型", "工程下限", "工程上限", "效能方向", "指标说明", "调整提示", "允许值", "是否必填", "允许自动调整", "显示小数位", "显示顺序", "是否启用", "模型取值映射(JSON)"]),
     ("标签字典", ["标签编号", "标签名称", "标签分组", "匹配权重", "生成判定方式", "标签说明", "是否启用"]),
     ("标签规则", ["规则编号", "标签编号", "指标编号", "比较关系", "条件值1", "条件值2", "规则组", "是否启用"]),
     ("耦合关系", ["关系编号", "关系名称", "关系类型", "指标A", "指标B", "可行域比较", "系数", "偏置", "作用强度", "提示级别", "关系说明", "设置依据", "显示顺序", "是否启用"]),
-    ("约束规则", ["规则编号", "规则名称", "左侧指标", "比较关系", "右侧指标", "系数", "偏置", "提示级别", "违反提示", "设置依据", "显示顺序", "是否启用"]),
+    ("约束规则", ["规则编号", "规则名称", "左侧指标", "比较关系", "右侧指标", "系数", "偏置", "提示级别", "违反提示", "设置依据", "显示顺序", "是否启用", "规则类型", "约束组", "模板元数据(JSON)"]),
     ("历史协议", ["协议编号", "协议名称", "方案定位", "协议来源", "来源年份", "供应方类型", "历史价格(万元)", "标签"]),
     ("模型字段绑定", ["模型类型", "字段编号", "字段名称", "字段来源", "数据类型", "单位", "是否必填", "缺失策略", "数据库配置值", "训练均值", "模型版本", "是否启用"]),
 ])
@@ -468,7 +468,7 @@ class DataMasterService(object):
         rows.append(("成品信息", [SHEETS["成品信息"], [product.get("product_code"), product.get("product_name"), product.get("product_description"), display_bool(product.get("enabled", 1))]]))
         params = []
         for p in snap["parameters"]:
-            params.append([p.get("parameter_id"), p.get("label"), p.get("unit"), display_value_type(p.get("value_type")), display_search_type(p.get("search_type", "auto")), p.get("min_value"), p.get("max_value"), display_preference(p.get("preference")), p.get("description"), p.get("adjustment_hint"), "、".join(str(x) for x in _json_allowed(p.get("allowed_values_json"))), display_bool(p.get("required", 1)), display_bool(p.get("auto_adjustable", 1)), p.get("decimal_places", 3), p.get("display_order"), display_bool(p.get("enabled", 1)), p.get("model_value_mapping_json") or ""])
+            params.append([p.get("parameter_id"), p.get("label"), p.get("parameter_group", "其他"), p.get("unit"), display_value_type(p.get("value_type")), display_search_type(p.get("search_type", "auto")), p.get("min_value"), p.get("max_value"), display_preference(p.get("preference")), p.get("description"), p.get("adjustment_hint"), "、".join(str(x) for x in _json_allowed(p.get("allowed_values_json"))), display_bool(p.get("required", 1)), display_bool(p.get("auto_adjustable", 1)), p.get("decimal_places", 3), p.get("display_order"), display_bool(p.get("enabled", 1)), p.get("model_value_mapping_json") or ""])
         rows.append(("指标定义", [SHEETS["指标定义"]] + params))
         tags = []
         for t in snap["tags"]:
@@ -484,7 +484,7 @@ class DataMasterService(object):
         rows.append(("耦合关系", [SHEETS["耦合关系"]] + ([] if empty else couplings)))
         constraints = []
         for r in snap["constraints"]:
-            constraints.append([r.get("rule_id"), r.get("rule_name"), r.get("left_parameter"), display_operator(r.get("operator")), r.get("right_parameter"), r.get("multiplier"), r.get("offset"), display_severity(r.get("severity")), r.get("message"), r.get("rationale"), r.get("display_order"), display_bool(r.get("enabled", 1))])
+            constraints.append([r.get("rule_id"), r.get("rule_name"), r.get("left_parameter"), display_operator(r.get("operator")), r.get("right_parameter"), r.get("multiplier"), r.get("offset"), display_severity(r.get("severity")), r.get("message"), r.get("rationale"), r.get("display_order"), display_bool(r.get("enabled", 1)), r.get("rule_kind", "affine"), r.get("constraint_group"), r.get("template_metadata_json")])
         rows.append(("约束规则", [SHEETS["约束规则"]] + ([] if empty else constraints)))
         protocol_headers = list(SHEETS["历史协议"]) + [p.get("label") + (("(%s)" % p.get("unit")) if p.get("unit") else "") for p in snap["parameters"]]
         protocols = []
@@ -575,7 +575,8 @@ class DataMasterService(object):
                         raise ValueError("指标%s的模型取值映射必须是JSON对象。" % clean(r.get("指标编号")))
                     mapping = json.dumps(parsed_mapping, ensure_ascii=False)
                 parameters.append({
-                    "parameter_id": clean(r.get("指标编号")), "label": clean(r.get("指标名称")), "unit": clean(r.get("单位")),
+                    "parameter_id": clean(r.get("指标编号")), "label": clean(r.get("指标名称")),
+                    "parameter_group": clean(r.get("指标分组")) or "其他", "unit": clean(r.get("单位")),
                     "value_type": value_type, "search_type": search_type, "min_value": num(r.get("工程下限")), "max_value": num(r.get("工程上限")),
                     "preference": normalize_preference(r.get("效能方向")), "description": clean(r.get("指标说明")), "adjustment_hint": clean(r.get("调整提示")),
                     "allowed_values_json": allowed or None, "model_value_mapping_json": mapping,
@@ -623,7 +624,7 @@ class DataMasterService(object):
             report["data"]["couplings"] = couplings
             constraints=[]
             for r in parsed["约束规则"]:
-                item={"rule_id":clean(r.get("规则编号")), "rule_name":clean(r.get("规则名称")), "left_parameter":clean(r.get("左侧指标")), "operator":normalize_operator(r.get("比较关系")), "right_parameter":clean(r.get("右侧指标")) or None, "multiplier":num(r.get("系数")) if clean(r.get("系数")) else 1.0, "offset":num(r.get("偏置")) if clean(r.get("偏置")) else 0.0, "severity":normalize_severity(r.get("提示级别")) or "warning", "message":clean(r.get("违反提示")), "rationale":clean(r.get("设置依据")), "display_order":integer(r.get("显示顺序"),len(constraints)+1), "enabled":parse_bool(r.get("是否启用",1))}
+                item={"rule_id":clean(r.get("规则编号")), "rule_name":clean(r.get("规则名称")), "left_parameter":clean(r.get("左侧指标")), "operator":normalize_operator(r.get("比较关系")), "right_parameter":clean(r.get("右侧指标")) or None, "multiplier":num(r.get("系数")) if clean(r.get("系数")) else 1.0, "offset":num(r.get("偏置")) if clean(r.get("偏置")) else 0.0, "severity":normalize_severity(r.get("提示级别")) or "warning", "message":clean(r.get("违反提示")), "rationale":clean(r.get("设置依据")), "display_order":integer(r.get("显示顺序"),len(constraints)+1), "enabled":parse_bool(r.get("是否启用",1)), "rule_kind":clean(r.get("规则类型")) or "affine", "constraint_group":clean(r.get("约束组")) or None, "template_metadata_json":clean(r.get("模板元数据(JSON)")) or None}
                 if item["left_parameter"] not in param_by_key or (item["right_parameter"] and item["right_parameter"] not in param_by_key):
                     report["errors"].append("约束规则%s引用未知指标%s/%s" % (item["rule_id"], item["left_parameter"], item["right_parameter"] or "常数"))
                 constraints.append(item)

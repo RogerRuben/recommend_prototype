@@ -160,6 +160,7 @@ class Store(object):
                     min_value REAL, max_value REAL, observed_min REAL, observed_max REAL, preference TEXT, description TEXT, adjustment_hint TEXT,
                     allowed_values_json TEXT, model_value_mapping_json TEXT, search_type TEXT NOT NULL DEFAULT 'auto', required INTEGER NOT NULL DEFAULT 1,
                     auto_adjustable INTEGER NOT NULL DEFAULT 1, decimal_places INTEGER NOT NULL DEFAULT 3,
+                    parameter_group TEXT NOT NULL DEFAULT '其他',
                     display_order INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, model_bound INTEGER NOT NULL DEFAULT 1
                 );
                 CREATE TABLE IF NOT EXISTS tags(
@@ -229,6 +230,7 @@ class Store(object):
                     ("parameter_definitions", "required INTEGER NOT NULL DEFAULT 1"),
                     ("parameter_definitions", "auto_adjustable INTEGER NOT NULL DEFAULT 1"),
                     ("parameter_definitions", "decimal_places INTEGER NOT NULL DEFAULT 3"),
+                    ("parameter_definitions", "parameter_group TEXT NOT NULL DEFAULT '其他'"),
                     ("parameter_definitions", "observed_min REAL"),
                     ("parameter_definitions", "observed_max REAL"),
                     ("tags", "enabled INTEGER NOT NULL DEFAULT 1"),
@@ -911,10 +913,10 @@ class Store(object):
                     conn.execute("INSERT INTO products(product_code,product_name,product_description,enabled) VALUES(?,?,?,?)", (item["product_code"],item["product_name"],item.get("product_description"),int(item.get("enabled",1))))
                 for item in data.get("parameters", []):
                     conn.execute("""INSERT INTO parameter_definitions
-                        (parameter_id,label,unit,value_type,min_value,max_value,observed_min,observed_max,preference,description,adjustment_hint,
+                        (parameter_id,label,parameter_group,unit,value_type,min_value,max_value,observed_min,observed_max,preference,description,adjustment_hint,
                          allowed_values_json,model_value_mapping_json,search_type,required,auto_adjustable,decimal_places,display_order,enabled,model_bound)
                         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
-                        item["parameter_id"],item["label"],item.get("unit"),item["value_type"],item.get("min_value"),item.get("max_value"),item.get("observed_min"),item.get("observed_max"),item.get("preference"),item.get("description"),item.get("adjustment_hint"),item.get("allowed_values_json"),item.get("model_value_mapping_json"),item.get("search_type") or "auto",int(item.get("required",1)),int(item.get("auto_adjustable",1)),int(item.get("decimal_places",3)),int(item.get("display_order",1)),int(item.get("enabled",1)),int(item.get("model_bound",1))))
+                        item["parameter_id"],item["label"],item.get("parameter_group") or "其他",item.get("unit"),item["value_type"],item.get("min_value"),item.get("max_value"),item.get("observed_min"),item.get("observed_max"),item.get("preference"),item.get("description"),item.get("adjustment_hint"),item.get("allowed_values_json"),item.get("model_value_mapping_json"),item.get("search_type") or "auto",int(item.get("required",1)),int(item.get("auto_adjustable",1)),int(item.get("decimal_places",3)),int(item.get("display_order",1)),int(item.get("enabled",1)),int(item.get("model_bound",1))))
                 for item in data.get("tags", []):
                     conn.execute("INSERT INTO tags(tag_id,tag_name,tag_group,weight,derivation_mode,description,enabled) VALUES(?,?,?,?,?,?,?)", (item["tag_id"],item["tag_name"],item.get("tag_group"),float(item.get("weight",1)),item.get("derivation_mode") or "rule",item.get("description"),int(item.get("enabled",1))))
                 for item in data.get("tag_rules", []):
@@ -925,8 +927,8 @@ class Store(object):
                         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (item["coupling_id"],item["coupling_name"],item["coupling_type"],item["parameter_a"],item["parameter_b"],item.get("domain_operator"),item.get("multiplier"),item.get("offset"),item.get("strength"),item.get("severity"),item.get("description"),item.get("rationale"),int(item.get("display_order",1)),int(item.get("enabled",1))))
                 for item in data.get("constraints", []):
                     conn.execute("""INSERT INTO constraint_rules
-                        (rule_id,rule_name,left_parameter,operator,right_parameter,multiplier,offset,severity,message,rationale,display_order,enabled)
-                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (item["rule_id"],item["rule_name"],item["left_parameter"],item["operator"],item.get("right_parameter"),float(item.get("multiplier",1)),float(item.get("offset",0)),item.get("severity"),item.get("message"),item.get("rationale"),int(item.get("display_order",1)),int(item.get("enabled",1))))
+                        (rule_id,rule_name,left_parameter,operator,right_parameter,multiplier,offset,severity,message,rationale,display_order,enabled,rule_kind,constraint_group,template_metadata_json)
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (item["rule_id"],item["rule_name"],item["left_parameter"],item["operator"],item.get("right_parameter"),float(item.get("multiplier",1)),float(item.get("offset",0)),item.get("severity"),item.get("message"),item.get("rationale"),int(item.get("display_order",1)),int(item.get("enabled",1)),item.get("rule_kind") or "affine",item.get("constraint_group"),item.get("template_metadata_json")))
                 if sync_model_contract:
                     # Runtime contract rows describe external model services and
                     # are not part of the business DataMaster authority.
@@ -1015,6 +1017,7 @@ class Store(object):
             payload.get("active_max", 1),
         )
         group = compiled["constraint_group"]
+        original_group = str(payload.get("original_constraint_group") or "").strip() or None
         severity = payload.get("severity") or "warning"
         message = payload.get("message") or "控制条件不满足时，该从属指标应取不适用值。"
         rationale = payload.get("rationale") or ""
@@ -1023,7 +1026,11 @@ class Store(object):
             conn = self.connect()
             try:
                 # Edit = replace the whole group, never leave a dangling half-rule.
+                # A controller/target edit produces a new group id, so also drop the
+                # previous group.
                 conn.execute("DELETE FROM constraint_rules WHERE constraint_group=?", (group,))
+                if original_group and original_group != group:
+                    conn.execute("DELETE FROM constraint_rules WHERE constraint_group=?", (original_group,))
                 for index, rule in enumerate(compiled["rules"]):
                     rule_id = build_rule_id(group, rule["rule_kind"])
                     rule_name = "%s %s" % (target, "下界" if rule["rule_kind"] == "conditional_lower" else "上界")
