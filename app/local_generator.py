@@ -83,6 +83,24 @@ def _move_reason_text(search_move):
     }.get(move_type, "参数搜索动作")
 
 
+def _change_source(key, projection_repairs, locked):
+    if any((rep or {}).get("parameter") == key for rep in (projection_repairs or [])):
+        return "constraint_projection"
+    if key in set(locked or []):
+        return "user_frozen"
+    return "search"
+
+
+def _change_reason_type(key, projection_repairs, locked):
+    if any((rep or {}).get("parameter") == key for rep in (projection_repairs or [])):
+        for rep in (projection_repairs or []):
+            if (rep or {}).get("parameter") == key:
+                return rep.get("type") or "conditional_projection"
+    if key in set(locked or []):
+        return "user_locked"
+    return "search_move"
+
+
 def _clamp(value, lo, hi):
     return max(float(lo), min(float(hi), float(value)))
 
@@ -1077,7 +1095,13 @@ class HistorySeededGenerator(object):
                     "reason_type": _move_reason_type(move_type),
                     "reason_text": _move_reason_text(search_move),
                     "changes": [
-                        {"parameter_id": key, "before": (parent_record or {}).get("params", {}).get(key), "after": params.get(key)}
+                        {
+                            "parameter_id": key,
+                            "before": (parent_record or {}).get("params", {}).get(key),
+                            "after": params.get(key),
+                            "source": _change_source(key, projection_repairs, locked),
+                            "reason_type": _change_reason_type(key, projection_repairs, locked),
+                        }
                         for key in move_changes
                     ],
                 },
