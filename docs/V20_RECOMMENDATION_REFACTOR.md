@@ -96,3 +96,37 @@
 
 ### 兼容风险
 - `sort_by` / `sort_order` 永不进入生成指纹；冻结仅作用于生成，不影响推荐排序请求。
+
+---
+
+## V20 Integration Hardening（`889a7a8`）
+
+Phase 5 之前补齐的集成收口，解决四个阶段之间仍然存在的语义/缓存/降级不一致。
+
+| 编号 | 修复 |
+| --- | --- |
+| 1 | `frozen_parameters` 进入后端生成指纹 + 前端 generation snapshot |
+| 2 | Generator 的 `_request_distance` / `_demand_assessment` 复用共享 `RequirementAssessment` |
+| 3 | `rank_historical_products` 离线回退改为软推荐（不再硬过滤） |
+| 4 | 前端卡片与详情真正渲染 `requirement_assessment.conditions` |
+| 5 | `sort_order` 从 generation snapshot 排除 |
+| 6 | 删除详情页“筛选排序采用 P10”旧文案 |
+| 7 | mapped enum 接入 `canonical_filter_value` / `values_equal` 比较 |
+| 8 | `unknown` 不再计入 `strict_satisfied`；修复离线价格降序缺失价格排最前 |
+
+### 关键文件
+- `app/generation_tasks.py`、`app/static/app.js`（指纹 + snapshot）
+- `app/local_generator.py`（Seed 距离 / 需求判定复用共享评估，生成结果附 `requirement_assessment`）
+- `app/recommender.py`（`filter_match` 枚举映射、`rank_historical_products` 软推荐与降序修复、`agreement_matches` 传 definitions）
+- `app/requirement_assessment.py`（`assessment_status`、`strict_satisfied` 语义、`group_matched`）
+- `app/server.py`（离线排序传 definitions/tag_map，两处 `_demand_assessment` 解包三元组）
+- `app/static/index.html` / `styles.css`（“需求匹配”面板与证据 chips）
+
+### 测试
+- 新增 `tests/generation_fingerprint_test.py`、`tests/mapped_enum_value_semantics_test.py`、`tests/offline_soft_unknown_test.py`、`tests/generator_requirement_consistency_test.py`
+- 扩展 `tests/requirement_assessment_test.py`（OR 组 strict_satisfied / unknown 不计满足）
+
+### 未包含（Phase 5 增强项）
+- DataMaster/模型耦合对优先级选择（当前仍为相邻 `numeric_comp` 组合）
+- 完整多步 move trace（当前仅保存最终节点 parent 信息，未嵌完整链）
+
