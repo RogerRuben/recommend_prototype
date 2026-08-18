@@ -38,7 +38,7 @@
       <label>推荐排序<select id="sortBy"><option value="comprehensive">综合推荐</option><option value="price">价格</option><option value="capability">效能评分</option><option value="tag_match">标签匹配率</option></select></label>
       <label>排序方向<select id="sortOrder"><option value="desc">从高到低</option><option value="asc">从低到高</option></select></label>
       <button id="recommendBtn" class="button primary full">开始智能推荐</button>
-      <div class="generation-box"><div><b>智能生成新方案</b><p>根据当前需求形成新的候选参数组合。</p></div><div class="generation-options"><label>生成数量<input id="generationCount" type="number" min="1" max="30" value="10"></label></div><button id="generateBtn" class="button accent full">智能生成方案</button><button id="clearLiveBtn" class="link-button full">清空生成方案</button></div>
+      <div class="generation-box"><div><b>智能生成新方案</b><p>根据当前需求形成新的候选参数组合。</p></div><div class="generation-options"><label>生成数量<input id="generationCount" type="number" min="1" max="30" value="10"></label></div><div class="generation-frozen"><b>生成时保持不变</b><div id="frozenParams" class="frozen-list"></div></div><button id="generateBtn" class="button accent full">智能生成方案</button><button id="clearLiveBtn" class="link-button full">清空生成方案</button></div>
     </section>
   </aside>
 

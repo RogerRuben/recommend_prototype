@@ -442,6 +442,21 @@ class HistorySeededGenerator(object):
             params[key] = value
         return params
 
+    @staticmethod
+    def _apply_frozen(params, locked, frozen_parameters):
+        """Lock user-frozen parameters to each seed's own historical value.
+
+        Returns a ``{key: source}`` map so the trace can distinguish user-anchored
+        values from user-frozen values, while every search action treats both as
+        immutable via the shared ``locked`` dict.
+        """
+        locked_sources = dict((key, "user_anchor") for key in (locked or {}))
+        for key in (frozen_parameters or []):
+            if key in params and key not in locked:
+                locked[key] = params[key]
+                locked_sources[key] = "user_frozen"
+        return locked_sources
+
     def _contour_diagnostics(self, params, locked):
         details = []
         total = 0.0
@@ -1295,10 +1310,11 @@ class HistorySeededGenerator(object):
             item["solution_fit_summary"] = "已满足当前筛选条件且位于主要模型经验范围内"
         return item
 
-    def _emergency_candidate(self, seeds, bounds, definitions, request, tag_map, rng):
+    def _emergency_candidate(self, seeds, bounds, definitions, request, tag_map, rng, frozen_parameters=None):
         for base in seeds:
             params = dict(base.get("params") or {})
             locked, conflicts = self._anchor_demands(params, bounds, definitions)
+            self._apply_frozen(params, locked, frozen_parameters)
             changed = self._changed_parameters(params, base["params"], definitions)
             for key, definition in definitions.items():
                 if key in locked or key not in params or not definition.get("auto_adjustable", 1):
@@ -1351,6 +1367,7 @@ class HistorySeededGenerator(object):
             branch_bounds.append(bounds)
             params = dict(base["params"])
             locked, anchor_conflicts = self._anchor_demands(params, bounds, definitions)
+            locked_sources = self._apply_frozen(params, locked, request.get("frozen_parameters"))
             repairs, soft_moves = self._finalize_params(params, base, locked, definitions, soft_strength=0.18)
             signature = tuple((key, params[key]) for key in sorted(params))
             if signature in seen:
@@ -1361,6 +1378,7 @@ class HistorySeededGenerator(object):
                 "base": base,
                 "request": branch_request,
                 "locked": locked,
+                "locked_sources": locked_sources,
                 "anchor_conflicts": anchor_conflicts,
                 "repairs": repairs,
                 "soft_moves": soft_moves,
@@ -1399,9 +1417,11 @@ class HistorySeededGenerator(object):
             evaluations += 1
             record["_base"] = item["base"]
             record["_locked"] = item["locked"]
+            record["_locked_sources"] = item["locked_sources"]
             record["_anchor_conflicts"] = item["anchor_conflicts"]
             record["_request"] = item["request"]
             record["generation_trace"]["tag_branch"] = item["branch_info"]
+            record["generation_trace"]["locked_sources"] = item["locked_sources"]
             all_records.append(record)
             beam.append(record)
         beam_width = 14 if deep_search else 10
@@ -1421,23 +1441,26 @@ class HistorySeededGenerator(object):
             pending = []
             remaining_rounds = len(step_schedule) - iteration + 1
             remaining_budget = max_evaluations - evaluations
-            # Deep extrapolation must retain budget for cumulative multi-attribute
-            # movement.  A single wide first-round coordinate scan previously
-            # consumed the whole budget and could never combine useful moves.
-            round_budget = (
-                (
+            # Retain budget for cumulative multi-round movement in both modes.
+            # A single first-round coordinate scan must not consume the whole
+            # budget and degrade the search into one shallow neighborhood.
+            if deep_search:
+                round_budget = (
                     min(120, remaining_budget)
                     if iteration == 1 else
                     max(24, int(math.ceil(float(remaining_budget) / remaining_rounds)))
                 )
-                if deep_search else remaining_budget
-            )
-            round_budget = min(round_budget, remaining_budget)
+            elif iteration == 1:
+                round_budget = min(max(24, int(max_evaluations * 0.35)), remaining_budget)
+            else:
+                round_budget = max(16, int(math.ceil(float(remaining_budget) / remaining_rounds)))
+            round_budget = max(1, min(round_budget, remaining_budget))
             proposals_by_center = []
             proposed_signatures = set()
             for center_record in beam:
                 base = center_record["_base"]
                 locked = center_record["_locked"]
+                locked_sources = center_record.get("_locked_sources") or {}
                 anchor_conflicts = center_record["_anchor_conflicts"]
                 center_request = center_record.get("_request") or request
                 compensation = self._compensation_keys(locked, definitions, numeric)
@@ -1459,7 +1482,7 @@ class HistorySeededGenerator(object):
                     proposed_signatures.add(signature)
                     center_pending.append({
                         "params": params, "base": base, "request": center_request,
-                        "locked": locked, "anchor_conflicts": anchor_conflicts,
+                        "locked": locked, "locked_sources": locked_sources, "anchor_conflicts": anchor_conflicts,
                         "repairs": repairs, "soft_moves": soft_moves,
                         "move_label": move_label, "center_record": center_record,
                         "signature": signature,
@@ -1482,6 +1505,7 @@ class HistorySeededGenerator(object):
                         "params": params, "base": base,
                         "request": center_record.get("_request") or request,
                         "locked": locked,
+                        "locked_sources": center_record.get("_locked_sources") or {},
                         "anchor_conflicts": center_record["_anchor_conflicts"],
                         "repairs": repairs, "soft_moves": soft_moves,
                         "move_label": move_label, "center_record": center_record,
@@ -1556,9 +1580,11 @@ class HistorySeededGenerator(object):
                 evaluations += 1
                 record["_base"] = item["base"]
                 record["_locked"] = item["locked"]
+                record["_locked_sources"] = item.get("locked_sources") or {}
                 record["_anchor_conflicts"] = item["anchor_conflicts"]
                 record["_request"] = item["request"]
                 record["generation_trace"]["tag_branch"] = dict(item["center_record"].get("generation_trace", {}).get("tag_branch") or {})
+                record["generation_trace"]["locked_sources"] = record["_locked_sources"]
                 round_records.append(record)
                 all_records.append(record)
             beam = self._beam_select(round_records, definitions, width=beam_width)
@@ -1597,7 +1623,7 @@ class HistorySeededGenerator(object):
             usable.append(record)
 
         if not usable:
-            emergency, emergency_base = self._emergency_candidate(seeds, bounds, definitions, request, tag_map, rng)
+            emergency, emergency_base = self._emergency_candidate(seeds, bounds, definitions, request, tag_map, rng, frozen_parameters=request.get("frozen_parameters"))
             if emergency is not None:
                 emergency["_base"] = emergency_base
                 emergency["_changed"] = self._changed_parameters(emergency["params"], emergency_base["params"], definitions)
