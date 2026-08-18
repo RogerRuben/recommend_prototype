@@ -205,7 +205,8 @@ class Store(object):
                     rule_id TEXT PRIMARY KEY, rule_name TEXT NOT NULL, left_parameter TEXT NOT NULL,
                     operator TEXT NOT NULL, right_parameter TEXT, multiplier REAL NOT NULL DEFAULT 1,
                     offset REAL NOT NULL DEFAULT 0, severity TEXT, message TEXT, rationale TEXT,
-                    display_order INTEGER NOT NULL DEFAULT 1, enabled INTEGER NOT NULL DEFAULT 1
+                    display_order INTEGER NOT NULL DEFAULT 1, enabled INTEGER NOT NULL DEFAULT 1,
+                    rule_kind TEXT NOT NULL DEFAULT 'affine', constraint_group TEXT, template_metadata_json TEXT
                 );
                 CREATE TABLE IF NOT EXISTS audit_log(
                     id INTEGER PRIMARY KEY AUTOINCREMENT, action TEXT NOT NULL, object_type TEXT,
@@ -241,6 +242,9 @@ class Store(object):
                     ("tag_rules", "archived_at TEXT"),
                     ("indicator_couplings", "archived_at TEXT"),
                     ("constraint_rules", "archived_at TEXT"),
+                    ("constraint_rules", "rule_kind TEXT NOT NULL DEFAULT 'affine'"),
+                    ("constraint_rules", "constraint_group TEXT"),
+                    ("constraint_rules", "template_metadata_json TEXT"),
                     ("agreements", "archived_at TEXT"),
                     ("saved_schemes", "product_code TEXT"),
                 ]:
@@ -988,6 +992,83 @@ class Store(object):
         finally:
             conn.close()
 
+    def upsert_conditional_template(self, payload):
+        """Create or replace a conditional-attribute template as one atomic group."""
+        from .conditional_constraint import build_rule_id, compile_conditional_constraint
+        payload = dict(payload or {})
+        controller = str(payload.get("controller") or "").strip()
+        target = str(payload.get("target") or "").strip()
+        if not controller or not target:
+            raise ValueError("请选择控制指标和从属指标。")
+        parameter_ids = set(self.parameter_map())
+        if controller not in parameter_ids:
+            raise ValueError("控制指标不存在：%s" % controller)
+        if target not in parameter_ids:
+            raise ValueError("从属指标不存在：%s" % target)
+        active_value = payload.get("active_value")
+        if active_value in (None, ""):
+            active_value = 1
+        compiled = compile_conditional_constraint(
+            controller, active_value, target,
+            payload.get("inactive_value", -1),
+            payload.get("active_min", 0),
+            payload.get("active_max", 1),
+        )
+        group = compiled["constraint_group"]
+        severity = payload.get("severity") or "warning"
+        message = payload.get("message") or "控制条件不满足时，该从属指标应取不适用值。"
+        rationale = payload.get("rationale") or ""
+        display_order = int(payload.get("display_order") or 1)
+        with self.lock:
+            conn = self.connect()
+            try:
+                # Edit = replace the whole group, never leave a dangling half-rule.
+                conn.execute("DELETE FROM constraint_rules WHERE constraint_group=?", (group,))
+                for index, rule in enumerate(compiled["rules"]):
+                    rule_id = build_rule_id(group, rule["rule_kind"])
+                    rule_name = "%s %s" % (target, "下界" if rule["rule_kind"] == "conditional_lower" else "上界")
+                    conn.execute(
+                        "INSERT INTO constraint_rules(rule_id,rule_name,left_parameter,operator,right_parameter,"
+                        "multiplier,offset,severity,message,rationale,display_order,enabled,"
+                        "rule_kind,constraint_group,template_metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (rule_id, rule_name, rule["left_parameter"], rule["operator"], rule["right_parameter"],
+                         rule["multiplier"], rule["offset"], severity, message, rationale,
+                         display_order + index, 1, rule["rule_kind"], group, rule["template_metadata_json"]))
+                self._audit(conn, "upsert", "constraints", group, {"conditional_template": compiled["template_metadata"]})
+                conn.commit()
+            finally:
+                conn.close()
+        return {"saved": True, "constraint_group": group, "rules": len(compiled["rules"]), "template_metadata": compiled["template_metadata"]}
+
+    def delete_conditional_template(self, constraint_group):
+        with self.lock:
+            conn = self.connect()
+            try:
+                cur = conn.execute("DELETE FROM constraint_rules WHERE constraint_group=?", (str(constraint_group),))
+                self._audit(conn, "delete", "constraints", str(constraint_group), {})
+                conn.commit()
+                return {"deleted": cur.rowcount}
+            finally:
+                conn.close()
+
+    def conditional_templates(self):
+        conn = self.connect()
+        try:
+            rows = [dict(row) for row in conn.execute(
+                "SELECT * FROM constraint_rules WHERE constraint_group IS NOT NULL AND enabled=1 ORDER BY display_order")]
+        finally:
+            conn.close()
+        groups = {}
+        for row in rows:
+            raw = row.get("template_metadata_json")
+            meta = json.loads(raw) if raw else {}
+            group = groups.setdefault(row["constraint_group"], {
+                "constraint_group": row["constraint_group"], "template_metadata": meta, "rules": []})
+            group["rules"].append({
+                "rule_id": row["rule_id"], "rule_kind": row["rule_kind"],
+                "operator": row["operator"], "multiplier": row["multiplier"], "offset": row["offset"]})
+        return list(groups.values())
+
     # -------------------------- Rule assessment --------------------------
     @staticmethod
     def _compare(left, operator, right):
@@ -1185,6 +1266,7 @@ class Store(object):
                         row["tags"] = _json_list(row.pop("tags_json", "[]"))
                 payload[key] = rows
             payload["saved_schemes"] = self.list_saved()
+            payload["conditional_templates"] = self.conditional_templates()
             payload["audit_log"] = [dict(row) for row in conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT 100")]
             payload["database"] = {"path": str(self.db_path), "size_bytes": self.db_path.stat().st_size if self.db_path.exists() else 0, "integrity": self.integrity_check()}
             return payload

@@ -1514,6 +1514,7 @@ class Handler(BaseHTTPRequestHandler):
     PUBLIC_PATHS = {"/login", "/login.html", "/login.js", "/styles.css", "/api/health", "/api/auth/status", "/api/auth/login", "/api/auth/logout"}
     WRITE_PATHS = {
         "/api/save-scheme", "/api/admin/upsert", "/api/admin/delete", "/api/admin/toggle", "/api/admin/purge",
+        "/api/admin/conditional-constraint/upsert", "/api/admin/conditional-constraint/delete",
         "/api/admin/backup", "/api/admin/restore-backup",
         "/api/admin/upload-database", "/api/admin/models/replace",
         "/api/admin/wide-import/commit", "/api/admin/datamaster/commit",
@@ -1737,6 +1738,14 @@ class Handler(BaseHTTPRequestHandler):
             elif path.startswith("/api/admin/") and self.app.disable_admin: self._admin_forbidden()
             elif path == "/api/admin/upsert":
                 result = self.app.store.admin_upsert(request.get("section"), request.get("item") or {})
+                self.app.on_business_data_changed()
+                self._json(result)
+            elif path == "/api/admin/conditional-constraint/upsert":
+                result = self.app.store.upsert_conditional_template(request.get("template") or {})
+                self.app.on_business_data_changed()
+                self._json(result)
+            elif path == "/api/admin/conditional-constraint/delete":
+                result = self.app.store.delete_conditional_template(request.get("constraint_group"))
                 self.app.on_business_data_changed()
                 self._json(result)
             elif path == "/api/admin/delete":
