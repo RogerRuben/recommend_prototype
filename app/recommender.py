@@ -3,7 +3,7 @@ from __future__ import print_function
 
 import math
 
-from .value_semantics import canonical_filter_value, definition_mapping, normalize_boolean, normalize_numeric, values_equal
+from .value_semantics import canonical_filter_value, definition_mapping, mapping_target, normalize_boolean, normalize_numeric, values_equal
 
 
 DEFAULT_FEASIBILITY_GATE = 0.65
@@ -34,6 +34,15 @@ def filter_match(params, rule, definition=None):
     value1 = rule.get("value1")
     value2 = rule.get("value2")
     if operator == "boolean_is":
+        # A mapped third state (无该属性 -> -1) must match the stored inactive
+        # value; compare through the mapping before the two-value boolean truth.
+        target = mapping_target(value1, definition)
+        if target is not None:
+            a = normalize_numeric(actual)
+            t = normalize_numeric(target)
+            if a is not None and t is not None:
+                return math.isclose(a, t, rel_tol=1e-9, abs_tol=1e-9)
+            return str(actual).strip() == str(target).strip()
         truth = normalize_boolean(value1)
         actual_truth = normalize_boolean(actual)
         if truth is None or actual_truth is None:
@@ -198,9 +207,19 @@ def rank_agreements(items, request, tag_weights, definitions=None, tag_map=None)
             item["fit_penalty"] = item["requirement_assessment"]["demand_penalty"]
             candidates.append(item)
         elif agreement_matches(item, request, definitions) or (allow_best_effort and item.get("best_effort")):
-            item["requirement_assessment"] = assess_requirements(item, request, definitions, tag_map)
-            item["strict_filter_satisfied"] = item["requirement_assessment"]["strict_satisfied"]
-            item["fit_penalty"] = item["requirement_assessment"]["demand_penalty"]
+            assessment = assess_requirements(item, request, definitions, tag_map)
+            hard_penalty = float((item.get("search_metrics") or {}).get("hard_penalty") or 0)
+            hard_conflicts = item.get("engineering_conflicts") or []
+            item["requirement_assessment"] = assessment
+            # A generated candidate's engineering hard conflicts are part of its
+            # strictness and fit, not just a display flag (best_effort stays a
+            # result-classification field, never a computation input).
+            item["strict_filter_satisfied"] = (
+                assessment["strict_satisfied"]
+                and not hard_conflicts
+                and hard_penalty <= 0
+            )
+            item["fit_penalty"] = assessment["demand_penalty"] + 2.5 * hard_penalty
             candidates.append(item)
     selected_tags = request.get("selected_tags") or []
     for item in candidates:

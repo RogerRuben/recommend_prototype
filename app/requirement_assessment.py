@@ -126,10 +126,14 @@ def assess_requirements(item, request, definitions=None, tag_map=None):
         mode = str(request.get("indicator_filter_mode") or "all")
         group_matched = any(results) if mode == "any" else all(results)
         if group_matched:
+            group_gap = 0.0
             matched += 1
         else:
+            # The group's gap must express the same demand distance that feeds
+            # demand_penalty: the closest alternative for ANY, the sum for AND.
+            group_gap = min(gaps) if mode == "any" else sum(gaps)
             unmatched += 1
-            penalty += min(gaps) if mode == "any" else sum(gaps)
+            penalty += group_gap
         for rule, ok, gap in zip(rules, results, gaps):
             key = rule.get("parameter_id")
             definition = definitions.get(key, {})
@@ -149,7 +153,7 @@ def assess_requirements(item, request, definitions=None, tag_map=None):
             "kind": "parameter_group", "key": "__indicator_filters__",
             "label": "技术指标条件（%s）" % ("任一满足" if mode == "any" else "全部满足"),
             "matched": group_matched, "status": "matched" if group_matched else "unmatched",
-            "mode": mode, "gap": round(0.0 if group_matched else sum(gaps), 6),
+            "mode": mode, "gap": round(group_gap, 6),
         })
 
     selected_tags = list(request.get("selected_tags") or [])

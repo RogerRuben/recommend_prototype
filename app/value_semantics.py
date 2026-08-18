@@ -85,6 +85,28 @@ def definition_mapping(definition):
     return {str(k): v for k, v in parsed.items()} if isinstance(parsed, dict) else {}
 
 
+def mapping_target(value, definition=None):
+    """Return the model value a business label/encoding maps to, else ``None``.
+
+    Unlike :func:`canonical_filter_value` this never falls back to boolean truth,
+    so a declared third state (``无该属性 -> -1``) survives to the caller.
+    """
+    mapping = definition_mapping(definition)
+    if not mapping:
+        return None
+    text = str(value).strip()
+    for business, model in mapping.items():
+        if str(business).strip() == text:
+            return model
+    number = normalize_numeric(value)
+    if number is not None:
+        for business, model in mapping.items():
+            business_num = normalize_numeric(business)
+            if business_num is not None and math.isclose(business_num, number, rel_tol=1e-9, abs_tol=1e-9):
+                return model
+    return None
+
+
 def values_equal(left, right, definition=None):
     """Compare two business values with boolean/numeric tolerance.
 
