@@ -84,7 +84,7 @@ def assess_requirements(item, request, definitions=None, tag_map=None):
     rules = list(request.get("indicator_filters") or [])
     if rules:
         params = item.get("params") or {}
-        results = [filter_match(params, rule) for rule in rules]
+        results = [filter_match(params, rule, definitions.get(rule.get("parameter_id"))) for rule in rules]
         mode = str(request.get("indicator_filter_mode") or "all")
         group_matched = any(results) if mode == "any" else all(results)
         if group_matched:
@@ -105,7 +105,7 @@ def assess_requirements(item, request, definitions=None, tag_map=None):
                 "label": "%s %s %s" % (label, _operator_text(operator), expected),
                 "operator": operator, "actual": params.get(key),
                 "matched": bool(ok), "status": "matched" if ok else "unmatched",
-                "gap": None, "group": mode,
+                "gap": None, "group": mode, "group_matched": group_matched,
             })
         conditions.append({
             "kind": "parameter_group", "key": "__indicator_filters__",
@@ -130,7 +130,13 @@ def assess_requirements(item, request, definitions=None, tag_map=None):
         })
 
     total = matched + unmatched + unknown
-    strict_satisfied = unmatched == 0
+    strict_satisfied = unmatched == 0 and unknown == 0
+    if unmatched > 0:
+        assessment_status = "partial"
+    elif unknown > 0:
+        assessment_status = "unknown"
+    else:
+        assessment_status = "satisfied"
     fit_ratio = round(matched / total, 4) if total else 1.0
     return {
         "conditions": conditions,
@@ -140,6 +146,7 @@ def assess_requirements(item, request, definitions=None, tag_map=None):
         "total_count": total,
         "demand_penalty": round(penalty, 6),
         "strict_satisfied": strict_satisfied,
+        "assessment_status": assessment_status,
         "fit_ratio": fit_ratio,
     }
 

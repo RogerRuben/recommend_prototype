@@ -1082,9 +1082,10 @@ class Application(object):
                 "physical_gate": evaluation.get("physical_gate") or {},
                 "cost_effectiveness": evaluation.get("cost_effectiveness"),
             })
-            demand_unmet, demand_penalty = self.generator._demand_assessment(item, request, definitions, tag_map)
+            demand_unmet, demand_penalty, requirement_assessment = self.generator._demand_assessment(item, request, definitions, tag_map)
             hard_conflicts, hard_penalty = self.generator._engineering_conflicts(evaluation)
             item["demand_unmet_conditions"] = demand_unmet
+            item["requirement_assessment"] = requirement_assessment
             item["engineering_conflicts"] = hard_conflicts
             item["unmet_conditions"] = demand_unmet + hard_conflicts
             item["strict_filter_satisfied"] = not demand_unmet and not hard_conflicts
@@ -1133,7 +1134,7 @@ class Application(object):
         ranked = (
             rank_agreements(candidates, ranking_request, tag_weights, definitions=definitions, tag_map=tag_map)
             if calculation_available else
-            rank_historical_products(candidates, ranking_request, tag_weights)
+            rank_historical_products(candidates, ranking_request, tag_weights, definitions=definitions, tag_map=tag_map)
         )
         page, page_size = max(1, int(request.get("page", 1))), max(1, min(int(request.get("page_size", 12)), 50))
         start = (page - 1) * page_size
@@ -1269,8 +1270,11 @@ class Application(object):
             "params": evaluation.get("parameters") or params,
             "tags": current_tags,
             "evaluation": evaluation,
+            "predicted_price_wan": evaluation.get("predicted_price_wan"),
+            "capability_score": evaluation.get("capability_score"),
+            "historical_price_wan": None,
         }
-        demand_unmet, demand_penalty = self.generator._demand_assessment(item, context, definitions, tag_map)
+        demand_unmet, demand_penalty, _requirement_assessment = self.generator._demand_assessment(item, context, definitions, tag_map)
         hard_conflicts, hard_penalty = self.generator._engineering_conflicts(evaluation)
         locked = set(context.get("locked_parameters") or [])
         contour_details = []

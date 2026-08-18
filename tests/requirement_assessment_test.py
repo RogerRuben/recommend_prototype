@@ -58,11 +58,14 @@ def main():
     assess_c = assess_requirements(c_item, request_c, definitions, {})
     group = [c for c in assess_c["conditions"] if c["kind"] == "parameter_group"]
     assert group and group[0]["matched"] is True, "OR group must be satisfied when one side matches"
+    assert assess_c["strict_satisfied"] is True and assess_c["assessment_status"] == "satisfied"
 
     # Case D-ish / unknown: capability absent -> unknown, not unmatched.
     request_unknown = {"min_capability": 100}
     unk = assess_requirements(_item("U", capability=None, price=10), request_unknown, definitions, {})
     assert unk["unknown_count"] == 1 and unk["unmatched_count"] == 0, unk
+    assert unk["strict_satisfied"] is False, "unknown must not count as strict_satisfied"
+    assert unk["assessment_status"] == "unknown", unk["assessment_status"]
 
     # Soft historical recommendation keeps non-matching history and ranks strict first.
     items = [

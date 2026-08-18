@@ -3,7 +3,7 @@ from __future__ import print_function
 
 import math
 
-from .value_semantics import normalize_boolean, normalize_numeric
+from .value_semantics import canonical_filter_value, definition_mapping, normalize_boolean, normalize_numeric, values_equal
 
 
 DEFAULT_FEASIBILITY_GATE = 0.65
@@ -25,7 +25,7 @@ def _interval(value):
     return (n, n) if n is not None else None
 
 
-def filter_match(params, rule):
+def filter_match(params, rule, definition=None):
     key = rule.get("parameter_id")
     operator = rule.get("operator", "eq")
     if not key or key not in params:
@@ -40,6 +40,12 @@ def filter_match(params, rule):
             return False
         return actual_truth == truth
     if operator in ("text_equals", "text_contains"):
+        # Mapped enums compare through the DataMaster mapping so "常规型" matches a
+        # stored model encoding such as 1 / 1.0 / "1".  Plain text keeps the
+        # original case-insensitive trimmed comparison.
+        if operator == "text_equals" and definition_mapping(definition):
+            return values_equal(canonical_filter_value(actual, definition),
+                                canonical_filter_value(value1, definition), definition)
         left, right = str(actual).strip().lower(), str(value1 or "").strip().lower()
         return left == right if operator == "text_equals" else right in left
     a = _number(actual)
@@ -115,7 +121,8 @@ def physical_gate_passes(item, request):
     return feasibility >= threshold
 
 
-def agreement_matches(item, request):
+def agreement_matches(item, request, definitions=None):
+    definitions = definitions or {}
     if item.get("model_evaluation_available") is False:
         price = _number(item.get("historical_price_wan"))
         if request.get("max_price") not in (None, ""):
@@ -123,7 +130,7 @@ def agreement_matches(item, request):
                 return False
         filters = request.get("indicator_filters") or []
         if filters:
-            results = [filter_match(item.get("params", {}), rule) for rule in filters]
+            results = [filter_match(item.get("params", {}), rule, definitions.get(rule.get("parameter_id"))) for rule in filters]
             if request.get("indicator_filter_mode", "all") == "any":
                 if not any(results):
                     return False
@@ -157,7 +164,7 @@ def agreement_matches(item, request):
     if request.get("min_feasibility") not in (None, "") and feasibility < float(request["min_feasibility"]): return False
     filters = request.get("indicator_filters") or []
     if filters:
-        results = [filter_match(item.get("params", {}), rule) for rule in filters]
+        results = [filter_match(item.get("params", {}), rule, definitions.get(rule.get("parameter_id"))) for rule in filters]
         if request.get("indicator_filter_mode", "all") == "any":
             if not any(results): return False
         elif not all(results):
@@ -190,7 +197,7 @@ def rank_agreements(items, request, tag_weights, definitions=None, tag_map=None)
             item["strict_filter_satisfied"] = item["requirement_assessment"]["strict_satisfied"]
             item["fit_penalty"] = item["requirement_assessment"]["demand_penalty"]
             candidates.append(item)
-        elif agreement_matches(item, request) or (allow_best_effort and item.get("best_effort")):
+        elif agreement_matches(item, request, definitions) or (allow_best_effort and item.get("best_effort")):
             item["requirement_assessment"] = assess_requirements(item, request, definitions, tag_map)
             candidates.append(item)
     selected_tags = request.get("selected_tags") or []
@@ -275,31 +282,22 @@ def rank_agreements(items, request, tag_weights, definitions=None, tag_map=None)
     return candidates
 
 
-def rank_historical_products(items, request, tag_weights):
-    """Rank stored history without inventing model outputs.
+def rank_historical_products(items, request, tag_weights, definitions=None, tag_map=None):
+    """Rank stored history as a soft recommendation without inventing model outputs.
 
-    Used when either independent HTTP model service is unavailable.  Model-only
-    filters are intentionally ignored; historical price, business attributes
-    and stored tags continue to work.
+    Used when either independent HTTP model service is unavailable.  No history
+    row is dropped for failing a user threshold; every row keeps a requirement
+    assessment (price / attributes / tags are judgeable offline, model outputs
+    become ``unknown``) and fully-satisfied rows rank first.
     """
+    from .requirement_assessment import assess_requirements
+    definitions = definitions or {}
+    tag_map = tag_map or {}
     selected_tags = list(request.get("selected_tags") or [])
-    filters = list(request.get("indicator_filters") or [])
-    filter_mode = str(request.get("indicator_filter_mode") or "all")
     candidates = []
     for source in items:
         item = dict(source)
         price = _number(item.get("historical_price_wan"))
-        if request.get("max_price") not in (None, ""):
-            if price is None or price > float(request["max_price"]):
-                continue
-        results = [filter_match(item.get("params") or {}, rule) for rule in filters]
-        if results and ((filter_mode == "any" and not any(results)) or
-                        (filter_mode != "any" and not all(results))):
-            continue
-        own = set(item.get("tags") or [])
-        item["matched_tags"] = [tag for tag in selected_tags if tag in own]
-        item["missing_tags"] = [tag for tag in selected_tags if tag not in own]
-        item["tag_match_score"] = round(compute_tag_match(item, selected_tags, tag_weights), 3)
         item["predicted_price_wan"] = price
         item["capability_score"] = None
         item["conservative_capability_score"] = None
@@ -307,6 +305,13 @@ def rank_historical_products(items, request, tag_weights):
         item["feasibility_probability"] = None
         item["model_evaluation_available"] = False
         item["recommendation_confidence"] = "unavailable"
+        item["requirement_assessment"] = assess_requirements(item, request, definitions, tag_map)
+        item["strict_filter_satisfied"] = item["requirement_assessment"]["strict_satisfied"]
+        item["fit_penalty"] = item["requirement_assessment"]["demand_penalty"]
+        own = set(item.get("tags") or [])
+        item["matched_tags"] = [tag for tag in selected_tags if tag in own]
+        item["missing_tags"] = [tag for tag in selected_tags if tag not in own]
+        item["tag_match_score"] = round(compute_tag_match(item, selected_tags, tag_weights), 3)
         candidates.append(item)
     if not candidates:
         return []
@@ -319,19 +324,27 @@ def rank_historical_products(items, request, tag_weights):
         item["comprehensive_score"] = round(0.70 * item["tag_match_score"] + 0.30 * price_score, 3)
     sort_by = str(request.get("sort_by") or "comprehensive")
     sort_order = str(request.get("sort_order") or "").strip().lower()
+    key_map = {"comprehensive": "comprehensive_score", "price": "predicted_price_wan", "tag_match": "tag_match_score"}
+    key = key_map.get(sort_by, "comprehensive_score")
     if sort_order in ("asc", "desc"):
         reverse = sort_order == "desc"
     elif sort_by == "price":
         reverse = False
     else:
         reverse = True
-    if sort_by == "price":
-        candidates.sort(key=lambda item: (item["predicted_price_wan"] is None,
-                                          item["predicted_price_wan"] if item["predicted_price_wan"] is not None else float("inf")), reverse=reverse)
-    elif sort_by == "tag_match":
-        candidates.sort(key=lambda item: item["tag_match_score"], reverse=reverse)
-    else:
-        candidates.sort(key=lambda item: item["comprehensive_score"], reverse=reverse)
+    def _sort_value(item):
+        # Fully-satisfied rows first; within each class the sort key decides, with
+        # missing values always last regardless of direction.
+        satisfied_rank = 0 if item.get("strict_filter_satisfied") else 1
+        value = item.get(key)
+        if value is None:
+            score_rank = float("inf")
+        else:
+            score_rank = float(value)
+            if reverse:
+                score_rank = -score_rank
+        return (satisfied_rank, score_rank)
+    candidates.sort(key=_sort_value)
     for index, item in enumerate(candidates, 1):
         item["rank"] = index
     return candidates

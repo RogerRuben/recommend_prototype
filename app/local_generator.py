@@ -29,7 +29,8 @@ import math
 import random
 import time
 
-from .recommender import filter_match, rank_agreements
+from .recommender import rank_agreements
+from .requirement_assessment import assess_requirements
 from .value_semantics import normalize_boolean, normalize_numeric, values_equal
 
 
@@ -144,39 +145,11 @@ class HistorySeededGenerator(object):
         return self.store.parameter_map()
 
     def _request_distance(self, item, request, definitions, tag_weights):
-        params = item.get("params") or {}
-        distance = 0.0
-        for tag in request.get("selected_tags") or []:
-            if tag not in set(item.get("tags") or []):
-                distance += 1.5 * float(tag_weights.get(tag, 1.0))
-        for rule in request.get("indicator_filters") or []:
-            key = rule.get("parameter_id")
-            if key not in params:
-                distance += 4.0
-                continue
-            if filter_match(params, rule):
-                continue
-            definition = definitions.get(key, {})
-            span = max(float(definition.get("max_value") or 1) - float(definition.get("min_value") or 0), 1e-9)
-            actual, target = _float(params.get(key)), _float(rule.get("value1"))
-            distance += abs(actual - target) / span if actual is not None and target is not None else 1.0
-        evaluation = item.get("evaluation") or {}
-        checks = [
-            ("max_price", evaluation.get("predicted_price_wan"), "max"),
-            ("min_capability", evaluation.get("capability_score"), "min"),
-            ("min_cost_effectiveness", evaluation.get("cost_effectiveness"), "min"),
-            ("min_feasibility", evaluation.get("feasibility_probability"), "min"),
-        ]
-        for req_key, actual, direction in checks:
-            target = request.get(req_key)
-            if target in (None, "") or actual in (None, ""):
-                continue
-            target, actual = float(target), float(actual)
-            if direction == "max" and actual > target:
-                distance += (actual - target) / max(abs(target), 1.0)
-            if direction == "min" and actual < target:
-                distance += (target - actual) / max(abs(target), 1.0)
-        return distance
+        # One requirement semantics everywhere: the seed's distance from the user's
+        # conditions is the shared RequirementAssessment penalty, so OR-groups and
+        # unknown model outputs are handled identically to recommendation ranking.
+        assessment = assess_requirements(item, request, definitions, self.store.tag_map())
+        return assessment["demand_penalty"]
 
     def select_seeds(self, request, limit=12, historical=None):
         historical = list(historical if historical is not None else self.store.historical_agreements())
@@ -854,57 +827,34 @@ class HistorySeededGenerator(object):
         return unique[:max_moves]
 
     def _demand_assessment(self, item, request, definitions, tag_map):
-        """Assess only user requirements; model extrapolation is reported separately."""
+        """Assess user requirements via the shared RequirementAssessment module.
+
+        Returns ``(unmet_texts, penalty, assessment)`` so the caller can attach the
+        structured ``requirement_assessment`` for the UI while keeping the existing
+        human-readable ``unmet_conditions`` contract.
+        """
+        assessment = assess_requirements(item, request, definitions, tag_map)
         unmet = []
-        penalty = 0.0
-        own_tags = set(item.get("tags") or [])
-        for tag_id in request.get("selected_tags") or []:
-            if tag_id not in own_tags:
-                label = tag_map.get(tag_id, {}).get("tag_name", tag_id)
-                unmet.append("缺少标签“%s”" % label)
-                penalty += 2.0 * float(tag_map.get(tag_id, {}).get("weight", 1.0))
-        params = item.get("params") or {}
-        rules = request.get("indicator_filters") or []
-        rule_results = [filter_match(params, rule) for rule in rules]
-        if rules:
-            if request.get("indicator_filter_mode", "all") == "any":
-                failed_rules = [] if any(rule_results) else rules
-            else:
-                failed_rules = [rule for rule, matched in zip(rules, rule_results) if not matched]
-            for rule in failed_rules:
-                key = rule.get("parameter_id")
-                definition = definitions.get(key, {})
-                label = definition.get("label", key)
-                operator = self._operator_text(rule.get("operator"))
-                value1, value2 = rule.get("value1"), rule.get("value2")
-                expected = "%s～%s" % (value1, value2) if rule.get("operator", "").startswith("range_") else str(value1)
-                actual = params.get(key)
-                unmet.append("%s当前为%s，未达到“%s %s”" % (label, actual, operator, expected))
-                span = max(float(definition.get("max_value") or 1) - float(definition.get("min_value") or 0), 1e-9)
-                a, b = _float(actual), _float(value1)
-                penalty += 1.0 + (abs(a - b) / span if a is not None and b is not None else 0.5)
-        evaluation = item.get("evaluation") or {}
-        output_checks = [
-            ("max_price", "预测价格", evaluation.get("predicted_price_wan"), "max", "万元"),
-            ("min_capability", "效能评分", evaluation.get("capability_score"), "min", ""),
-            ("min_cost_effectiveness", "效费比", evaluation.get("cost_effectiveness"), "min", ""),
-            ("min_feasibility", "可行概率", evaluation.get("feasibility_probability"), "min", ""),
-        ]
-        for key, label, actual, direction, unit in output_checks:
-            target = request.get(key)
-            if target in (None, "") or actual in (None, ""):
+        failed_rule_labels = []
+        for condition in assessment["conditions"]:
+            kind = condition.get("kind")
+            if condition.get("status") != "unmatched":
                 continue
-            actual, target = float(actual), float(target)
-            violated = actual > target if direction == "max" else actual < target
-            if violated:
-                relation = "高于上限" if direction == "max" else "低于要求"
-                unmet.append("%s%s：当前%.3f%s，要求%.3f%s" % (label, relation, actual, unit, target, unit))
-                penalty += 1.5 + abs(actual - target) / max(abs(target), 1.0)
-        unique = []
-        for text in unmet:
-            if text not in unique:
-                unique.append(text)
-        return unique, round(penalty, 6)
+            if kind == "parameter":
+                # Individual rule detail; reported together with the group verdict.
+                failed_rule_labels.append(condition.get("label", ""))
+                continue
+            if kind == "parameter_group":
+                detail = "；".join(failed_rule_labels) or "存在未满足项"
+                unmet.append("%s（%s）" % (condition.get("label", "技术指标条件未满足"), detail))
+                continue
+            if kind == "tag":
+                unmet.append("缺少标签“%s”" % condition.get("label", ""))
+                continue
+            label = condition.get("label", "")
+            actual = condition.get("actual")
+            unmet.append("%s（当前 %s）" % (label, actual) if actual is not None else label)
+        return unmet, assessment["demand_penalty"], assessment
 
     @staticmethod
     def _engineering_conflicts(evaluation):
@@ -992,7 +942,7 @@ class HistorySeededGenerator(object):
             "is_generated": True,
             "evaluation": evaluation,
         }
-        demand_unmet, demand_penalty = self._demand_assessment(item, request, definitions, tag_map)
+        demand_unmet, demand_penalty, requirement_assessment = self._demand_assessment(item, request, definitions, tag_map)
         hard_conflicts, hard_penalty = self._engineering_conflicts(evaluation)
         extrapolation, contour_penalty, anomaly_penalty = self._extrapolation_assessment(evaluation, contour_details)
         seed_distance = self._normalized_distance(params, base["params"], definitions)
@@ -1000,6 +950,7 @@ class HistorySeededGenerator(object):
         item.update({
             "unmet_conditions": demand_unmet + hard_conflicts,
             "demand_unmet_conditions": demand_unmet,
+            "requirement_assessment": requirement_assessment,
             "engineering_conflicts": hard_conflicts,
             "extrapolation_warnings": extrapolation,
             "contour_extrapolation": any(x.get("state") != "inside" for x in contour_details),

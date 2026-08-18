@@ -25,6 +25,9 @@ class GenerationTaskManager(object):
             "min_feasibility", "indicator_filter_mode", "indicator_filters", "count",
             "target_protocol"
         ))
+        # Frozen parameters change which seed values are locked during search, so
+        # a different frozen set must never reuse a previously cached batch.
+        relevant["frozen_parameters"] = sorted(set(request.get("frozen_parameters") or []))
         relevant["product_code"] = self.app.runtime.schema["product_code"]
         relevant["master_data_version"] = self.app.store.master_data_version()
         relevant["models"] = self.app.runtime.manifest().get("model_versions") or {
