@@ -70,7 +70,8 @@ def project_constraints(params, definitions, rules, locked=None, seed_values=Non
         active_max = float(meta.get("active_max", 1))
         if controller not in params:
             continue
-        active = str(params[controller]).strip() == str(active_value).strip()
+        controller_num = _num(params.get(controller))
+        active = controller_num is not None and abs(controller_num - float(active_value)) < 1e-9
         current = params.get(target)
         current_num = _num(current)
 

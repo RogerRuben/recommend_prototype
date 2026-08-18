@@ -950,12 +950,11 @@ class HistorySeededGenerator(object):
         return 0.38 * capability + 0.27 * feasibility + 0.18 * ce_utility + 0.17 * price_utility - gate_penalty
 
     def _record_from_params(self, params, base, request, definitions, tag_map, locked, anchor_conflicts,
-                            repairs, soft_moves, iteration, attempt, search_move, evaluation=None, parent_record=None):
-        # Conditional projection runs before evaluation so an inactive subordinate
-        # is already its inactive value (e.g. -1) when the model sees it.
+                            repairs, soft_moves, iteration, attempt, search_move, evaluation=None, parent_record=None,
+                            constraint_conflicts=None, inactive_parameters=None, projection_repairs=None):
+        # Params arrive already canonicalized by _finalize_params; here we only
+        # recompute the active set for bookkeeping, never mutate the model input.
         constraint_rules = getattr(self.store, "constraint_rows", lambda: [])()
-        projection = project_constraints(params, definitions, constraint_rules, locked=locked, seed_values=base.get("params"))
-        params = projection["parameters"]
         active_set = active_parameter_set(params, definitions, constraint_rules, locked=locked)
         if evaluation is None:
             evaluation = self._evaluate_for_request(params, base.get("params"), request)
@@ -1002,11 +1001,14 @@ class HistorySeededGenerator(object):
             "demand_unmet_conditions": demand_unmet,
             "requirement_assessment": requirement_assessment,
             "engineering_conflicts": hard_conflicts,
-            "constraint_conflicts": projection["conflicts"],
-            "inactive_parameters": projection["inactive_parameters"],
+            "constraint_conflicts": constraint_conflicts or [],
+            "inactive_parameters": inactive_parameters if inactive_parameters is not None else active_set["inactive_parameters"],
             "active_parameters": active_set["active_parameters"],
-            "projection_repairs": projection["repairs"],
-            "structural_move": bool(isinstance(search_move, str) and search_move.startswith("结构调整")),
+            "projection_repairs": projection_repairs or [],
+            "structural_move": bool(
+                (isinstance(search_move, str) and search_move.startswith("结构调整"))
+                or any(rep.get("type") in ("conditional_activation", "conditional_deactivation") for rep in (projection_repairs or []))
+            ),
             "extrapolation_warnings": extrapolation,
             "contour_extrapolation": any(x.get("state") != "inside" for x in contour_details),
             "fit_penalty": round(demand_penalty + 2.5 * hard_penalty, 6),
@@ -1271,17 +1273,38 @@ class HistorySeededGenerator(object):
         return proposals
 
     def _finalize_params(self, params, base, locked, definitions, soft_strength=0.30, repair_reference=None):
+        """Single candidate canonicalization pipeline.
+
+        Order: restore locked -> conditional projection -> boundary/contour/coupling
+        repair -> conditional projection again -> round.  The returned params are the
+        exact values the model will evaluate, so signature/dedup/batch evaluation all
+        share one canonical form.
+        """
         self._restore_locked(params, locked)
+        constraint_rules = getattr(self.store, "constraint_rows", lambda: [])()
+        projection1 = project_constraints(params, definitions, constraint_rules, locked=locked, seed_values=base.get("params"))
+        params = projection1["parameters"]
         boundary_repairs = self._repair_learned_boundaries(params, locked, definitions)
         soft_moves = self._soft_adjust_unlocked_contours(params, locked, definitions, strength=soft_strength)
         reference = repair_reference if repair_reference is not None else base["params"]
         repairs = self._repair_relations(params, reference, definitions, locked)
         repairs.extend(self._repair_learned_boundaries(params, locked, definitions))
         repairs.extend(boundary_repairs)
+        # Second projection: coupling/boundary repair may have moved a controller or
+        # subordinate; the conditional relationship must hold before evaluation.
+        projection2 = project_constraints(params, definitions, constraint_rules, locked=locked, seed_values=base.get("params"))
+        params = projection2["parameters"]
         repairs = list(dict.fromkeys(value for value in repairs if value))
         self._restore_locked(params, locked)
         self._round_values(params, definitions, locked)
-        return repairs, soft_moves
+        return {
+            "params": params,
+            "repairs": repairs,
+            "soft_moves": soft_moves,
+            "constraint_conflicts": projection2["conflicts"],
+            "inactive_parameters": projection2["inactive_parameters"],
+            "projection_repairs": projection1["repairs"] + projection2["repairs"],
+        }
 
     def _changed_parameters(self, params, seed, definitions):
         changed = []
@@ -1389,9 +1412,11 @@ class HistorySeededGenerator(object):
                     changed.append(key)
                 if len(changed) >= 2:
                     break
-            repairs, soft = self._finalize_params(params, base, locked, definitions)
+            finalized = self._finalize_params(params, base, locked, definitions)
+            repairs, soft = finalized["repairs"], finalized["soft_moves"]
             try:
-                record = self._record_from_params(params, base, request, definitions, tag_map, locked, conflicts, repairs, soft, 0, 0, "兜底微调")
+                record = self._record_from_params(finalized["params"], base, request, definitions, tag_map, locked, conflicts, repairs, soft, 0, 0, "兜底微调",
+                                                  constraint_conflicts=finalized["constraint_conflicts"], inactive_parameters=finalized["inactive_parameters"], projection_repairs=finalized["projection_repairs"])
             except Exception:
                 continue
             return record, base
@@ -1415,7 +1440,7 @@ class HistorySeededGenerator(object):
         tag_weights = dict((key, value.get("weight", 1.0)) for key, value in tag_map.items())
         all_records = []
         seen = set()
-        rejection = {"not_changed": 0, "duplicate": 0, "model_input": 0, "hard_conflict": 0, "demand_unmet": 0, "extrapolation": 0, "known_boundary_repaired": 0, "repeated_risk_signature": 0}
+        rejection = {"not_changed": 0, "duplicate": 0, "model_input": 0, "hard_conflict": 0, "demand_unmet": 0, "extrapolation": 0, "known_boundary_repaired": 0, "repeated_risk_signature": 0, "conditional_frozen_conflict": 0}
         evaluations = 0
         max_evaluations = max(int(budget), count * 10)
         beam = []
@@ -1430,7 +1455,8 @@ class HistorySeededGenerator(object):
             params = dict(base["params"])
             locked, anchor_conflicts = self._anchor_demands(params, bounds, definitions)
             locked_sources = self._apply_frozen(params, locked, request.get("frozen_parameters"))
-            repairs, soft_moves = self._finalize_params(params, base, locked, definitions, soft_strength=0.18)
+            finalized = self._finalize_params(params, base, locked, definitions, soft_strength=0.18)
+            params = finalized["params"]
             signature = tuple((key, params[key]) for key in sorted(params))
             if signature in seen:
                 continue
@@ -1442,8 +1468,11 @@ class HistorySeededGenerator(object):
                 "locked": locked,
                 "locked_sources": locked_sources,
                 "anchor_conflicts": anchor_conflicts,
-                "repairs": repairs,
-                "soft_moves": soft_moves,
+                "repairs": finalized["repairs"],
+                "soft_moves": finalized["soft_moves"],
+                "constraint_conflicts": finalized["constraint_conflicts"],
+                "inactive_parameters": finalized["inactive_parameters"],
+                "projection_repairs": finalized["projection_repairs"],
                 "branch_info": branch_info,
                 "attempt": seed_index + 1,
             })
@@ -1472,6 +1501,9 @@ class HistorySeededGenerator(object):
                     item["params"], item["base"], item["request"], definitions, tag_map,
                     item["locked"], item["anchor_conflicts"], item["repairs"], item["soft_moves"],
                     0, item["attempt"], "需求与标签条件投影", evaluation=evaluation,
+                    constraint_conflicts=item.get("constraint_conflicts"),
+                    inactive_parameters=item.get("inactive_parameters"),
+                    projection_repairs=item.get("projection_repairs"),
                 )
             except Exception:
                 rejection["model_input"] += 1
@@ -1532,10 +1564,16 @@ class HistorySeededGenerator(object):
                 )
                 center_pending = []
                 for proposal_index, (params, move_label) in enumerate(proposals):
-                    repairs, soft_moves = self._finalize_params(params, base, locked, definitions, soft_strength=0.32, repair_reference=center_record["params"])
+                    finalized = self._finalize_params(params, base, locked, definitions, soft_strength=0.32, repair_reference=center_record["params"])
+                    params = finalized["params"]
                     changed = self._changed_parameters(params, base["params"], definitions)
                     if len(changed) < 1:
                         rejection["not_changed"] += 1
+                        continue
+                    # A frozen subordinate that a conditional controller forces
+                    # inactive is a hard conflict: reject the proposal outright.
+                    if finalized["constraint_conflicts"]:
+                        rejection["conditional_frozen_conflict"] = rejection.get("conditional_frozen_conflict", 0) + 1
                         continue
                     signature = tuple((key, params[key]) for key in sorted(params))
                     if signature in seen or signature in proposed_signatures:
@@ -1545,7 +1583,10 @@ class HistorySeededGenerator(object):
                     center_pending.append({
                         "params": params, "base": base, "request": center_request,
                         "locked": locked, "locked_sources": locked_sources, "anchor_conflicts": anchor_conflicts,
-                        "repairs": repairs, "soft_moves": soft_moves,
+                        "repairs": finalized["repairs"], "soft_moves": finalized["soft_moves"],
+                        "constraint_conflicts": finalized["constraint_conflicts"],
+                        "inactive_parameters": finalized["inactive_parameters"],
+                        "projection_repairs": finalized["projection_repairs"],
                         "move_label": move_label, "center_record": center_record,
                         "signature": signature,
                     })
@@ -1555,10 +1596,14 @@ class HistorySeededGenerator(object):
                 for params, center_record, move_label in self._deep_extrapolation_moves(beam, definitions):
                     base = center_record["_base"]
                     locked = center_record["_locked"]
-                    repairs, soft_moves = self._finalize_params(
+                    finalized = self._finalize_params(
                         params, base, locked, definitions, soft_strength=0.24,
                         repair_reference=center_record["params"],
                     )
+                    params = finalized["params"]
+                    if finalized["constraint_conflicts"]:
+                        rejection["conditional_frozen_conflict"] = rejection.get("conditional_frozen_conflict", 0) + 1
+                        continue
                     signature = tuple((key, params[key]) for key in sorted(params))
                     if signature in seen or signature in proposed_signatures:
                         continue
@@ -1569,7 +1614,10 @@ class HistorySeededGenerator(object):
                         "locked": locked,
                         "locked_sources": center_record.get("_locked_sources") or {},
                         "anchor_conflicts": center_record["_anchor_conflicts"],
-                        "repairs": repairs, "soft_moves": soft_moves,
+                        "repairs": finalized["repairs"], "soft_moves": finalized["soft_moves"],
+                        "constraint_conflicts": finalized["constraint_conflicts"],
+                        "inactive_parameters": finalized["inactive_parameters"],
+                        "projection_repairs": finalized["projection_repairs"],
                         "move_label": move_label, "center_record": center_record,
                         "signature": signature,
                     }])
@@ -1635,6 +1683,9 @@ class HistorySeededGenerator(object):
                         item["locked"], item["anchor_conflicts"], item["repairs"], item["soft_moves"],
                         iteration, evaluations + 1, item["move_label"], evaluation=evaluation,
                         parent_record=item.get("center_record"),
+                        constraint_conflicts=item.get("constraint_conflicts"),
+                        inactive_parameters=item.get("inactive_parameters"),
+                        projection_repairs=item.get("projection_repairs"),
                     )
                 except Exception:
                     rejection["model_input"] += 1

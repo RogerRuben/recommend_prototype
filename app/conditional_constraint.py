@@ -22,6 +22,8 @@ from __future__ import print_function
 import json
 import uuid
 
+from .value_semantics import normalize_numeric
+
 TEMPLATE_KIND = "conditional_numeric_applicability"
 
 
@@ -95,7 +97,9 @@ def parse_template_metadata(rule):
 
 def expected_range(template_metadata, controller_value):
     """Return the ``(lower, upper)`` bound a template implies for a controller value."""
-    if str(controller_value).strip() == str(template_metadata.get("active_value", 1)).strip():
+    c = normalize_numeric(controller_value)
+    a = normalize_numeric(template_metadata.get("active_value", 1))
+    if c is not None and a is not None and abs(c - a) < 1e-9:
         return (float(template_metadata["active_min"]), float(template_metadata["active_max"]))
     return (float(template_metadata["inactive_value"]), float(template_metadata["inactive_value"]))
 
