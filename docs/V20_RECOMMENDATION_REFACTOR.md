@@ -193,5 +193,34 @@ Phase 5 前补的三个 P1 + 一个 `-1` 阻断项 + UI 收尾。
 ### 测试（新增 12 个，累计 31 个全通过）
 `generated_engineering_ranking_test.py`、`any_group_gap_test.py`、`boolean_third_state_test.py`、`conditional_constraint_compile_test.py`、`conditional_constraint_admin_test.py`、`constraint_projection_test.py`、`frozen_conditional_conflict_test.py`、`inactive_search_space_test.py`、`inactive_requirement_test.py`、`coupling_pair_priority_test.py`、`structural_move_priority_test.py`、`generation_path_replay_test.py`、`constraint_projection_trace_test.py`
 
+---
+
+## V20 Phase 5 Hardening + Generation UX
+
+| 提交 | 主题 |
+| --- | --- |
+| `cc4de87` | 候选模型评价前 canonicalization（单一管线，投影先于签名） |
+| `4b89c15` | 约束规则贯穿 + 全移动类型 inactive 过滤 + 耦合方向真实化 |
+| `96c2b84` | 条件属性业务化 UI + `parameter_group` 元数据 + 模板/元数据 round-trip |
+| `59cbfd4` | 工程友好 nice step + 参数 canonicalization |
+| `3a8105a` | 价格/效能服务业务输出默认三位 |
+| `e97acb9` | 分组冻结参数（组全选/半选/摘要） |
+| `91dfb31` | 用户可配候选评价额度/最大搜索轮数 + 动态 schedule |
+| `420cef8` | trace change 带 source/reason_type |
+
+### 关键改动
+- `_finalize_params` = 唯一 candidate canonicalization 管线（restore locked → 投影#1 → repair → 投影#2 → round），invariant `model_input==candidate.params==signature==trace.final_params`。
+- 冻结条件冲突直接 reject proposal（`conditional_frozen_conflict`）；structural 由实际控制器状态变化判定。
+- `active_parameter_set` 过滤所有 move 类型；耦合对带 `relation_type`/`direction`（positive/negative/feasible/learned 符号）。
+- `parameter_group` 列（默认「其他」）贯穿 SQLite/DataMaster 导入导出/管理 UI；`rule_kind/constraint_group/template_metadata_json` 贯穿 DataMaster round-trip；编辑换 controller/target 时按 `original_constraint_group` 清旧组。
+- `nice_engineering_step`（1/2/2.5/5/10×10ⁿ）+ `canonicalize_parameter_value`；价格/效能业务输出 3 位。
+- 分组冻结 Accordion（组全选/indeterminate + 摘要），payload 仍为扁平 `frozen_parameters`。
+- `generation_budget`/`generation_rounds` 进 fingerprint + server 上限（`generation_limits`）+ 动态 `build_step_schedule`。
+- trace change 带 `source`（search/user_frozen/constraint_projection）与 `reason_type`。
+
+### 测试（累计 37 个全通过）
+新增 `batch_projection_consistency_test.py`、`coupling_direction_test.py`、`nice_step_test.py`、`template_roundtrip_test.py`、`generation_budget_rounds_test.py`、`trace_source_test.py`。
+
+
 
 
