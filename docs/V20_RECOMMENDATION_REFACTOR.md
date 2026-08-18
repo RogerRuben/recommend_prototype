@@ -155,4 +155,43 @@ Phase 5 前补的三个 P1 + 一个 `-1` 阻断项 + UI 收尾。
 ### 测试
 - 新增 `tests/partial_ranking_and_gap_test.py`、`tests/tag_rule_definition_test.py`
 
+---
+
+## V20 Phase 5 — 条件属性约束生成（`6a153fb` / `57f6d2c` / `481629d` / `0ce80b2` / `81a987f`）
+
+| 提交 | 阶段 | 主题 |
+| --- | --- | --- |
+| `6a153fb` | Patch 0 | 保留生成工程 penalty、ANY gap、布尔第三态筛选 |
+| `57f6d2c` | 5A | 条件属性约束模板（编译 + schema + 管理 UI + 迁移） |
+| `481629d` | 5B | 约束投影 + 活跃搜索空间 |
+| `0ce80b2` | 5C | 工程耦合对优先级 + 结构调整惩罚 |
+| `81a987f` | 5D | 可回放多步生成路径 + 解释 UI |
+
+### Patch 0
+- `rank_agreements` 区分历史/生成：生成项 `strict_filter_satisfied = assessment.strict_satisfied and not hard_conflicts and hard_penalty<=0`，`fit_penalty = demand_penalty + 2.5*hard_penalty`。
+- `parameter_group.gap` 与 `demand_penalty` 同语义（ANY=min、AND=sum）。
+- 布尔第三态：`value_semantics.mapping_target` + `filter_match` boolean_is 走映射比较；前端 `booleanFilterOptions` 三态。
+
+### 5A 条件属性约束模板
+- `constraint_rules` 新增 `rule_kind`（affine/conditional_lower/conditional_upper）、`constraint_group`、`template_metadata_json`，向后兼容迁移（默认 `affine`）。
+- `app/conditional_constraint.py`：`compile_conditional_constraint` 把「控制指标→从属指标适用性」编译为两条 affine 规则（`B≥(L−C)A+C`、`B≤(U−C)A+C`）；`inactive_value` 可配置。
+- DataMaster「条件属性有效性」管理 UI；`store.upsert_conditional_template` / `delete_conditional_template` 成组原子增删改。
+
+### 5B 约束投影 + 活跃搜索空间
+- `app/constraint_projection.py`：`project_constraints`（不适用折叠、激活恢复 seed→default→midpoint、冻结优先级冲突）、`active_parameter_set`。
+- Generator 候选最终化在模型评价前应用投影，并记录 `inactive_parameters` / `active_parameters` / `projection_repairs` / `constraint_conflicts`。
+- Requirement Assessment 对 inactive 从属指标输出 `actual_state=inactive` + `inactive_reason`，gap 固定 1.0。
+
+### 5C 工程耦合对优先级
+- `app/coupling_pairs.py`：pair 池优先级 DataMaster > 学习耦合 > 条件控制器↔从属 > 探索；锁定/inactive 不进 proposal。
+- 条件控制器动作标记 `structural_move`，加轻微 `structural_penalty`（0.35）进搜索键。
+
+### 5D 生成路径 + 解释 UI
+- 每个候选带 `node_id` / `parent_node_id` / `move_type`（结构枚举）/ `move`（结构化 changes + reason）。
+- `_build_generation_path` 回溯生成可回放 `generation_path`；详情页新增「方案形成过程」面板。
+
+### 测试（新增 12 个，累计 31 个全通过）
+`generated_engineering_ranking_test.py`、`any_group_gap_test.py`、`boolean_third_state_test.py`、`conditional_constraint_compile_test.py`、`conditional_constraint_admin_test.py`、`constraint_projection_test.py`、`frozen_conditional_conflict_test.py`、`inactive_search_space_test.py`、`inactive_requirement_test.py`、`coupling_pair_priority_test.py`、`structural_move_priority_test.py`、`generation_path_replay_test.py`、`constraint_projection_trace_test.py`
+
+
 
