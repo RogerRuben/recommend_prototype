@@ -30,6 +30,7 @@ import random
 import time
 
 from .constraint_projection import active_parameter_set, project_constraints
+from .coupling_pairs import build_coupling_pairs, exploration_pairs
 from .recommender import rank_agreements
 from .requirement_assessment import assess_requirements
 from .value_semantics import normalize_boolean, normalize_numeric, values_equal
@@ -963,6 +964,7 @@ class HistorySeededGenerator(object):
             "inactive_parameters": projection["inactive_parameters"],
             "active_parameters": active_set["active_parameters"],
             "projection_repairs": projection["repairs"],
+            "structural_move": bool(isinstance(search_move, str) and search_move.startswith("结构调整")),
             "extrapolation_warnings": extrapolation,
             "contour_extrapolation": any(x.get("state") != "inside" for x in contour_details),
             "fit_penalty": round(demand_penalty + 2.5 * hard_penalty, 6),
@@ -1036,10 +1038,15 @@ class HistorySeededGenerator(object):
             item["recommendation_warning"] = "该方案满足用户条件，但部分属性位于历史经验或模型训练范围之外：%s" % "；".join(extrapolation[:3])
         else:
             item["recommendation_warning"] = ""
-        # Lexicographic comparison follows the agreed priority order.
+        # Lexicographic comparison follows the agreed priority order.  A
+        # structural move (changing a conditional controller) carries a small
+        # complexity penalty so the search prefers parameter tuning over removing
+        # a functional module when both are close to the target.
+        structural_penalty = 0.35 if item.get("structural_move") else 0.0
         item["_search_key"] = (
             round(hard_penalty, 8),
             round(demand_penalty, 8),
+            round(structural_penalty, 8),
             round(contour_penalty, 8),
             round(anomaly_penalty, 8),
             round(-objective, 8),
@@ -1135,16 +1142,31 @@ class HistorySeededGenerator(object):
                 trial[key] = value
                 proposals.append((trial, "单属性：%s调整为%s" % (definition.get("label", key), value)))
 
-        # Two-variable coordinated moves support compensation trade-offs.
-        numeric_comp = [key for key in compensation if key in stds][:5]
-        for index in range(min(3, max(len(numeric_comp) - 1, 0))):
-            a, b = numeric_comp[index], numeric_comp[index + 1]
+        # Two-variable coordinated moves use engineering coupling pairs by explicit
+        # priority (DataMaster > learned coupling > conditional relationship) with
+        # adjacent exploration pairs only as a fallback.
+        constraint_rules = getattr(self.store, "constraint_rows", lambda: [])()
+        active_set = active_parameter_set(center, definitions, constraint_rules, locked=locked)
+        pair_pool = build_coupling_pairs(
+            active_set["active_parameters"], locked, definitions,
+            datamaster_rows=getattr(self.store, "coupling_rows", lambda: [])(),
+            learned_couplings=getattr(self.runtime.effectiveness, "couplings", []),
+            conditional_rules=constraint_rules,
+        )
+        if not pair_pool:
+            pair_pool = exploration_pairs(active_set["active_parameters"], locked, definitions, limit=5)
+        for pair in pair_pool[:5]:
+            a, b = pair["a"], pair["b"]
+            if a not in center or b not in center or a not in stds or b not in stds:
+                continue
             trial = dict(center)
-            sign_a = -1.0 if (iteration + index) % 2 else 1.0
-            sign_b = -sign_a if index % 2 else sign_a
+            sign_a = -1.0 if (iteration + len(proposals)) % 2 else 1.0
+            sign_b = -sign_a if pair["priority"] % 2 else sign_a
             trial[a] = float(trial[a]) + sign_a * float(stds[a]) * step_scale
             trial[b] = float(trial[b]) + sign_b * float(stds[b]) * step_scale
-            proposals.append((trial, "双属性联动：%s/%s" % (definitions[a].get("label", a), definitions[b].get("label", b))))
+            structural = pair["source"] == "conditional_relationship"
+            label_prefix = "结构调整" if structural else "工程联动"
+            proposals.append((trial, "%s：%s/%s" % (label_prefix, definitions[a].get("label", a), definitions[b].get("label", b))))
 
         # Correlated stochastic moves preserve local joint structure while the
         # iterative beam update makes subsequent rounds directional.
