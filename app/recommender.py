@@ -72,6 +72,18 @@ def conservative_capability(item):
     return float(value or 0)
 
 
+def center_capability(item):
+    """The user-facing effectiveness score: the model's center estimate.
+
+    ``conservative_capability_score`` (P10) stays an internal risk signal; the
+    operator-facing "效能评分" is always ``capability_score``.
+    """
+    value = item.get("capability_score")
+    if value is None:
+        value = (item.get("evaluation") or {}).get("capability_score")
+    return float(value or 0)
+
+
 def _price_value(item):
     """Return the item's usable price as a float, or None when it has no price.
 
@@ -121,7 +133,7 @@ def agreement_matches(item, request):
         # it visible with an explicit "service unavailable" badge instead.
         return True
     price = _price_value(item)
-    capability = conservative_capability(item)
+    capability = center_capability(item)
     ce = item.get("cost_effectiveness")
     if ce is None and price is not None:
         ce = capability / max(price, 1e-9)
@@ -173,8 +185,8 @@ def rank_agreements(items, request, tag_weights):
     for item in candidates:
         model_available = item.get("model_evaluation_available") is not False
         price = _price_value(item)
-        capability = conservative_capability(item)
-        item["conservative_capability_score"] = capability
+        capability = center_capability(item)
+        item["capability_score"] = round(capability, 3)
         item["predicted_price_wan"] = round(price, 3) if price is not None else None
         item["cost_effectiveness"] = round(capability / price, 3) if price is not None else None
         own_tags = set(item.get("tags") or [])
@@ -210,7 +222,7 @@ def rank_agreements(items, request, tag_weights):
             base_score = 0.70 * item["tag_match_score"] + 0.30 * price_score - 20.0
         else:
             base_score = (
-                0.30 * item["tag_match_score"] + 0.25 * float(item.get("conservative_capability_score", 0)) +
+                0.30 * item["tag_match_score"] + 0.25 * float(item.get("capability_score", 0)) +
                 0.15 * price_score + 0.15 * ce_score + 0.15 * feasibility_score
             ) - uncertainty_penalty
         if item.get("best_effort"):
@@ -220,13 +232,19 @@ def rank_agreements(items, request, tag_weights):
     key_map = {
         "comprehensive": "comprehensive_score",
         "price": "predicted_price_wan",
-        "capability": "conservative_capability_score",
+        "capability": "capability_score",
         "cost_effectiveness": "cost_effectiveness",
         "tag_match": "tag_match_score",
         "feasibility": "feasibility_probability",
     }
     key = key_map.get(sort_by, "comprehensive_score")
-    reverse = sort_by != "price"
+    sort_order = str(request.get("sort_order") or "").strip().lower()
+    if sort_order in ("asc", "desc"):
+        reverse = sort_order == "desc"
+    elif sort_by == "price":
+        reverse = False  # price defaults to low-to-high
+    else:
+        reverse = True  # scores default to high-to-low
     def _sort_value(item):
         value = item.get(key)
         if value is None:
@@ -282,13 +300,20 @@ def rank_historical_products(items, request, tag_weights):
         item["price_score"] = round(price_score, 3)
         item["comprehensive_score"] = round(0.70 * item["tag_match_score"] + 0.30 * price_score, 3)
     sort_by = str(request.get("sort_by") or "comprehensive")
+    sort_order = str(request.get("sort_order") or "").strip().lower()
+    if sort_order in ("asc", "desc"):
+        reverse = sort_order == "desc"
+    elif sort_by == "price":
+        reverse = False
+    else:
+        reverse = True
     if sort_by == "price":
         candidates.sort(key=lambda item: (item["predicted_price_wan"] is None,
-                                          item["predicted_price_wan"] if item["predicted_price_wan"] is not None else float("inf")))
+                                          item["predicted_price_wan"] if item["predicted_price_wan"] is not None else float("inf")), reverse=reverse)
     elif sort_by == "tag_match":
-        candidates.sort(key=lambda item: item["tag_match_score"], reverse=True)
+        candidates.sort(key=lambda item: item["tag_match_score"], reverse=reverse)
     else:
-        candidates.sort(key=lambda item: item["comprehensive_score"], reverse=True)
+        candidates.sort(key=lambda item: item["comprehensive_score"], reverse=reverse)
     for index, item in enumerate(candidates, 1):
         item["rank"] = index
     return candidates

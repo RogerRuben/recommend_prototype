@@ -23,9 +23,7 @@
       <div class="form-grid compact-grid">
         <label class="full-field">效能评价协议<select id="targetProtocol"></select><small id="targetProtocolHint">协议作为100分参考，不参与模型训练。</small></label>
         <label>最高价格（万元）<input id="maxPrice" type="number" step="0.1" placeholder="不限制"></label>
-        <label>最低保守效能分（P10）<input id="minCapability" type="number" min="0" placeholder="不限制，可超过100"></label>
-        <label>最低效费比<input id="minCE" type="number" step="0.1" placeholder="不限制"></label>
-        <label>最低可行概率<input id="minFeasibility" type="number" min="0" max="1" step="0.01" placeholder="不限制"></label>
+        <label>最低效能评分<input id="minCapability" type="number" min="0" placeholder="不限制，可超过100"></label>
       </div>
     </section>
 
@@ -37,7 +35,8 @@
 
     <section class="card action-card">
       <div class="section-heading"><div><span class="step-index">04</span><h3>智能推荐</h3></div></div>
-      <label>推荐排序<select id="sortBy"><option value="comprehensive">综合得分</option><option value="price">价格由低到高</option><option value="capability">效能由高到低</option><option value="cost_effectiveness">效费比由高到低</option><option value="feasibility">可行概率</option><option value="tag_match">标签匹配率</option></select></label>
+      <label>推荐排序<select id="sortBy"><option value="comprehensive">综合推荐</option><option value="price">价格</option><option value="capability">效能评分</option><option value="tag_match">标签匹配率</option></select></label>
+      <label>排序方向<select id="sortOrder"><option value="desc">从高到低</option><option value="asc">从低到高</option></select></label>
       <button id="recommendBtn" class="button primary full">开始智能推荐</button>
       <div class="generation-box"><div><b>智能生成新方案</b><p>根据当前需求形成新的候选参数组合。</p></div><div class="generation-options"><label>生成数量<input id="generationCount" type="number" min="1" max="30" value="10"></label></div><button id="generateBtn" class="button accent full">智能生成方案</button><button id="clearLiveBtn" class="link-button full">清空生成方案</button></div>
     </section>
@@ -56,7 +55,7 @@
 <div id="detailOverlay" class="overlay hidden"><article class="detail-drawer">
   <header class="drawer-header"><div><div class="eyebrow" id="detailSource">方案详情</div><h2 id="detailTitle">协议详情</h2><p id="detailMeta"></p></div><button id="closeDetail" class="icon-button">×</button></header>
   <div class="drawer-scroll">
-    <section class="metric-board"><div><span>预测价格</span><b id="detailPrice">-</b><small>万元</small></div><div><span>中心效能</span><b id="detailCapability">-</b><small>协议参考为100，可超过</small></div><div><span>保守效能</span><b id="detailConservative">-</b><small>P10工程排序值</small></div><div><span>效费比</span><b id="detailCE">-</b></div><div><span>可行概率</span><b id="detailFeasibility">-</b></div><div><span>预测可信度</span><b id="detailConfidence">-</b></div></section>
+    <section class="metric-board"><div><span>预测价格</span><b id="detailPrice">-</b><small>万元</small></div><div><span>效能评分</span><b id="detailCapability">-</b><small>协议参考为100，可超过</small></div><div><span>效费比</span><b id="detailCE">-</b><small>分/万元</small></div></section>
     <div class="detail-layout"><section class="editor-section"><div class="section-heading"><div><h3>方案属性调整</h3><p>修改属性不会自动调用模型；完成调整后请点击计算。</p><span id="evaluationStatus" class="evaluation-status">当前展示为方案初始结果</span></div><button id="evaluateBtn" class="button primary">重新计算价格与效能</button></div><label class="price-attribute-toggle"><input id="showPriceAttributes" type="checkbox"><span>显示价格相关属性</span><small>展开价格专用属性；共有属性已在上方显示</small></label><div id="parameterEditor" class="parameter-editor"></div></section>
       <aside class="insight-column"><section class="insight-card guidance"><div class="insight-title"><span>✦</span><h3>调整建议</h3></div><div id="guidancePanel"></div></section><section class="insight-card"><div class="insight-title"><span>↗</span><h3>协议补差方案</h3></div><button id="improveBtn" class="button secondary full">计算低改动改进方案</button><div id="improvementPanel" class="empty-state">仅在需要时运行反事实搜索。</div></section><section class="insight-card"><div class="insight-title"><span>!</span><h3>约束与风险</h3></div><div id="riskPanel"></div></section><section class="insight-card"><div class="insight-title"><span>◎</span><h3>生成依据</h3></div><div id="generationBasisPanel"></div></section><section class="insight-card"><div class="insight-title"><span>⌁</span><h3>模型经验范围</h3></div><div id="couplingPanel"></div></section></aside>
     </div>

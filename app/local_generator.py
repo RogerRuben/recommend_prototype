@@ -163,7 +163,7 @@ class HistorySeededGenerator(object):
         evaluation = item.get("evaluation") or {}
         checks = [
             ("max_price", evaluation.get("predicted_price_wan"), "max"),
-            ("min_capability", evaluation.get("conservative_capability_score", evaluation.get("capability_score")), "min"),
+            ("min_capability", evaluation.get("capability_score"), "min"),
             ("min_cost_effectiveness", evaluation.get("cost_effectiveness"), "min"),
             ("min_feasibility", evaluation.get("feasibility_probability"), "min"),
         ]
@@ -871,7 +871,7 @@ class HistorySeededGenerator(object):
         evaluation = item.get("evaluation") or {}
         output_checks = [
             ("max_price", "预测价格", evaluation.get("predicted_price_wan"), "max", "万元"),
-            ("min_capability", "保守效能分", evaluation.get("conservative_capability_score", evaluation.get("capability_score")), "min", ""),
+            ("min_capability", "效能评分", evaluation.get("capability_score"), "min", ""),
             ("min_cost_effectiveness", "效费比", evaluation.get("cost_effectiveness"), "min", ""),
             ("min_feasibility", "可行概率", evaluation.get("feasibility_probability"), "min", ""),
         ]
@@ -935,7 +935,7 @@ class HistorySeededGenerator(object):
         return unique, contour_penalty / max(len(contour_details), 1), float(anomaly.get("score") or 0.0)
 
     def _objective_value(self, evaluation):
-        capability = float(evaluation.get("conservative_capability_score", evaluation.get("capability_score")) or 0) / 100.0
+        capability = float(evaluation.get("capability_score") or 0) / 100.0
         feasibility = float(evaluation.get("feasibility_probability") or 0)
         ce = float(evaluation.get("cost_effectiveness") or 0)
         price = float(evaluation.get("predicted_price_wan") or 0)
