@@ -191,7 +191,7 @@ def compute_tag_match(item, selected_tags, tag_weights):
     return 100.0 * numerator / max(denominator, 1e-9)
 
 
-def rank_agreements(items, request, tag_weights, definitions=None, tag_map=None):
+def rank_agreements(items, request, tag_weights, definitions=None, tag_map=None, constraint_rules=None):
     from .requirement_assessment import assess_requirements
     allow_best_effort = bool(request.get("include_best_effort"))
     candidates = []
@@ -202,12 +202,12 @@ def rank_agreements(items, request, tag_weights, definitions=None, tag_map=None)
             # Soft recommendation: a real historical product is never dropped by
             # the user's thresholds; it is kept and its requirement assessment is
             # attached so the UI can show exactly where it falls short.
-            item["requirement_assessment"] = assess_requirements(item, request, definitions, tag_map)
+            item["requirement_assessment"] = assess_requirements(item, request, definitions, tag_map, constraint_rules)
             item["strict_filter_satisfied"] = item["requirement_assessment"]["strict_satisfied"]
             item["fit_penalty"] = item["requirement_assessment"]["demand_penalty"]
             candidates.append(item)
         elif agreement_matches(item, request, definitions) or (allow_best_effort and item.get("best_effort")):
-            assessment = assess_requirements(item, request, definitions, tag_map)
+            assessment = assess_requirements(item, request, definitions, tag_map, constraint_rules)
             hard_penalty = float((item.get("search_metrics") or {}).get("hard_penalty") or 0)
             hard_conflicts = item.get("engineering_conflicts") or []
             item["requirement_assessment"] = assessment
@@ -305,7 +305,7 @@ def rank_agreements(items, request, tag_weights, definitions=None, tag_map=None)
     return candidates
 
 
-def rank_historical_products(items, request, tag_weights, definitions=None, tag_map=None):
+def rank_historical_products(items, request, tag_weights, definitions=None, tag_map=None, constraint_rules=None):
     """Rank stored history as a soft recommendation without inventing model outputs.
 
     Used when either independent HTTP model service is unavailable.  No history
@@ -328,7 +328,7 @@ def rank_historical_products(items, request, tag_weights, definitions=None, tag_
         item["feasibility_probability"] = None
         item["model_evaluation_available"] = False
         item["recommendation_confidence"] = "unavailable"
-        item["requirement_assessment"] = assess_requirements(item, request, definitions, tag_map)
+        item["requirement_assessment"] = assess_requirements(item, request, definitions, tag_map, constraint_rules)
         item["strict_filter_satisfied"] = item["requirement_assessment"]["strict_satisfied"]
         item["fit_penalty"] = item["requirement_assessment"]["demand_penalty"]
         own = set(item.get("tags") or [])

@@ -188,7 +188,8 @@ class HistorySeededGenerator(object):
         # One requirement semantics everywhere: the seed's distance from the user's
         # conditions is the shared RequirementAssessment penalty, so OR-groups and
         # unknown model outputs are handled identically to recommendation ranking.
-        assessment = assess_requirements(item, request, definitions, self.store.tag_map())
+        assessment = assess_requirements(item, request, definitions, self.store.tag_map(),
+                                         getattr(self.store, "constraint_rows", lambda: [])())
         return assessment["demand_penalty"]
 
     def select_seeds(self, request, limit=12, historical=None):
@@ -873,7 +874,8 @@ class HistorySeededGenerator(object):
         structured ``requirement_assessment`` for the UI while keeping the existing
         human-readable ``unmet_conditions`` contract.
         """
-        assessment = assess_requirements(item, request, definitions, tag_map)
+        assessment = assess_requirements(item, request, definitions, tag_map,
+                                          getattr(self.store, "constraint_rows", lambda: [])())
         unmet = []
         failed_rule_labels = []
         for condition in assessment["conditions"]:
@@ -1179,6 +1181,12 @@ class HistorySeededGenerator(object):
     def _neighborhood_params(self, center, base, locked, compensation, definitions, numeric, stds, lower,
                              step_scale, rng, iteration, request):
         proposals = []
+        # Inactive subordinates never enter any move type; filter the adjustable
+        # key list once so single/output/reverse/correlated moves all obey it.
+        constraint_rules = getattr(self.store, "constraint_rows", lambda: [])()
+        active_set = active_parameter_set(center, definitions, constraint_rules, locked=locked)
+        active_keys = set(active_set["active_parameters"])
+        compensation = [key for key in compensation if key in active_keys]
         proposals.extend(self._output_target_moves(center, base, locked, compensation, definitions, stds, step_scale, request))
         proposals.extend(self._reverse_contour_moves(center, base, locked, compensation, definitions, stds, step_scale))
 
@@ -1201,8 +1209,6 @@ class HistorySeededGenerator(object):
         # Two-variable coordinated moves use engineering coupling pairs by explicit
         # priority (DataMaster > learned coupling > conditional relationship) with
         # adjacent exploration pairs only as a fallback.
-        constraint_rules = getattr(self.store, "constraint_rows", lambda: [])()
-        active_set = active_parameter_set(center, definitions, constraint_rules, locked=locked)
         pair_pool = build_coupling_pairs(
             active_set["active_parameters"], locked, definitions,
             datamaster_rows=getattr(self.store, "coupling_rows", lambda: [])(),
@@ -1217,7 +1223,7 @@ class HistorySeededGenerator(object):
                 continue
             trial = dict(center)
             sign_a = -1.0 if (iteration + len(proposals)) % 2 else 1.0
-            sign_b = -sign_a if pair["priority"] % 2 else sign_a
+            sign_b = -sign_a if pair.get("direction") == "opposite" else sign_a
             trial[a] = float(trial[a]) + sign_a * float(stds[a]) * step_scale
             trial[b] = float(trial[b]) + sign_b * float(stds[b]) * step_scale
             structural = pair["source"] == "conditional_relationship"

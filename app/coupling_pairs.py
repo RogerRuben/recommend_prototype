@@ -34,20 +34,30 @@ def build_coupling_pairs(active, locked, definitions,
     pairs = []
     seen = set()
 
-    def add(a, b, source, priority, strength):
+    def add(a, b, source, priority, strength, relation_type="same_direction", direction="same"):
         if a == b:
             return
         key = tuple(sorted((a, b)))
         if key in seen:
             return
         seen.add(key)
-        pairs.append({"a": a, "b": b, "source": source, "priority": priority, "strength": float(strength or 1.0)})
+        pairs.append({
+            "a": a, "b": b, "source": source, "priority": priority,
+            "strength": float(strength or 1.0), "relation_type": relation_type, "direction": direction,
+        })
 
     # Priority 1: DataMaster indicator_couplings.
     for row in (datamaster_rows or []):
         a, b = row.get("parameter_a"), row.get("parameter_b")
+        coupling_type = str(row.get("coupling_type") or "positive")
+        relation_type = {
+            "positive": "same_direction",
+            "negative": "opposite_direction",
+            "feasible_domain": "toward_feasible_boundary",
+        }.get(coupling_type, "same_direction")
+        direction = "opposite" if relation_type == "opposite_direction" else "same"
         if _eligible(a, active, locked, definitions) and _eligible(b, active, locked, definitions):
-            add(a, b, "datamaster_coupling", 1, row.get("strength") or 1.0)
+            add(a, b, "datamaster_coupling", 1, row.get("strength") or 1.0, relation_type, direction)
 
     # Priority 2: effectiveness model learned couplings.
     for model in (learned_couplings or []):
@@ -57,8 +67,9 @@ def build_coupling_pairs(active, locked, definitions,
             strength = 1.0
             if isinstance(source, dict):
                 strength = source.get("weight") or source.get("strength") or 1.0
+            direction = "opposite" if float(strength) < 0 else "same"
             if _eligible(key, active, locked, definitions) and _eligible(target, active, locked, definitions):
-                add(key, target, "learned_coupling", 2, strength)
+                add(key, target, "learned_coupling", 2, strength, "same_direction" if direction == "same" else "opposite_direction", direction)
 
     # Priority 3: conditional controller <-> subordinate.
     for rule in (conditional_rules or []):
@@ -69,7 +80,7 @@ def build_coupling_pairs(active, locked, definitions,
             continue
         controller, target = meta.get("controller"), meta.get("target")
         if _eligible(controller, active, locked, definitions) and _eligible(target, active, locked, definitions):
-            add(controller, target, "conditional_relationship", 3, 1.0)
+            add(controller, target, "conditional_relationship", 3, 1.0, "conditional_controller", "same")
 
     pairs.sort(key=lambda pair: (pair["priority"], -pair["strength"], pair["a"], pair["b"]))
     return pairs

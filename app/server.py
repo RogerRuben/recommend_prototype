@@ -1131,10 +1131,11 @@ class Application(object):
         tag_weights = dict((item["tag_id"], item["weight"]) for item in self.bootstrap()["tags"])
         definitions = self.store.parameter_map()
         tag_map = self.store.tag_map()
+        constraint_rules = self.store.constraint_rows()
         ranked = (
-            rank_agreements(candidates, ranking_request, tag_weights, definitions=definitions, tag_map=tag_map)
+            rank_agreements(candidates, ranking_request, tag_weights, definitions=definitions, tag_map=tag_map, constraint_rules=constraint_rules)
             if calculation_available else
-            rank_historical_products(candidates, ranking_request, tag_weights, definitions=definitions, tag_map=tag_map)
+            rank_historical_products(candidates, ranking_request, tag_weights, definitions=definitions, tag_map=tag_map, constraint_rules=constraint_rules)
         )
         page, page_size = max(1, int(request.get("page", 1))), max(1, min(int(request.get("page_size", 12)), 50))
         start = (page - 1) * page_size
