@@ -28,6 +28,10 @@ class GenerationTaskManager(object):
         # Frozen parameters change which seed values are locked during search, so
         # a different frozen set must never reuse a previously cached batch.
         relevant["frozen_parameters"] = sorted(set(request.get("frozen_parameters") or []))
+        # User-tunable budget/rounds change the search itself, so they participate
+        # in the fingerprint.
+        relevant["generation_budget"] = request.get("generation_budget")
+        relevant["generation_rounds"] = request.get("generation_rounds")
         relevant["product_code"] = self.app.runtime.schema["product_code"]
         relevant["master_data_version"] = self.app.store.master_data_version()
         relevant["models"] = self.app.runtime.manifest().get("model_versions") or {

@@ -87,6 +87,26 @@ def _clamp(value, lo, hi):
     return max(float(lo), min(float(hi), float(value)))
 
 
+def build_step_schedule(mode, max_rounds):
+    """Return a step-scale schedule for a user-configurable round count.
+
+    Fast mode decays from broad to fine; deep mode widens on round two then
+    decays.  The endpoints match the historical fixed schedules.
+    """
+    rounds = max(1, int(max_rounds))
+    if mode == "deep":
+        if rounds <= 2:
+            return [0.52, 0.90][:rounds]
+        tail_count = rounds - 2
+        start, end = 0.68, 0.13
+        tail = [start * (end / start) ** (i / max(tail_count - 1, 1)) for i in range(tail_count)]
+        return [0.52, 0.90] + tail
+    if rounds <= 1:
+        return [0.52]
+    start, end = 0.52, 0.09
+    return [start * (end / start) ** (i / (rounds - 1)) for i in range(rounds)]
+
+
 def _mean(values):
     return sum(values) / max(len(values), 1)
 
@@ -1531,10 +1551,8 @@ class HistorySeededGenerator(object):
 
         # Stage 2: adaptive iterative neighborhoods. Better candidates become the
         # next centres; the step size shrinks as the search progresses.
-        step_schedule = (
-            [0.52, 0.90, 0.68, 0.50, 0.34, 0.22, 0.13]
-            if deep_search else [0.52, 0.38, 0.27, 0.19, 0.13, 0.09]
-        )
+        max_rounds = int(request.get("generation_rounds") or (7 if deep_search else 6))
+        step_schedule = build_step_schedule("deep" if deep_search else "fast", max_rounds)
         iteration = 0
         while beam and evaluations < max_evaluations and iteration < len(step_schedule):
             iteration += 1

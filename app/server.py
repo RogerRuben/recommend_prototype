@@ -434,6 +434,10 @@ class Application(object):
             "dynamic_target_protocol_enabled": bool(
                 ((self.runtime.manifest().get("effectiveness") or {}).get("target_protocol_contract") or {}).get("supported")
             ),
+            "generation_limits": {
+                "max_budget": self.generation_budget_limit(),
+                "max_rounds": self.generation_rounds_limit(),
+            },
         }
         effect_manifest = self.runtime.manifest().get("effectiveness") or {}
         payload["protocols"] = effect_manifest.get("protocol_profiles") or []
@@ -979,6 +983,12 @@ class Application(object):
             "historical_profile": history,
         }
 
+    def generation_budget_limit(self):
+        return max(60, int(self.model_config.get("generation_max_budget") or 2400))
+
+    def generation_rounds_limit(self):
+        return max(3, int(self.model_config.get("generation_max_rounds") or 15))
+
     def _generate_sync(self, request, progress_callback=None):
         self._require_product_ready()
         req = dict(request or {})
@@ -1003,6 +1013,10 @@ class Application(object):
             budget = max(360, count * 60)
         else:
             budget = max(120, count * 22) if has_output_target else max(80, count * 14)
+        # User-tunable candidate evaluation budget (clamped by server limits).
+        if req.get("generation_budget") not in (None, ""):
+            budget = max(1, int(req["generation_budget"]))
+            budget = min(budget, self.generation_budget_limit())
         result = self.generator.generate(
             req, count=count, seed=req.get("seed"), budget=budget,
             search_mode=search_mode, progress_callback=progress_callback,
