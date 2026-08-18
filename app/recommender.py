@@ -3,17 +3,14 @@ from __future__ import print_function
 
 import math
 
+from .value_semantics import normalize_boolean, normalize_numeric
+
 
 DEFAULT_FEASIBILITY_GATE = 0.65
 
 
 def _number(value):
-    try:
-        if isinstance(value, str) and value.strip().upper().startswith("IP"):
-            value = value.strip()[2:]
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+    return normalize_numeric(value)
 
 
 def _interval(value):
@@ -37,8 +34,10 @@ def filter_match(params, rule):
     value1 = rule.get("value1")
     value2 = rule.get("value2")
     if operator == "boolean_is":
-        truth = str(value1).strip().lower() in ("1", "true", "yes", "有", "是") or value1 is True or value1 == 1
-        actual_truth = str(actual).strip().lower() in ("1", "true", "yes", "有", "是") or actual is True or actual == 1
+        truth = normalize_boolean(value1)
+        actual_truth = normalize_boolean(actual)
+        if truth is None or actual_truth is None:
+            return False
         return actual_truth == truth
     if operator in ("text_equals", "text_contains"):
         left, right = str(actual).strip().lower(), str(value1 or "").strip().lower()

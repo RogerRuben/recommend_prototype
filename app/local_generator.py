@@ -30,17 +30,16 @@ import random
 import time
 
 from .recommender import filter_match, rank_agreements
+from .value_semantics import normalize_boolean, normalize_numeric, values_equal
 
 
 def _float(value, default=None):
-    try:
-        return float(str(value).strip().upper().replace("IP", ""))
-    except (TypeError, ValueError):
-        return default
+    result = normalize_numeric(value)
+    return result if result is not None else default
 
 
 def _truth(value):
-    return str(value).strip().lower() in ("1", "true", "yes", "有", "是") or value is True or value == 1
+    return normalize_boolean(value) is True
 
 
 def _clamp(value, lo, hi):
@@ -296,14 +295,7 @@ class HistorySeededGenerator(object):
         return list(values)
 
     def _value_equal(self, left, right, definition):
-        kind = self._search_type(definition)
-        if kind in ("boolean", "integer", "continuous", "ordered_discrete"):
-            a, b = _float(left), _float(right)
-            if a is None or b is None:
-                return str(left) == str(right)
-            tolerance = 10 ** (-max(2, int(definition.get("decimal_places", 3))))
-            return abs(a - b) <= tolerance
-        return str(left) == str(right)
+        return values_equal(left, right, definition)
 
     def _attribute_move_distance(self, current, candidate, definition):
         """Normalized one-attribute move size used to prefer minimal changes.
