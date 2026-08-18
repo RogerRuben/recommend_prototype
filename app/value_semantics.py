@@ -180,3 +180,44 @@ def business_display_value(value, definition=None):
             return "IP%d" % int(number) if float(number).is_integer() else "IP%s" % value
         return "IP%s" % value
     return str(value)
+
+
+def nice_engineering_step(raw_step, decimal_places=None):
+    """Snap a raw search step to an engineering-friendly increment.
+
+    The step is snapped to the nearest ``1 / 2 / 2.5 / 5 / 10`` multiplied by a
+    power of ten, so continuous parameters move on a readable grid (``4.5 -> 4.45``)
+    instead of a standard-deviation-derived float (``4.5 -> 4.44112137``).
+    """
+    if raw_step is None or raw_step <= 0:
+        return None
+    magnitude = math.floor(math.log10(raw_step))
+    base = 10.0 ** magnitude
+    fraction = raw_step / base
+    nearest = min((1.0, 2.0, 2.5, 5.0, 10.0), key=lambda candidate: abs(candidate - fraction))
+    return nearest * base
+
+
+def canonicalize_parameter_value(definition, value):
+    """Round a parameter value to its business precision (boolean/int/decimal)."""
+    if value is None:
+        return value
+    definition = definition or {}
+    value_type = definition_value_type(definition)
+    if value_type in ("boolean", "bool"):
+        boolean = normalize_boolean(value)
+        if boolean is not None:
+            return 1.0 if boolean else 0.0
+    if value_type == "ip_grade":
+        number = normalize_numeric(value)
+        return int(number) if number is not None else value
+    number = normalize_numeric(value)
+    if number is None:
+        return value
+    search_type = str(definition.get("search_type") or "auto").lower()
+    if search_type in ("integer", "ordered_discrete"):
+        return int(round(number))
+    if value_type in ("integer",):
+        return int(round(number))
+    decimal_places = int(definition.get("decimal_places", 3) or 3)
+    return round(number, decimal_places)

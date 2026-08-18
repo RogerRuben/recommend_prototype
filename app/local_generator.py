@@ -33,7 +33,7 @@ from .constraint_projection import active_parameter_set, project_constraints
 from .coupling_pairs import build_coupling_pairs, exploration_pairs
 from .recommender import rank_agreements
 from .requirement_assessment import assess_requirements
-from .value_semantics import normalize_boolean, normalize_numeric, values_equal
+from .value_semantics import canonicalize_parameter_value, nice_engineering_step, normalize_boolean, normalize_numeric, values_equal
 
 
 def _float(value, default=None):
@@ -373,8 +373,10 @@ class HistorySeededGenerator(object):
                     raw.extend(range(int(math.ceil(lower)), int(math.floor(upper)) + 1))
             values = [int(round(_clamp(value, lower, upper))) for value in raw]
         else:
-            step = max(float(std_value or 0.0) * max(step_scale, 0.20), span * 0.025, 10 ** (-max(1, int(definition.get("decimal_places", 3)))))
-            raw = [current_num - step, current_num + step, current_num - 3.5 * step, current_num + 3.5 * step]
+            raw_step = max(float(std_value or 0.0) * max(step_scale, 0.20), span * 0.025, 10 ** (-max(1, int(definition.get("decimal_places", 3)))))
+            step = nice_engineering_step(raw_step, int(definition.get("decimal_places", 3) or 3)) or raw_step
+            raw = [current_num - step, current_num + step, current_num - 2 * step, current_num + 2 * step,
+                   current_num - 3 * step, current_num + 3 * step]
             if include_bounds:
                 raw.extend([lower, upper, lower + span * 0.25, lower + span * 0.50, lower + span * 0.75])
             values = [_clamp(value, lower, upper) for value in raw]
