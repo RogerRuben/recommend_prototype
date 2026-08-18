@@ -16,6 +16,43 @@ def _number(value):
     return normalize_numeric(value)
 
 
+def _rule_gap(params, rule, definition, matched):
+    """Normalised distance to satisfying one indicator rule (0.0 when satisfied).
+
+    Numeric operators use the attribute's own span so ``99 vs 100`` and ``10 vs
+    100`` are no longer the same binary penalty; boolean/text/range rules that
+    fail collapse to 1.0 (there is no meaningful continuous distance).
+    """
+    if matched:
+        return 0.0
+    operator = rule.get("operator")
+    value1 = rule.get("value1")
+    value2 = rule.get("value2")
+    actual = params.get(rule.get("parameter_id"))
+    definition = definition or {}
+    span = max(float(definition.get("max_value") or 1) - float(definition.get("min_value") or 0), 1e-9)
+    a = _number(actual)
+    if operator in ("gte", "gt", "lte", "lt", "eq"):
+        b = _number(value1)
+        if a is None or b is None:
+            return 1.0
+        if operator == "gte":
+            return (b - a) / span
+        if operator == "gt":
+            return (b - a + 1e-7) / span
+        if operator == "lte":
+            return (a - b) / span
+        if operator == "lt":
+            return (a - b + 1e-7) / span
+        return abs(a - b) / span
+    if str(operator).startswith("range_") and a is not None:
+        b1, b2 = _number(value1), _number(value2)
+        if b1 is not None and b2 is not None:
+            lo, hi = min(b1, b2), max(b1, b2)
+            return (lo - a if a < lo else a - hi) / span
+    return 1.0
+
+
 def assess_requirements(item, request, definitions=None, tag_map=None):
     """Assess one candidate against the user's requirements.
 
@@ -85,14 +122,15 @@ def assess_requirements(item, request, definitions=None, tag_map=None):
     if rules:
         params = item.get("params") or {}
         results = [filter_match(params, rule, definitions.get(rule.get("parameter_id"))) for rule in rules]
+        gaps = [_rule_gap(params, rule, definitions.get(rule.get("parameter_id")), ok) for rule, ok in zip(rules, results)]
         mode = str(request.get("indicator_filter_mode") or "all")
         group_matched = any(results) if mode == "any" else all(results)
         if group_matched:
             matched += 1
         else:
             unmatched += 1
-            penalty += 1.0
-        for rule, ok in zip(rules, results):
+            penalty += min(gaps) if mode == "any" else sum(gaps)
+        for rule, ok, gap in zip(rules, results, gaps):
             key = rule.get("parameter_id")
             definition = definitions.get(key, {})
             label = definition.get("label", key)
@@ -105,13 +143,13 @@ def assess_requirements(item, request, definitions=None, tag_map=None):
                 "label": "%s %s %s" % (label, _operator_text(operator), expected),
                 "operator": operator, "actual": params.get(key),
                 "matched": bool(ok), "status": "matched" if ok else "unmatched",
-                "gap": None, "group": mode, "group_matched": group_matched,
+                "gap": round(gap, 6), "group": mode, "group_matched": group_matched,
             })
         conditions.append({
             "kind": "parameter_group", "key": "__indicator_filters__",
             "label": "技术指标条件（%s）" % ("任一满足" if mode == "any" else "全部满足"),
             "matched": group_matched, "status": "matched" if group_matched else "unmatched",
-            "mode": mode, "gap": None,
+            "mode": mode, "gap": round(0.0 if group_matched else sum(gaps), 6),
         })
 
     selected_tags = list(request.get("selected_tags") or [])

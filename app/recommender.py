@@ -199,6 +199,8 @@ def rank_agreements(items, request, tag_weights, definitions=None, tag_map=None)
             candidates.append(item)
         elif agreement_matches(item, request, definitions) or (allow_best_effort and item.get("best_effort")):
             item["requirement_assessment"] = assess_requirements(item, request, definitions, tag_map)
+            item["strict_filter_satisfied"] = item["requirement_assessment"]["strict_satisfied"]
+            item["fit_penalty"] = item["requirement_assessment"]["demand_penalty"]
             candidates.append(item)
     selected_tags = request.get("selected_tags") or []
     for item in candidates:
@@ -265,9 +267,11 @@ def rank_agreements(items, request, tag_weights, definitions=None, tag_map=None)
     else:
         reverse = True  # scores default to high-to-low
     def _sort_value(item):
-        # Fully-satisfied candidates rank first; within each satisfaction class
-        # the user's sort key decides, with missing values always last.
+        # Fully-satisfied candidates rank first; within each satisfaction class the
+        # demand gap (fit_penalty) decides, then the user's sort key, with missing
+        # values always last.
         satisfied_rank = 0 if item.get("strict_filter_satisfied") else 1
+        fit_rank = float(item.get("fit_penalty", 0) or 0)
         value = item.get(key)
         if value is None:
             score_rank = float("inf")
@@ -275,7 +279,7 @@ def rank_agreements(items, request, tag_weights, definitions=None, tag_map=None)
             score_rank = float(value)
             if reverse:
                 score_rank = -score_rank
-        return (satisfied_rank, score_rank)
+        return (satisfied_rank, fit_rank, score_rank)
     candidates.sort(key=_sort_value)
     for index, item in enumerate(candidates, 1):
         item["rank"] = index
@@ -333,9 +337,10 @@ def rank_historical_products(items, request, tag_weights, definitions=None, tag_
     else:
         reverse = True
     def _sort_value(item):
-        # Fully-satisfied rows first; within each class the sort key decides, with
-        # missing values always last regardless of direction.
+        # Fully-satisfied rows first; within each class the demand gap decides,
+        # then the sort key, with missing values always last regardless of direction.
         satisfied_rank = 0 if item.get("strict_filter_satisfied") else 1
+        fit_rank = float(item.get("fit_penalty", 0) or 0)
         value = item.get(key)
         if value is None:
             score_rank = float("inf")
@@ -343,7 +348,7 @@ def rank_historical_products(items, request, tag_weights, definitions=None, tag_
             score_rank = float(value)
             if reverse:
                 score_rank = -score_rank
-        return (satisfied_rank, score_rank)
+        return (satisfied_rank, fit_rank, score_rank)
     candidates.sort(key=_sort_value)
     for index, item in enumerate(candidates, 1):
         item["rank"] = index

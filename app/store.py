@@ -401,6 +401,16 @@ class Store(object):
         finally:
             conn.close()
 
+    def _tag_rule_match(self, values, rule, definitions):
+        """Match one DataMaster tag rule, passing its parameter definition so mapped
+        enums and boolean encodings use the same Phase 1 semantics as filtering."""
+        return filter_match(values, {
+            "parameter_id": rule.get("parameter_id"),
+            "operator": rule.get("operator"),
+            "value1": rule.get("value1"),
+            "value2": rule.get("value2"),
+        }, definitions.get(rule.get("parameter_id")))
+
     def derive_tags(self, params, evaluation=None, inherited_tags=None):
         """Derive generated-scheme tags from DataMaster rules, never code constants."""
         evaluation = evaluation or {}
@@ -412,6 +422,7 @@ class Store(object):
         })
         tags = self.tag_map()
         inherited = set(inherited_tags or [])
+        definitions = self.parameter_map()
         grouped = {}
         for rule in self.tag_rule_rows():
             grouped.setdefault(rule["tag_id"], {}).setdefault(rule.get("rule_group") or "default", []).append(rule)
@@ -434,12 +445,7 @@ class Store(object):
                 continue
             matched = False
             for rules in groups.values():
-                if all(filter_match(values, {
-                    "parameter_id": rule.get("parameter_id"),
-                    "operator": rule.get("operator"),
-                    "value1": rule.get("value1"),
-                    "value2": rule.get("value2"),
-                }) for rule in rules):
+                if all(self._tag_rule_match(values, rule, definitions) for rule in rules):
                     matched = True
                     break
             if matched:
@@ -490,6 +496,7 @@ class Store(object):
         })
         tags = self.tag_map()
         inherited = set(inherited_tags or [])
+        definitions = self.parameter_map()
         grouped = {}
         for rule in self.tag_rule_rows():
             grouped.setdefault(rule["tag_id"], {}).setdefault(rule.get("rule_group") or "default", []).append(rule)
@@ -508,7 +515,7 @@ class Store(object):
                     details = []
                     group_ok = True
                     for rule in rules:
-                        match = filter_match(values, {"parameter_id": rule.get("parameter_id"), "operator": rule.get("operator"), "value1": rule.get("value1"), "value2": rule.get("value2")})
+                        match = self._tag_rule_match(values, rule, definitions)
                         details.append({"rule_id": rule.get("rule_id"), "parameter_id": rule.get("parameter_id"), "operator": rule.get("operator"), "value1": rule.get("value1"), "value2": rule.get("value2"), "matched": bool(match)})
                         group_ok = group_ok and bool(match)
                     if group_ok:

@@ -955,7 +955,7 @@ class HistorySeededGenerator(object):
             "extrapolation_warnings": extrapolation,
             "contour_extrapolation": any(x.get("state") != "inside" for x in contour_details),
             "fit_penalty": round(demand_penalty + 2.5 * hard_penalty, 6),
-            "strict_filter_satisfied": not demand_unmet and not hard_conflicts,
+            "strict_filter_satisfied": requirement_assessment["strict_satisfied"] and not hard_conflicts,
             "best_effort": bool(demand_unmet or hard_conflicts),
             "search_metrics": {
                 "hard_penalty": hard_penalty,
