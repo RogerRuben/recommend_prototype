@@ -130,3 +130,29 @@ Phase 5 之前补齐的集成收口，解决四个阶段之间仍然存在的语
 - DataMaster/模型耦合对优先级选择（当前仍为相邻 `numeric_comp` 组合）
 - 完整多步 move trace（当前仅保存最终节点 parent 信息，未嵌完整链）
 
+---
+
+## V20 Pre-Phase5 Patch（`aad8aed`）
+
+Phase 5 前补的三个 P1 + 一个 `-1` 阻断项 + UI 收尾。
+
+| 编号 | 修复 |
+| --- | --- |
+| 1 | 部分满足方案内部按 `demand_penalty` 排序（`satisfied_rank, fit_rank, score_rank`） |
+| 2 | 技术指标规则加连续 `normalized_gap`（AND 求和 / ANY 取最近 alternative），不再 0/1 化 |
+| 3 | `store.derive_tags` / `tag_evidence` 经 `_tag_rule_match` 透传 parameter definition |
+| 4 | 前端 mapping 优先于 boolean 二值；boolean 编辑器支持第三态（`-1` → 无该属性） |
+| 5 | Generator `strict_filter_satisfied` 使用共享 assessment 的 `strict_satisfied` |
+| UI | chips 对 AND 逐条显示；actual 经 `displayParameterValue` 显示业务值；离线详情继承卡片 assessment；Saved/CSV 隐藏 P10 与可行概率 |
+
+### 关键文件
+- `app/requirement_assessment.py`（`_rule_gap`、`gap` 字段、AND/ANY 聚合）
+- `app/recommender.py`（`rank_agreements` / `rank_historical_products` 排序键、生成项 `strict_filter_satisfied`/`fit_penalty`）
+- `app/store.py`（`_tag_rule_match`）
+- `app/local_generator.py`（strict 状态复用）
+- `app/static/app.js`（`booleanOptions`、`displayParameterValue`、`requirementEvidenceHtml`、`openDetail`、`exportCsv`、`openSaved`）
+
+### 测试
+- 新增 `tests/partial_ranking_and_gap_test.py`、`tests/tag_rule_definition_test.py`
+
+
