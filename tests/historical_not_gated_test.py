@@ -73,10 +73,13 @@ def main():
     ranked = rank_agreements(items, {}, {})
     assert len(ranked) == 4, "无筛选条件时4条历史成品应全部保留，实际 %d" % len(ranked)
 
+    # Soft recommendation: user thresholds no longer delete historical products;
+    # they are kept and the fully-satisfied ones rank first.
     ranked2 = rank_agreements(items, {"min_feasibility": 0.8}, {})
-    assert len(ranked2) == 2, "min_feasibility=0.8 应只保留 A/B，实际 %d" % len(ranked2)
+    assert len(ranked2) == 4, "min_feasibility=0.8 仍应保留4条历史成品（软匹配），实际 %d" % len(ranked2)
+    assert set(item["agreement_id"] for item in ranked2[:2]) == {"A", "B"}, "完全满足的 A/B 应排在前面"
 
-    print(json.dumps({"status": "PASS", "message": "历史成品不受模型工程门控淘汰，仅由用户筛选条件过滤"}, ensure_ascii=False))
+    print(json.dumps({"status": "PASS", "message": "历史成品不受模型工程门控淘汰，用户条件软匹配排序"}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

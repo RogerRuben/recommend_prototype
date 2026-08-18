@@ -175,12 +175,24 @@ def compute_tag_match(item, selected_tags, tag_weights):
     return 100.0 * numerator / max(denominator, 1e-9)
 
 
-def rank_agreements(items, request, tag_weights):
+def rank_agreements(items, request, tag_weights, definitions=None, tag_map=None):
+    from .requirement_assessment import assess_requirements
     allow_best_effort = bool(request.get("include_best_effort"))
-    candidates = [
-        dict(item) for item in items
-        if agreement_matches(item, request) or (allow_best_effort and item.get("best_effort"))
-    ]
+    candidates = []
+    for source in items:
+        item = dict(source)
+        is_historical = (not item.get("is_generated")) and item.get("agreement_source") in ("historical", "imported")
+        if is_historical:
+            # Soft recommendation: a real historical product is never dropped by
+            # the user's thresholds; it is kept and its requirement assessment is
+            # attached so the UI can show exactly where it falls short.
+            item["requirement_assessment"] = assess_requirements(item, request, definitions, tag_map)
+            item["strict_filter_satisfied"] = item["requirement_assessment"]["strict_satisfied"]
+            item["fit_penalty"] = item["requirement_assessment"]["demand_penalty"]
+            candidates.append(item)
+        elif agreement_matches(item, request) or (allow_best_effort and item.get("best_effort")):
+            item["requirement_assessment"] = assess_requirements(item, request, definitions, tag_map)
+            candidates.append(item)
     selected_tags = request.get("selected_tags") or []
     for item in candidates:
         model_available = item.get("model_evaluation_available") is not False
@@ -246,12 +258,18 @@ def rank_agreements(items, request, tag_weights):
     else:
         reverse = True  # scores default to high-to-low
     def _sort_value(item):
+        # Fully-satisfied candidates rank first; within each satisfaction class
+        # the user's sort key decides, with missing values always last.
+        satisfied_rank = 0 if item.get("strict_filter_satisfied") else 1
         value = item.get(key)
         if value is None:
-            # Missing price / cost-effectiveness must sort last, never first.
-            return float("inf") if not reverse else float("-inf")
-        return float(value)
-    candidates.sort(key=_sort_value, reverse=reverse)
+            score_rank = float("inf")
+        else:
+            score_rank = float(value)
+            if reverse:
+                score_rank = -score_rank
+        return (satisfied_rank, score_rank)
+    candidates.sort(key=_sort_value)
     for index, item in enumerate(candidates, 1):
         item["rank"] = index
     return candidates

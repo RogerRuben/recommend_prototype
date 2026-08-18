@@ -1128,8 +1128,10 @@ class Application(object):
         ranking_request = dict(request)
         ranking_request["include_best_effort"] = source_mode in ("generated", "both")
         tag_weights = dict((item["tag_id"], item["weight"]) for item in self.bootstrap()["tags"])
+        definitions = self.store.parameter_map()
+        tag_map = self.store.tag_map()
         ranked = (
-            rank_agreements(candidates, ranking_request, tag_weights)
+            rank_agreements(candidates, ranking_request, tag_weights, definitions=definitions, tag_map=tag_map)
             if calculation_available else
             rank_historical_products(candidates, ranking_request, tag_weights)
         )
