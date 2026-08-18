@@ -45,6 +45,44 @@ def _truth(value):
     return normalize_boolean(value) is True
 
 
+def _classify_move(search_move):
+    text = str(search_move or "")
+    if text.startswith("结构调整"):
+        return "structural_move"
+    if text.startswith("工程联动") or text.startswith("双属性联动"):
+        return "coupled_move"
+    if text.startswith("单属性"):
+        return "single_move"
+    if text.startswith("反向轮廓") or text.startswith("兜底"):
+        return "output_target_move"
+    if text.startswith("相关联合"):
+        return "coupled_move"
+    if text.startswith("深度精英交叉"):
+        return "elite_crossover"
+    return "single_move"
+
+
+def _move_reason_type(move_type):
+    return {
+        "structural_move": "structural_change",
+        "coupled_move": "engineering_coupling",
+        "single_move": "local_tuning",
+        "output_target_move": "output_target",
+        "elite_crossover": "elite_recombination",
+    }.get(move_type, "local_tuning")
+
+
+def _move_reason_text(search_move):
+    move_type = _classify_move(search_move)
+    return {
+        "structural_move": "改变产品结构条件（控制属性联动）",
+        "coupled_move": "按工程耦合关系联动调整",
+        "single_move": "局部参数调整",
+        "output_target_move": "逼近输出目标（价格/效能）",
+        "elite_crossover": "重组精英方案的有效改动",
+    }.get(move_type, "参数搜索动作")
+
+
 def _clamp(value, lo, hi):
     return max(float(lo), min(float(hi), float(value)))
 
@@ -955,6 +993,10 @@ class HistorySeededGenerator(object):
         extrapolation, contour_penalty, anomaly_penalty = self._extrapolation_assessment(evaluation, contour_details)
         seed_distance = self._normalized_distance(params, base["params"], definitions)
         objective = self._objective_value(evaluation)
+        move_type = _classify_move(search_move)
+        node_id = "N%03d-%03d" % (int(iteration), int(attempt))
+        parent_node_id = (parent_record or {}).get("generation_trace", {}).get("node_id")
+        move_changes = self._changed_parameters(params, (parent_record or {}).get("params") or base["params"], definitions) if parent_record else self._changed_parameters(params, base["params"], definitions)
         item.update({
             "unmet_conditions": demand_unmet + hard_conflicts,
             "demand_unmet_conditions": demand_unmet,
@@ -1001,6 +1043,18 @@ class HistorySeededGenerator(object):
                 "seed_tags": list(base.get("tags") or []),
                 "iteration": iteration,
                 "attempt": attempt,
+                "node_id": node_id,
+                "parent_node_id": parent_node_id,
+                "move_type": move_type,
+                "move": {
+                    "type": move_type,
+                    "reason_type": _move_reason_type(move_type),
+                    "reason_text": _move_reason_text(search_move),
+                    "changes": [
+                        {"parameter_id": key, "before": (parent_record or {}).get("params", {}).get(key), "after": params.get(key)}
+                        for key in move_changes
+                    ],
+                },
                 "origin_seed_id": base["agreement_id"],
                 "parent_iteration": (parent_record or {}).get("generation_trace", {}).get("iteration"),
                 "parent_attempt": (parent_record or {}).get("generation_trace", {}).get("attempt"),
@@ -1272,6 +1326,30 @@ class HistorySeededGenerator(object):
             ) >= distance:
                 selected.append(item)
         return len(selected)
+
+    def _build_generation_path(self, record, node_map):
+        """Backtrace a candidate's node chain into a replayable generation path."""
+        path = []
+        seen = set()
+        current = record
+        while current is not None:
+            trace = current.get("generation_trace") or {}
+            node_id = trace.get("node_id")
+            if not node_id or node_id in seen:
+                break
+            seen.add(node_id)
+            path.append({
+                "node_id": node_id,
+                "iteration": trace.get("iteration"),
+                "attempt": trace.get("attempt"),
+                "move_type": trace.get("move_type"),
+                "move": trace.get("move"),
+                "params": dict(current.get("params") or {}),
+            })
+            parent_id = trace.get("parent_node_id")
+            current = node_map.get(parent_id) if parent_id else None
+        path.reverse()
+        return path
 
     def _make_public_item(self, record, base, changed, index, rng):
         item = dict(record)
@@ -1686,8 +1764,14 @@ class HistorySeededGenerator(object):
         if not selected and usable:
             selected = usable[:1]
 
+        node_map = {}
+        for rec in all_records:
+            node_id = (rec.get("generation_trace") or {}).get("node_id")
+            if node_id:
+                node_map[node_id] = rec
         public_selected = []
         for index, record in enumerate(selected, 1):
+            record.setdefault("generation_trace", {})["generation_path"] = self._build_generation_path(record, node_map)
             base = record.get("_base") or seeds[0]
             changed = record.get("_changed") or self._changed_parameters(record["params"], base["params"], definitions)
             public_selected.append(self._make_public_item(record, base, changed, index, rng))
