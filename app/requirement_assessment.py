@@ -8,6 +8,7 @@ generator's demand anchoring.
 """
 from __future__ import print_function
 
+from .conditional_constraint import TEMPLATE_KIND, parse_template_metadata
 from .recommender import filter_match
 from .value_semantics import normalize_numeric
 
@@ -53,7 +54,7 @@ def _rule_gap(params, rule, definition, matched):
     return 1.0
 
 
-def assess_requirements(item, request, definitions=None, tag_map=None):
+def assess_requirements(item, request, definitions=None, tag_map=None, constraint_rules=None):
     """Assess one candidate against the user's requirements.
 
     Returns::
@@ -74,6 +75,16 @@ def assess_requirements(item, request, definitions=None, tag_map=None):
     matched = 0
     unmatched = 0
     unknown = 0
+
+    # Conditional-attribute targets: whose controller currently forces them
+    # inactive, so evidence can say "当前无该属性" instead of a raw gap.
+    conditional_targets = {}
+    for rule in (constraint_rules or []):
+        kind = rule.get("rule_kind")
+        if kind in ("conditional_lower", "conditional_upper"):
+            meta = parse_template_metadata(rule)
+            if meta and meta.get("template") == TEMPLATE_KIND and meta.get("target"):
+                conditional_targets.setdefault(meta["target"], meta)
 
     price = item.get("predicted_price_wan")
     if price in (None, ""):
@@ -123,6 +134,18 @@ def assess_requirements(item, request, definitions=None, tag_map=None):
         params = item.get("params") or {}
         results = [filter_match(params, rule, definitions.get(rule.get("parameter_id"))) for rule in rules]
         gaps = [_rule_gap(params, rule, definitions.get(rule.get("parameter_id")), ok) for rule, ok in zip(rules, results)]
+        # An inactive subordinate (-1 = 无该属性) is "not applicable", not a
+        # continuous numeric distance: flatten its gap to a fixed 1.0.
+        inactive_flags = {}
+        for rule in rules:
+            key = rule.get("parameter_id")
+            meta = conditional_targets.get(key)
+            if meta is not None:
+                actual_num = _number(params.get(key))
+                if actual_num is not None and abs(actual_num - float(meta.get("inactive_value", -1))) < 1e-9:
+                    inactive_flags[key] = meta
+        if inactive_flags:
+            gaps = [1.0 if rule.get("parameter_id") in inactive_flags else gap for rule, gap in zip(rules, gaps)]
         mode = str(request.get("indicator_filter_mode") or "all")
         group_matched = any(results) if mode == "any" else all(results)
         if group_matched:
@@ -142,13 +165,21 @@ def assess_requirements(item, request, definitions=None, tag_map=None):
             value1 = rule.get("value1")
             value2 = rule.get("value2")
             expected = "%s～%s" % (value1, value2) if str(operator).startswith("range_") else str(value1)
-            conditions.append({
+            condition = {
                 "kind": "parameter", "key": key, "parameter_id": key,
                 "label": "%s %s %s" % (label, _operator_text(operator), expected),
                 "operator": operator, "actual": params.get(key),
                 "matched": bool(ok), "status": "matched" if ok else "unmatched",
                 "gap": round(gap, 6), "group": mode, "group_matched": group_matched,
-            })
+            }
+            meta = inactive_flags.get(key)
+            if meta is not None:
+                condition["actual_state"] = "inactive"
+                condition["inactive_reason"] = {
+                    "controller": meta.get("controller"),
+                    "controller_value": params.get(meta.get("controller")),
+                }
+            conditions.append(condition)
         conditions.append({
             "kind": "parameter_group", "key": "__indicator_filters__",
             "label": "技术指标条件（%s）" % ("任一满足" if mode == "any" else "全部满足"),

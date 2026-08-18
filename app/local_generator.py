@@ -29,6 +29,7 @@ import math
 import random
 import time
 
+from .constraint_projection import active_parameter_set, project_constraints
 from .recommender import rank_agreements
 from .requirement_assessment import assess_requirements
 from .value_semantics import normalize_boolean, normalize_numeric, values_equal
@@ -911,6 +912,12 @@ class HistorySeededGenerator(object):
 
     def _record_from_params(self, params, base, request, definitions, tag_map, locked, anchor_conflicts,
                             repairs, soft_moves, iteration, attempt, search_move, evaluation=None, parent_record=None):
+        # Conditional projection runs before evaluation so an inactive subordinate
+        # is already its inactive value (e.g. -1) when the model sees it.
+        constraint_rules = getattr(self.store, "constraint_rows", lambda: [])()
+        projection = project_constraints(params, definitions, constraint_rules, locked=locked, seed_values=base.get("params"))
+        params = projection["parameters"]
+        active_set = active_parameter_set(params, definitions, constraint_rules, locked=locked)
         if evaluation is None:
             evaluation = self._evaluate_for_request(params, base.get("params"), request)
         contour_details, _ = self._contour_diagnostics(evaluation.get("parameters") or params, locked)
@@ -952,6 +959,10 @@ class HistorySeededGenerator(object):
             "demand_unmet_conditions": demand_unmet,
             "requirement_assessment": requirement_assessment,
             "engineering_conflicts": hard_conflicts,
+            "constraint_conflicts": projection["conflicts"],
+            "inactive_parameters": projection["inactive_parameters"],
+            "active_parameters": active_set["active_parameters"],
+            "projection_repairs": projection["repairs"],
             "extrapolation_warnings": extrapolation,
             "contour_extrapolation": any(x.get("state") != "inside" for x in contour_details),
             "fit_penalty": round(demand_penalty + 2.5 * hard_penalty, 6),
