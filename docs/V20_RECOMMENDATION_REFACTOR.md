@@ -352,6 +352,33 @@ Phase 5 前补的三个 P1 + 一个 `-1` 阻断项 + UI 收尾。
 ### 测试（累计 74 个，全部通过）
 新增 `frontend_app_initialization_test.py`、`datamaster_parameter_validation_alignment_test.py`、`missing_seed_parameter_anchor_test.py`、`generation_model_input_preflight_test.py`、`model_value_mapping_generation_input_test.py`、`conditional_relationship_v2_test.py`、`conditional_relationship_v1_migration_test.py`、`conditional_relationship_model_compatibility_test.py`、`parameter_group_delete_editability_test.py`、`datamaster_validation_hardening_test.py`、`real_generation_incomplete_seed_test.py`。
 
+---
+
+## V20 Conditional Relationship Closure Tail Patch
+
+在 `c208143` 后收口 Conditional V2 的生产集成路径。
+
+| 提交 | 主题 |
+| --- | --- |
+| `62a6388` | admin UI 提交 V2 关系 payload |
+| `8fc3ef2` | 保存链接入模型契约兼容检查；V2 占位规则排除出 affine assessment |
+| `94dc3e9` | Preflight 接受 canonical 字符串编码；V2 占位规则排除出 repair |
+| `48bc0d5` | V2 投影对 locked target 做 branch-aware 兼容判断 |
+| `35b89a9` | 有分组 master sheet 时禁止自动创建未知分组 |
+| `4116325` | 全链 V2 save/project/evaluate/assess 集成测试 |
+
+### 关键改动
+- `admin.js` 条件属性关系编辑器现在直接生成 `conditional_applicability_v2` payload（`when/then/otherwise`）。
+- `Store.upsert_conditional_template()` 保存 V2 时执行 `validate_conditional_relationship()`；模型服务在线且不兼容时拒绝保存，离线时允许业务保存。
+- `Store.assess_rules()` 与 `Generator._repair_relations()` 均跳过 V2 占位规则，V2 只由 `project_constraints()` 执行。
+- V2 投影对 locked target 按 branch 判断兼容性（fixed/range/enum/not_applicable），不再一律判冲突。
+- Generation Preflight 的枚举未映射判断同时接受 business key 与 canonical model value，字符串模型编码（如 `"SS"`）不再被误杀。
+- DataMaster 有「指标分组」sheet 时，参数引用未知分组会校验报错，不再偷偷创建。
+
+### 测试（累计 77 个，全部通过）
+新增 `conditional_v2_full_chain_test.py`、`datamaster_group_sheet_strict_test.py`、`string_enum_preflight_test.py`。
+
+
 
 
 
