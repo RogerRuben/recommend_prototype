@@ -1540,7 +1540,7 @@ class HistorySeededGenerator(object):
             item["solution_fit_summary"] = "已满足当前筛选条件且位于主要模型经验范围内"
         return item
 
-    def _emergency_candidate(self, seeds, bounds, definitions, request, tag_map, rng, frozen_parameters=None, budget=None):
+    def _emergency_candidate(self, seeds, bounds, definitions, request, tag_map, rng, frozen_parameters=None, budget=None, rejection_details=None):
         if budget is None:
             budget = {"attempted": 0, "max": 10 ** 9}
         for base in seeds:
@@ -1562,6 +1562,18 @@ class HistorySeededGenerator(object):
                 if len(changed) >= 2:
                     break
             finalized = self._finalize_params(params, base, locked, definitions)
+            anchor_violations = validate_anchor_integrity(
+                finalized["params"], request.get("indicator_filters"), definitions, request.get("indicator_filter_mode", "all")
+            )
+            if anchor_violations:
+                if rejection_details is not None:
+                    rejection_details.append({
+                        "stage": "anchor_integrity",
+                        "candidate_id": "EMERGENCY",
+                        "error_type": "AnchorInvariantError",
+                        "message": "；".join("%s %s actual=%s" % (v["parameter_id"], v["requested"], v["actual"]) for v in anchor_violations),
+                    })
+                continue
             repairs, soft = finalized["repairs"], finalized["soft_moves"]
             try:
                 budget["attempted"] += 1
@@ -1889,6 +1901,7 @@ class HistorySeededGenerator(object):
                     center_pending.append({
                         "params": params, "base": base, "request": center_request,
                         "locked": locked, "locked_sources": locked_sources, "anchor_conflicts": anchor_conflicts,
+                        "anchor_resolutions": center_record.get("generation_trace", {}).get("anchor_resolutions") or [],
                         "repairs": finalized["repairs"], "soft_moves": finalized["soft_moves"],
                         "constraint_conflicts": finalized["constraint_conflicts"],
                         "inactive_parameters": finalized["inactive_parameters"],
@@ -1926,6 +1939,7 @@ class HistorySeededGenerator(object):
                         "locked": locked,
                         "locked_sources": center_record.get("_locked_sources") or {},
                         "anchor_conflicts": center_record["_anchor_conflicts"],
+                        "anchor_resolutions": center_record.get("generation_trace", {}).get("anchor_resolutions") or [],
                         "repairs": finalized["repairs"], "soft_moves": finalized["soft_moves"],
                         "constraint_conflicts": finalized["constraint_conflicts"],
                         "inactive_parameters": finalized["inactive_parameters"],
@@ -2015,6 +2029,7 @@ class HistorySeededGenerator(object):
                 record["_request"] = item["request"]
                 record["generation_trace"]["tag_branch"] = dict(item["center_record"].get("generation_trace", {}).get("tag_branch") or {})
                 record["generation_trace"]["locked_sources"] = record["_locked_sources"]
+                record["generation_trace"]["anchor_resolutions"] = item.get("anchor_resolutions") or []
                 round_records.append(record)
                 all_records.append(record)
             beam = self._beam_select(round_records, definitions, width=beam_width)
@@ -2058,6 +2073,7 @@ class HistorySeededGenerator(object):
             emergency, emergency_base = self._emergency_candidate(
                 seeds, bounds, definitions, request, tag_map, rng,
                 frozen_parameters=request.get("frozen_parameters"), budget=budget_state,
+                rejection_details=rejection_details,
             )
             attempted_evaluations = budget_state["attempted"]
             if emergency is not None:
