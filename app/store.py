@@ -105,7 +105,7 @@ class Store(object):
     REQUIRED_TABLES = {
         "metadata", "products", "parameter_definitions", "tags", "agreements",
         "saved_schemes", "model_registry", "model_input_bindings", "indicator_couplings", "constraint_rules",
-        "tag_rules", "audit_log", "product_releases",
+        "tag_rules", "audit_log", "product_releases", "parameter_groups",
     }
     MIGRATABLE_TABLES = {"product_releases"}
 
@@ -162,6 +162,10 @@ class Store(object):
                     auto_adjustable INTEGER NOT NULL DEFAULT 1, decimal_places INTEGER NOT NULL DEFAULT 3,
                     parameter_group TEXT NOT NULL DEFAULT '其他',
                     display_order INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, model_bound INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE TABLE IF NOT EXISTS parameter_groups(
+                    group_name TEXT PRIMARY KEY, display_order INTEGER NOT NULL DEFAULT 1,
+                    description TEXT, enabled INTEGER NOT NULL DEFAULT 1, default_collapsed INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS tags(
                     tag_id TEXT PRIMARY KEY, tag_name TEXT NOT NULL, tag_group TEXT, weight REAL NOT NULL,
@@ -251,6 +255,20 @@ class Store(object):
                     ("saved_schemes", "product_code TEXT"),
                 ]:
                     self._add_column(conn, table, definition)
+                # Bootstrap managed parameter groups from existing definitions.
+                group_rows = conn.execute(
+                    "SELECT parameter_group, MIN(display_order) AS ord FROM parameter_definitions "
+                    "WHERE parameter_group IS NOT NULL AND parameter_group<>'' GROUP BY parameter_group ORDER BY ord, parameter_group"
+                ).fetchall()
+                for row in group_rows:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO parameter_groups(group_name, display_order, description, enabled, default_collapsed) "
+                        "VALUES(?,?,?,1,0)", (row["parameter_group"], int(row["ord"] or 9999), "")
+                    )
+                conn.execute(
+                    "INSERT OR IGNORE INTO parameter_groups(group_name, display_order, description, enabled, default_collapsed) "
+                    "VALUES('其他',9999,'',1,0)"
+                )
                 # Normalize legacy IP-grade definitions. Older packages stored a
                 # handful of observed grades as if they were the full legal set;
                 # that prevented exploration of valid intermediate integer grades.
@@ -612,6 +630,7 @@ class Store(object):
             for item in parameters:
                 item.update(role_map.get(item["parameter_id"], {"model_role":"effectiveness_only","affects_effectiveness":True,"affects_price":False,"default_visible":True,"editable":True,"default_value":None}))
             tags = [dict(row) for row in conn.execute("SELECT * FROM tags WHERE enabled=1 ORDER BY tag_group,tag_name")]
+            parameter_groups = [dict(row) for row in conn.execute("SELECT * FROM parameter_groups ORDER BY display_order, group_name")]
             models = [dict(row) for row in conn.execute("SELECT * FROM model_registry ORDER BY model_kind")]
             counts = {
                 "historical": conn.execute("SELECT COUNT(*) FROM agreements WHERE agreement_source IN ('historical','imported') AND enabled=1").fetchone()[0],
@@ -620,7 +639,8 @@ class Store(object):
             }
             version_row = conn.execute("SELECT value FROM metadata WHERE key='master_data_version'").fetchone()
             return {"product": product, "parameters": parameters, "parameter_roles": role_map,
-                    "tags": tags, "models": models, "counts": counts, "master_data_version": version_row[0] if version_row else "0"}
+                    "tags": tags, "parameter_groups": parameter_groups, "models": models,
+                    "counts": counts, "master_data_version": version_row[0] if version_row else "0"}
         finally:
             conn.close()
 
@@ -907,7 +927,7 @@ class Store(object):
             conn = self.connect()
             try:
                 conn.execute("BEGIN IMMEDIATE")
-                for table in ("agreements", "constraint_rules", "indicator_couplings", "tag_rules", "tags", "parameter_definitions", "products"):
+                for table in ("agreements", "constraint_rules", "indicator_couplings", "tag_rules", "tags", "parameter_definitions", "parameter_groups", "products"):
                     conn.execute("DELETE FROM %s" % table)
                 for item in data.get("products", []):
                     conn.execute("INSERT INTO products(product_code,product_name,product_description,enabled) VALUES(?,?,?,?)", (item["product_code"],item["product_name"],item.get("product_description"),int(item.get("enabled",1))))
@@ -915,8 +935,37 @@ class Store(object):
                     conn.execute("""INSERT INTO parameter_definitions
                         (parameter_id,label,parameter_group,unit,value_type,min_value,max_value,observed_min,observed_max,preference,description,adjustment_hint,
                          allowed_values_json,model_value_mapping_json,search_type,required,auto_adjustable,decimal_places,display_order,enabled,model_bound)
-                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
                         item["parameter_id"],item["label"],item.get("parameter_group") or "其他",item.get("unit"),item["value_type"],item.get("min_value"),item.get("max_value"),item.get("observed_min"),item.get("observed_max"),item.get("preference"),item.get("description"),item.get("adjustment_hint"),item.get("allowed_values_json"),item.get("model_value_mapping_json"),item.get("search_type") or "auto",int(item.get("required",1)),int(item.get("auto_adjustable",1)),int(item.get("decimal_places",3)),int(item.get("display_order",1)),int(item.get("enabled",1)),int(item.get("model_bound",1))))
+                group_items = data.get("parameter_groups")
+                if not group_items:
+                    seen = []
+                    for p in data.get("parameters", []):
+                        g = p.get("parameter_group") or "其他"
+                        if g not in seen:
+                            seen.append(g)
+                    if "其他" not in seen:
+                        seen.append("其他")
+                    group_items = [{"group_name": g, "display_order": i + 1, "description": "", "enabled": 1, "default_collapsed": 0} for i, g in enumerate(seen)]
+                seen_group_names = set()
+                for item in group_items:
+                    name = item.get("group_name") or "其他"
+                    if name in seen_group_names:
+                        continue
+                    seen_group_names.add(name)
+                    conn.execute(
+                        "INSERT INTO parameter_groups(group_name,display_order,description,enabled,default_collapsed) VALUES(?,?,?,?,?)",
+                        (name, int(item.get("display_order", 9999) or 9999), item.get("description") or "",
+                         int(item.get("enabled", 1) or 0), int(item.get("default_collapsed", 0) or 0))
+                    )
+                for p in data.get("parameters", []):
+                    g = p.get("parameter_group") or "其他"
+                    if g not in seen_group_names:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO parameter_groups(group_name,display_order,description,enabled,default_collapsed) VALUES(?,?,?,1,0)",
+                            (g, 9999, "")
+                        )
+                        seen_group_names.add(g)
                 for item in data.get("tags", []):
                     conn.execute("INSERT INTO tags(tag_id,tag_name,tag_group,weight,derivation_mode,description,enabled) VALUES(?,?,?,?,?,?,?)", (item["tag_id"],item["tag_name"],item.get("tag_group"),float(item.get("weight",1)),item.get("derivation_mode") or "rule",item.get("description"),int(item.get("enabled",1))))
                 for item in data.get("tag_rules", []):
@@ -1258,6 +1307,7 @@ class Store(object):
         "constraints": ("constraint_rules", "rule_id"),
         "agreements": ("agreements", "agreement_id"),
         "models": ("model_registry", "model_kind"),
+        "parameter_groups": ("parameter_groups", "group_name"),
     }
 
     def admin_snapshot(self):
@@ -1265,7 +1315,7 @@ class Store(object):
         try:
             payload = {}
             for key, (table, pk) in self.ADMIN_TABLES.items():
-                order = "display_order" if table in ("parameter_definitions", "indicator_couplings", "constraint_rules") else pk
+                order = "display_order" if table in ("parameter_definitions", "indicator_couplings", "constraint_rules", "parameter_groups") else pk
                 rows = [dict(row) for row in conn.execute("SELECT * FROM %s ORDER BY %s" % (table, order))]
                 if key == "agreements":
                     for row in rows:
@@ -1376,6 +1426,7 @@ class Store(object):
             "constraints": {"operator": "gte", "multiplier": 1.0, "offset": 0.0,
                             "severity": "warning", "display_order": 1, "enabled": 1},
             "agreements": {"agreement_source": "historical", "enabled": 1},
+            "parameter_groups": {"display_order": 9999, "enabled": 1, "default_collapsed": 0},
         }.get(section, {})
         for key, value in defaults.items():
             if data.get(key) in (None, ""):
@@ -1389,6 +1440,7 @@ class Store(object):
             "couplings": (("coupling_name", "耦合名称"), ("parameter_a", "指标A"), ("parameter_b", "指标B")),
             "constraints": (("rule_name", "约束名称"), ("left_parameter", "左侧指标")),
             "agreements": (("agreement_name", "协议名称"),),
+            "parameter_groups": (("group_name", "分组名称"),),
         }.get(section, ())
         missing = [label for key, label in required if data.get(key) in (None, "")]
         if missing:
@@ -1396,6 +1448,43 @@ class Store(object):
         if section == "parameters" and data.get("min_value") is not None and data.get("max_value") is not None:
             if float(data["min_value"]) > float(data["max_value"]):
                 raise ValueError("指标下限不能大于上限。")
+        if section == "parameter_groups":
+            original = str(data.get("original_group_name") or "").strip()
+            new_name = str(data.get("group_name") or "").strip()
+            if original and original != new_name:
+                with self.lock:
+                    conn = self.connect()
+                    try:
+                        exists = conn.execute("SELECT 1 FROM parameter_groups WHERE group_name=?", (original,)).fetchone()
+                        if not exists:
+                            raise ValueError("原分组不存在：%s" % original)
+                        dup = conn.execute("SELECT 1 FROM parameter_groups WHERE group_name=? AND group_name<>?", (new_name, original)).fetchone()
+                        if dup:
+                            raise ValueError("分组名称已存在：%s" % new_name)
+                        conn.execute(
+                            "UPDATE parameter_groups SET group_name=?, display_order=?, description=?, enabled=?, default_collapsed=? WHERE group_name=?",
+                            (new_name, int(data.get("display_order", 9999) or 9999), data.get("description") or "",
+                             int(data.get("enabled", 1) or 0), int(data.get("default_collapsed", 0) or 0), original)
+                        )
+                        conn.execute("UPDATE parameter_definitions SET parameter_group=? WHERE parameter_group=?", (new_name, original))
+                        self._audit(conn, "upsert", section, new_name, {"renamed_from": original, "data": data})
+                        conn.commit()
+                    finally:
+                        conn.close()
+                return {"saved": True, "id": new_name}
+            data.pop("original_group_name", None)
+        if section == "parameters":
+            group_name = str(data.get("parameter_group") or "其他").strip() or "其他"
+            with self.lock:
+                conn = self.connect()
+                try:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO parameter_groups(group_name, display_order, description, enabled, default_collapsed) VALUES(?,?,?,1,0)",
+                        (group_name, 9999, "")
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
         columns = self._table_columns(table)
         data = dict((k, v) for k, v in data.items() if k in columns)
         if not data.get(pk):
@@ -1437,6 +1526,9 @@ class Store(object):
                 # scan keeps a still-referenced field from being orphaned.
                 count = conn.execute("SELECT COUNT(*) FROM agreements WHERE params_json LIKE ?", ('%%"%s"%%' % object_id,)).fetchone()[0]
                 if count: refs.append({"type":"协议属性","count":count})
+            elif section == "parameter_groups":
+                count = conn.execute("SELECT COUNT(*) FROM parameter_definitions WHERE parameter_group=?", (object_id,)).fetchone()[0]
+                if count: refs.append({"type":"指标", "count":count})
             elif section == "products":
                 count = conn.execute("SELECT COUNT(*) FROM agreements WHERE product_code=?", (object_id,)).fetchone()[0]
                 if count: refs.append({"type":"协议数据","count":count})

@@ -13,6 +13,7 @@ from .xlsx_utils import read_workbook_bytes, write_workbook_bytes
 SHEETS = OrderedDict([
     ("成品信息", ["成品代号", "成品名称", "成品说明", "是否启用"]),
     ("指标定义", ["指标编号", "指标名称", "指标分组", "单位", "取值类型", "搜索类型", "工程下限", "工程上限", "效能方向", "指标说明", "调整提示", "允许值", "是否必填", "允许自动调整", "显示小数位", "显示顺序", "是否启用", "模型取值映射(JSON)"]),
+    ("指标分组", ["分组名称", "显示顺序", "说明", "是否启用", "默认折叠"]),
     ("标签字典", ["标签编号", "标签名称", "标签分组", "匹配权重", "生成判定方式", "标签说明", "是否启用"]),
     ("标签规则", ["规则编号", "标签编号", "指标编号", "比较关系", "条件值1", "条件值2", "规则组", "是否启用"]),
     ("耦合关系", ["关系编号", "关系名称", "关系类型", "指标A", "指标B", "可行域比较", "系数", "偏置", "作用强度", "提示级别", "关系说明", "设置依据", "显示顺序", "是否启用"]),
@@ -20,6 +21,9 @@ SHEETS = OrderedDict([
     ("历史协议", ["协议编号", "协议名称", "方案定位", "协议来源", "来源年份", "供应方类型", "历史价格(万元)", "标签"]),
     ("模型字段绑定", ["模型类型", "字段编号", "字段名称", "字段来源", "数据类型", "单位", "是否必填", "缺失策略", "数据库配置值", "训练均值", "模型版本", "是否启用"]),
 ])
+
+# Sheets that older workbooks may omit; they are derived from existing data.
+OPTIONAL_SHEETS = {"指标分组"}
 
 
 def clean(value):
@@ -470,6 +474,10 @@ class DataMasterService(object):
         for p in snap["parameters"]:
             params.append([p.get("parameter_id"), p.get("label"), p.get("parameter_group", "其他"), p.get("unit"), display_value_type(p.get("value_type")), display_search_type(p.get("search_type", "auto")), p.get("min_value"), p.get("max_value"), display_preference(p.get("preference")), p.get("description"), p.get("adjustment_hint"), "、".join(str(x) for x in _json_allowed(p.get("allowed_values_json"))), display_bool(p.get("required", 1)), display_bool(p.get("auto_adjustable", 1)), p.get("decimal_places", 3), p.get("display_order"), display_bool(p.get("enabled", 1)), p.get("model_value_mapping_json") or ""])
         rows.append(("指标定义", [SHEETS["指标定义"]] + params))
+        groups = []
+        for g in snap.get("parameter_groups", []):
+            groups.append([g.get("group_name"), g.get("display_order"), g.get("description"), display_bool(g.get("enabled", 1)), display_bool(g.get("default_collapsed", 0))])
+        rows.append(("指标分组", [SHEETS["指标分组"]] + ([] if empty else groups)))
         tags = []
         for t in snap["tags"]:
             tags.append([t.get("tag_id"), t.get("tag_name"), t.get("tag_group"), t.get("weight"), display_derivation(t.get("derivation_mode", "rule")), t.get("description"), display_bool(t.get("enabled", 1))])
@@ -515,7 +523,7 @@ class DataMasterService(object):
     def export_snapshot(self, snapshot):
         """Export a release draft without requiring it to be active or model-valid."""
         snap = dict(snapshot or {})
-        for key in ("products", "parameters", "tags", "tag_rules", "couplings", "constraints", "agreements", "model_inputs"):
+        for key in ("products", "parameters", "parameter_groups", "tags", "tag_rules", "couplings", "constraints", "agreements", "model_inputs"):
             snap.setdefault(key, [])
         _rows, names = self._dictionary_sheet(snap)
         return write_workbook_bytes(
@@ -532,7 +540,7 @@ class DataMasterService(object):
         if not clean(filename).lower().endswith(".xlsx"):
             raise ValueError("DataMaster仅支持.xlsx工作簿。")
         workbook = read_workbook_bytes(data)
-        missing_sheets = [name for name in SHEETS if name not in workbook]
+        missing_sheets = [name for name in SHEETS if name not in workbook and name not in OPTIONAL_SHEETS]
         if missing_sheets:
             raise ValueError("DataMaster缺少工作表：%s" % "、".join(missing_sheets))
         parsed = dict((name, rows_to_dicts(workbook[name])) for name in SHEETS)
@@ -600,6 +608,38 @@ class DataMasterService(object):
                 # services are active; it is not a DataMaster validation input.
                 parameter["model_bound"] = 0
             report["data"]["parameters"] = parameters
+
+            group_items = []
+            if "指标分组" in workbook:
+                seen_group_names = set()
+                for r in parsed["指标分组"]:
+                    name = clean(r.get("分组名称")) or "其他"
+                    if name in seen_group_names:
+                        continue
+                    seen_group_names.add(name)
+                    group_items.append({
+                        "group_name": name,
+                        "display_order": integer(r.get("显示顺序"), len(group_items) + 1),
+                        "description": clean(r.get("说明")),
+                        "enabled": parse_bool(r.get("是否启用", 1)),
+                        "default_collapsed": parse_bool(r.get("默认折叠", 0)),
+                    })
+            derived_group_names = []
+            for p in parameters:
+                g = p.get("parameter_group") or "其他"
+                if g not in derived_group_names:
+                    derived_group_names.append(g)
+            if "其他" not in derived_group_names:
+                derived_group_names.append("其他")
+            if not group_items:
+                group_items = [{"group_name": g, "display_order": i + 1, "description": "", "enabled": 1, "default_collapsed": 0} for i, g in enumerate(derived_group_names)]
+            else:
+                existing_group_names = set(x["group_name"] for x in group_items)
+                for g in derived_group_names:
+                    if g not in existing_group_names:
+                        group_items.append({"group_name": g, "display_order": len(group_items) + 1, "description": "", "enabled": 1, "default_collapsed": 0})
+                        existing_group_names.add(g)
+            report["data"]["parameter_groups"] = group_items
 
             tags = []
             for r in parsed["标签字典"]:
