@@ -472,7 +472,7 @@ class HistorySeededGenerator(object):
         locked = {}
         conflicts = []
         for key, rule in bounds.items():
-            if key not in params or key not in definitions:
+            if key not in definitions:
                 continue
             definition = definitions[key]
             if not definition.get("auto_adjustable", 1):
@@ -508,16 +508,42 @@ class HistorySeededGenerator(object):
                 requested_hi = float(rule.get("max", 1e99))
                 lower = max(engineering_min, requested_lo)
                 upper = min(engineering_max, requested_hi)
-                current = float(params[key])
-                if lower <= upper:
+                current = params.get(key)
+                current_num = _float(current)
+                has_min = "min" in rule
+                has_max = "max" in rule
+                if current_num is None:
+                    # The user explicitly requested this field; create it from the
+                    # demand rather than leaving the seed missing and failing at
+                    # model-input time.
+                    if lower <= upper:
+                        if has_min and has_max:
+                            value = (float(rule["min"]) + float(rule["max"])) / 2.0
+                        elif has_min:
+                            value = float(rule["min"])
+                        elif has_max:
+                            value = float(rule["max"])
+                        else:
+                            value = 0.0
+                        value = _clamp(value, lower, upper)
+                    else:
+                        target = requested_lo if requested_lo > engineering_max else requested_hi
+                        value = _clamp(target, engineering_min, engineering_max)
+                        conflicts.append({
+                            "parameter_id": key,
+                            "reason": "用户筛选范围与工程范围没有交集",
+                            "requested_min": requested_lo,
+                            "requested_max": requested_hi,
+                        })
+                elif lower <= upper:
                     # Minimal-change projection: retain a satisfying seed value;
                     # otherwise move exactly to the nearest requested boundary.
-                    if current < lower:
+                    if current_num < lower:
                         value = lower
-                    elif current > upper:
+                    elif current_num > upper:
                         value = upper
                     else:
-                        value = current
+                        value = current_num
                 else:
                     target = requested_lo if requested_lo > engineering_max else requested_hi
                     value = _clamp(target, engineering_min, engineering_max)
