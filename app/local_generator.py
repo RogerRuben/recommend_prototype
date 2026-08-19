@@ -777,7 +777,12 @@ class HistorySeededGenerator(object):
                     elif a not in locked and definitions.get(a, {}).get("auto_adjustable", 1) and abs(multiplier) > 1e-12:
                         params[a] = (float(params[b]) - offset) / multiplier
                         repairs.append(item.get("coupling_id"))
+        from .conditional_constraint import TEMPLATE_KIND_V2, parse_template_metadata
         for rule in self.store.constraint_rows():
+            # V2 placeholder rows are storage/group identity only; the real
+            # relationship is executed exclusively by project_constraints().
+            if parse_template_metadata(rule).get("template") == TEMPLATE_KIND_V2:
+                continue
             # Only severe rules are repaired as hard constraints. Advisory rules
             # are assessed and shown to the user but do not silently overwrite a
             # generated or manually edited attribute.
@@ -1602,7 +1607,9 @@ class HistorySeededGenerator(object):
                 if not isinstance(mapping, dict):
                     mapping = {}
                 text = str(value).strip() if value is not None else ""
-                if text and text not in mapping and normalize_numeric(text) is None:
+                business_keys = {str(k).strip() for k in mapping}
+                model_values = {str(v).strip() for v in mapping.values()}
+                if text and text not in business_keys and text not in model_values and normalize_numeric(text) is None:
                     unmapped.append(key)
             for key in missing:
                 missing_agg[key] = missing_agg.get(key, 0) + 1
