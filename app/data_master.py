@@ -694,13 +694,11 @@ class DataMasterService(object):
             if "其他" not in derived_group_names:
                 derived_group_names.append("其他")
             if not group_items:
+                # Legacy workbook without a group master sheet: derive from
+                # parameter definitions to stay backward compatible.
                 group_items = [{"group_name": g, "display_order": i + 1, "description": "", "enabled": 1, "default_collapsed": 0} for i, g in enumerate(derived_group_names)]
-            else:
-                existing_group_names = set(x["group_name"] for x in group_items)
-                for g in derived_group_names:
-                    if g not in existing_group_names:
-                        group_items.append({"group_name": g, "display_order": len(group_items) + 1, "description": "", "enabled": 1, "default_collapsed": 0})
-                        existing_group_names.add(g)
+            # If a group master sheet is present, do NOT silently create unknown
+            # groups; validate_business_data will report unknown references.
             report["data"]["parameter_groups"] = group_items
 
             tags = []
