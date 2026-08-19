@@ -257,3 +257,27 @@ Phase 5 前补的三个 P1 + 一个 `-1` 阻断项 + UI 收尾。
 ### 测试（累计 54 个，2 个因沙箱临时目录权限无法运行）
 新增 `conditional_template_ui_wiring_test.py`、`parameter_groups_admin_test.py`、`requirement_count_user_conditions_test.py`、`enum_filter_anchor_test.py`、`empty_generation_retry_test.py`、`generation_failure_diagnostics_test.py`、`frontend_generation_dirty_test.py`、`extreme_mixed_filter_generation_test.py`、`real_generation_path_replay_test.py`、`conditional_advanced_fold_test.py`。
 
+---
+
+## V20 Integration Patch（4 个 P1 收口）
+
+在 `ec242ee` 后的静态 review 收口，只补四个 P1，不引入新 Phase。
+
+| 提交 | 主题 |
+| --- | --- |
+| `1d6842d` | 旧 DataMaster 缺「指标分组」sheet 不再 KeyError，自动推导 |
+| `f0ff52c` | `parameter_group` + `parameter_groups` 完整进入 Product Release/维护工作簿 |
+| `861da01` | generation budget 改为严格 hard cap；budget/rounds 在 fingerprint 前规范化 |
+| `c14edc6` | 前端消费 `empty_result/rejection_details/stopping_reason`，空结果不自动切空页 |
+
+### 关键改动
+- `DataMaster.parse` 的 `parsed` 对可选 sheet 使用 `workbook.get` 语义，缺表时 `[]`，随后由指标定义推导分组。
+- Product Release `SECTIONS/HEADER_ALIASES/CSV_COLUMNS/PRIMARY_KEYS/REQUIRED_COLUMNS` 增加 `parameter_groups`；`parameters` 增加 `parameter_group`；维护工作簿增加「指标分组」sheet；旧发布包缺 `parameter_groups` 仍可导入。
+- Generator `max_evaluations = int(budget)`，不再被 `count*10` 放大；初始 seed batch 也按预算截断；`actual_budget_used` 报告真实尝试次数。
+- `GenerationTaskManager.start()` 在 fingerprint 前把 `generation_budget/generation_rounds` clamp 到 server 上限；`_generate_sync` 对同步调用同样 clamp。
+- 前端空结果时保留历史推荐页，显示评价额度/搜索轮数/停止原因/rejection 统计与明细，并提供「按原条件重新生成」。
+
+### 测试（累计 58 个，仍 2 个因沙箱临时目录权限无法运行）
+新增 `datamaster_optional_sheet_test.py`、`product_release_parameter_groups_roundtrip_test.py`、`generation_budget_hard_cap_test.py`、`frontend_empty_result_ui_test.py`。
+
+
