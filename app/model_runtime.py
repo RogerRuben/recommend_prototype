@@ -1052,6 +1052,31 @@ class IntegratedModelRuntime(object):
             item["model_role"]="price_only"; item["default_visible"]=False; result.append(item); seen.add(spec["key"])
         return result
 
+    def model_feature_specs(self):
+        """Return per-model feature contracts without deduplicating shared keys.
+
+        Conditional-relationship compatibility needs to see both the
+        effectiveness and price contract for a shared target, because their
+        allowed ranges may differ.
+        """
+        result = []
+        for spec in self.effectiveness.features:
+            item = dict(spec)
+            item["model_kind"] = "effectiveness"
+            item["model_role"] = "shared" if spec["key"] in self.feature_roles()["shared_features"] else "effectiveness_only"
+            result.append(item)
+        for spec in self.price.raw_contract:
+            if spec.get("source", "product_parameter") != "product_parameter":
+                continue
+            item = dict(spec)
+            item["model_kind"] = "price"
+            item["model_role"] = "price_only"
+            item.setdefault("min", item.get("training_min"))
+            item.setdefault("max", item.get("training_max"))
+            item.setdefault("preference", "neutral")
+            result.append(item)
+        return result
+
     def feature_roles(self):
         comp=(self.contract_report or {}).get("feature_compatibility",{})
         return {"shared_features":list(comp.get("shared_features") or []),"effectiveness_only_features":list(comp.get("effectiveness_only_features") or []),"price_only_features":list(comp.get("price_only_features") or [])}
