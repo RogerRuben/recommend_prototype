@@ -1477,6 +1477,7 @@ class Store(object):
             data.pop("original_group_name", None)
         if section == "parameters":
             group_name = str(data.get("parameter_group") or "其他").strip() or "其他"
+            parameter_id = str(data.get("parameter_id") or "").strip()
             with self.lock:
                 conn = self.connect()
                 try:
@@ -1484,6 +1485,15 @@ class Store(object):
                         "INSERT OR IGNORE INTO parameter_groups(group_name, display_order, description, enabled, default_collapsed) VALUES(?,?,?,1,0)",
                         (group_name, 9999, "")
                     )
+                    group_row = conn.execute("SELECT enabled FROM parameter_groups WHERE group_name=?", (group_name,)).fetchone()
+                    if group_row and int(group_row["enabled"] or 0) == 0:
+                        existing = None
+                        if parameter_id:
+                            existing = conn.execute(
+                                "SELECT parameter_group FROM parameter_definitions WHERE parameter_id=?", (parameter_id,)
+                            ).fetchone()
+                        if not existing or existing["parameter_group"] != group_name:
+                            raise ValueError("指标分组“%s”已停用，不能将指标移入该组。" % group_name)
                     conn.commit()
                 finally:
                     conn.close()
