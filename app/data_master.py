@@ -311,6 +311,31 @@ def validate_business_data(data):
                         "指标「%s」有 %d 个业务可选值，但当前模型值映射只覆盖 %d 个。缺少：%s。请为该业务值填写模型实际使用的编码。"
                         % (item.get("label") or pid, len(allowed), len(mapping), "、".join(missing))
                     )
+        # Allowed values must be a JSON array and mappings must be JSON objects.
+        raw_allowed = item.get("allowed_values_json")
+        if raw_allowed not in (None, ""):
+            try:
+                parsed_allowed = json.loads(raw_allowed) if isinstance(raw_allowed, str) else raw_allowed
+                if not isinstance(parsed_allowed, list):
+                    errors.append("指标%s的允许值必须是JSON数组。" % pid)
+            except Exception:
+                errors.append("指标%s的允许值必须是JSON数组。" % pid)
+        raw_mapping = item.get("model_value_mapping_json")
+        if raw_mapping not in (None, ""):
+            try:
+                parsed_mapping = json.loads(raw_mapping) if isinstance(raw_mapping, str) else raw_mapping
+                if not isinstance(parsed_mapping, dict):
+                    errors.append("指标%s的模型值映射必须是JSON对象。" % pid)
+            except Exception:
+                errors.append("指标%s的模型值映射必须是JSON对象。" % pid)
+
+    # Parameter-group existence is a business reference check.
+    group_names = set(clean(g.get("group_name")) for g in (data.get("parameter_groups") or []) if clean(g.get("group_name")))
+    if group_names:
+        for item in parameters:
+            g = clean(item.get("parameter_group")) or "其他"
+            if g not in group_names:
+                errors.append("指标%s引用了不存在的指标分组%s。" % (clean(item.get("parameter_id")), g))
 
     tag_ids = set(clean(item.get("tag_id")) for item in (data.get("tags") or []) if clean(item.get("tag_id")))
     for item in data.get("tag_rules") or []:
@@ -341,6 +366,18 @@ def validate_business_data(data):
             errors.append("约束规则%s引用不存在的指标%s。" % (rule_id, item.get("right_parameter")))
         if item.get("severity") not in SUPPORTED_SEVERITIES:
             errors.append("约束规则%s的提示级别无效：%s。" % (rule_id, item.get("severity")))
+        if item.get("rule_kind") in ("conditional_lower", "conditional_upper") and item.get("template_metadata_json"):
+            try:
+                meta = json.loads(item["template_metadata_json"]) if isinstance(item["template_metadata_json"], str) else item["template_metadata_json"]
+                if isinstance(meta, dict):
+                    controller = meta.get("controller")
+                    target = meta.get("target")
+                    if controller and controller not in param_ids:
+                        errors.append("条件关系%s引用不存在的控制指标%s。" % (rule_id, controller))
+                    if target and target not in param_ids:
+                        errors.append("条件关系%s引用不存在的从属指标%s。" % (rule_id, target))
+            except Exception:
+                errors.append("约束规则%s的模板元数据不是有效JSON。" % rule_id)
 
     for item in data.get("agreements") or []:
         agreement_id = clean(item.get("agreement_id"))
