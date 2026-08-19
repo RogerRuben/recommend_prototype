@@ -1488,8 +1488,12 @@ class HistorySeededGenerator(object):
             item["solution_fit_summary"] = "已满足当前筛选条件且位于主要模型经验范围内"
         return item
 
-    def _emergency_candidate(self, seeds, bounds, definitions, request, tag_map, rng, frozen_parameters=None):
+    def _emergency_candidate(self, seeds, bounds, definitions, request, tag_map, rng, frozen_parameters=None, budget=None):
+        if budget is None:
+            budget = {"attempted": 0, "max": 10 ** 9}
         for base in seeds:
+            if budget["attempted"] >= budget["max"]:
+                break
             params = dict(base.get("params") or {})
             locked, conflicts = self._anchor_demands(params, bounds, definitions)
             self._apply_frozen(params, locked, frozen_parameters)
@@ -1508,6 +1512,7 @@ class HistorySeededGenerator(object):
             finalized = self._finalize_params(params, base, locked, definitions)
             repairs, soft = finalized["repairs"], finalized["soft_moves"]
             try:
+                budget["attempted"] += 1
                 record = self._record_from_params(finalized["params"], base, request, definitions, tag_map, locked, conflicts, repairs, soft, 0, 0, "兜底微调",
                                                   constraint_conflicts=finalized["constraint_conflicts"], inactive_parameters=finalized["inactive_parameters"], projection_repairs=finalized["projection_repairs"])
             except Exception:
@@ -1852,8 +1857,13 @@ class HistorySeededGenerator(object):
             )
             usable.append(record)
 
-        if not usable:
-            emergency, emergency_base = self._emergency_candidate(seeds, bounds, definitions, request, tag_map, rng, frozen_parameters=request.get("frozen_parameters"))
+        if not usable and attempted_evaluations < max_evaluations:
+            budget_state = {"attempted": attempted_evaluations, "max": max_evaluations}
+            emergency, emergency_base = self._emergency_candidate(
+                seeds, bounds, definitions, request, tag_map, rng,
+                frozen_parameters=request.get("frozen_parameters"), budget=budget_state,
+            )
+            attempted_evaluations = budget_state["attempted"]
             if emergency is not None:
                 emergency["_base"] = emergency_base
                 emergency["_changed"] = self._changed_parameters(emergency["params"], emergency_base["params"], definitions)
