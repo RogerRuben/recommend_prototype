@@ -25,7 +25,7 @@ def main():
 
     # Empty completed tasks must not auto-switch to the generated empty view.
     assert 'if(task.result&&task.result.empty_result){showEmptyGeneration(task);return}' in source
-    assert 'if(gt.result&&gt.result.empty_result){showEmptyGeneration(gt)}' in source
+    assert 'if(gt.result&&gt.result.empty_result){renderResults(data);showEmptyGeneration(gt);return}' in source
 
     # The report has visible styles.
     assert "generation-empty-report" in css
