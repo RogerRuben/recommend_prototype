@@ -77,6 +77,28 @@ def project_constraints(params, definitions, rules, locked=None, seed_values=Non
             mode = branch.get("mode") or "not_applicable"
             current = params.get(target)
             if target in locked:
+                locked_value = params.get(target)
+                locked_ok = False
+                if mode in ("not_applicable", "fixed"):
+                    required = branch.get("model_value")
+                    locked_num, required_num = _num(locked_value), _num(required)
+                    locked_ok = (locked_num is not None and required_num is not None and abs(locked_num - required_num) < 1e-9) or (locked_num is None and str(locked_value) == str(required))
+                elif mode == "range":
+                    lo = float(branch.get("min", 0))
+                    hi = float(branch.get("max", 1))
+                    if lo > hi:
+                        lo, hi = hi, lo
+                    locked_num = _num(locked_value)
+                    locked_ok = locked_num is not None and lo <= locked_num <= hi
+                elif mode == "enum":
+                    allowed = branch.get("allowed") or []
+                    locked_ok = any(
+                        (_num(locked_value) is not None and _num(candidate) is not None and abs(_num(locked_value) - _num(candidate)) < 1e-9)
+                        or (_num(locked_value) is None and str(locked_value) == str(candidate))
+                        for candidate in allowed
+                    )
+                if locked_ok:
+                    continue
                 conflicts.append({
                     "type": "frozen_conditional_conflict", "parameter": target,
                     "controller": controller, "controller_value": params.get(controller),
