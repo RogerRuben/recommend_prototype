@@ -132,6 +132,9 @@ HEADER_ALIASES = {
         "rationale": ("rationale", "设置依据"),
         "display_order": ("display_order", "显示顺序"),
         "enabled": ("enabled", "是否启用"),
+        "rule_kind": ("rule_kind", "规则类型"),
+        "constraint_group": ("constraint_group", "约束组"),
+        "template_metadata_json": ("template_metadata_json", "模板元数据(JSON)"),
     },
 }
 
@@ -198,6 +201,7 @@ CSV_COLUMNS = {
         ("operator", "比较关系"), ("right_parameter", "右侧指标"), ("multiplier", "系数"),
         ("offset", "偏置"), ("severity", "提示级别"), ("message", "违反提示"),
         ("rationale", "设置依据"), ("display_order", "显示顺序"), ("enabled", "是否启用"),
+        ("rule_kind", "规则类型"), ("constraint_group", "约束组"), ("template_metadata_json", "模板元数据(JSON)"),
     ),
 }
 
@@ -645,6 +649,13 @@ class ProductReleaseService(object):
                 "display_order": integer(row.get("display_order"), row_number - 1), "enabled": _bool(row.get("enabled")),
             }
         if section == "constraints":
+            metadata_text = clean(row.get("template_metadata_json"))
+            metadata = None
+            if metadata_text:
+                parsed_metadata = json.loads(metadata_text)
+                if not isinstance(parsed_metadata, dict):
+                    raise ValueError("模板元数据必须是JSON对象")
+                metadata = json.dumps(parsed_metadata, ensure_ascii=False)
             return {
                 "rule_id": clean(row.get("rule_id")), "rule_name": clean(row.get("rule_name")),
                 "left_parameter": clean(row.get("left_parameter")), "operator": normalize_operator(row.get("operator")),
@@ -654,6 +665,9 @@ class ProductReleaseService(object):
                 "severity": normalize_severity(row.get("severity")), "message": clean(row.get("message")),
                 "rationale": clean(row.get("rationale")),
                 "display_order": integer(row.get("display_order"), row_number - 1), "enabled": _bool(row.get("enabled")),
+                "rule_kind": clean(row.get("rule_kind")) or "affine",
+                "constraint_group": clean(row.get("constraint_group")) or None,
+                "template_metadata_json": metadata or None,
             }
         raise ValueError("不支持的数据模块：%s" % section)
 

@@ -1122,7 +1122,9 @@ class Store(object):
                 "constraint_group": row["constraint_group"], "template_metadata": meta, "rules": []})
             group["rules"].append({
                 "rule_id": row["rule_id"], "rule_kind": row["rule_kind"],
-                "operator": row["operator"], "multiplier": row["multiplier"], "offset": row["offset"]})
+                "operator": row["operator"], "multiplier": row["multiplier"], "offset": row["offset"],
+                "constraint_group": row["constraint_group"],
+                "template_metadata_json": row.get("template_metadata_json")})
         return list(groups.values())
 
     # -------------------------- Rule assessment --------------------------
