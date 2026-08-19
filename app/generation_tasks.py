@@ -139,7 +139,8 @@ class GenerationTaskManager(object):
                 "count", "requested_count", "evaluated_count", "all_records_count", "usable_count",
                 "best_effort_candidate_count", "final_selected_count", "fallback_used",
                 "strict_filter_satisfied", "strict_candidate_count", "best_effort_used", "rejection_statistics",
-                "seed_agreements", "message", "batch_id", "search_profile", "search_warning",
+                "rejection_details", "generation_budget", "actual_budget_used", "max_rounds", "actual_rounds",
+                "stopping_reason", "seed_agreements", "message", "batch_id", "search_profile", "search_warning",
                 "search_iterations", "generation_method", "empty_result"
             ))
             payload["candidates_count"] = len(result.get("candidates") or [])

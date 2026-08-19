@@ -1534,9 +1534,20 @@ class HistorySeededGenerator(object):
         all_records = []
         seen = set()
         rejection = {"not_changed": 0, "duplicate": 0, "model_input": 0, "hard_conflict": 0, "demand_unmet": 0, "extrapolation": 0, "known_boundary_repaired": 0, "repeated_risk_signature": 0, "conditional_frozen_conflict": 0}
+        rejection_details = []
         evaluations = 0
+        attempted_evaluations = 0
         max_evaluations = max(int(budget), count * 10)
         beam = []
+
+        def record_rejection(stage, candidate_id, exc):
+            if len(rejection_details) < 5:
+                rejection_details.append({
+                    "stage": stage,
+                    "candidate_id": candidate_id,
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                })
 
         # Stage 1: demand-anchored centres from every selected historical seed.
         # They are evaluated together.  Previous releases issued one price and one
@@ -1584,10 +1595,12 @@ class HistorySeededGenerator(object):
                 ])
                 if len(initial_evaluations) != len(initial_pending):
                     initial_evaluations = None
-            except Exception:
+            except Exception as exc:
+                record_rejection("batch_evaluation", "SEED-BATCH", exc)
                 initial_evaluations = None
 
         for initial_index, item in enumerate(initial_pending):
+            attempted_evaluations += 1
             try:
                 evaluation = initial_evaluations[initial_index] if initial_evaluations is not None else None
                 record = self._record_from_params(
@@ -1598,8 +1611,9 @@ class HistorySeededGenerator(object):
                     inactive_parameters=item.get("inactive_parameters"),
                     projection_repairs=item.get("projection_repairs"),
                 )
-            except Exception:
+            except Exception as exc:
                 rejection["model_input"] += 1
+                record_rejection("model_evaluation", "SEED-%04d" % initial_index, exc)
                 continue
             evaluations += 1
             record["_base"] = item["base"]
@@ -1619,6 +1633,9 @@ class HistorySeededGenerator(object):
         max_rounds = int(request.get("generation_rounds") or (7 if deep_search else 6))
         step_schedule = build_step_schedule("deep" if deep_search else "fast", max_rounds)
         iteration = 0
+        diverse_strict = 0
+        stopped_for_count = False
+        pending = []
         while beam and evaluations < max_evaluations and iteration < len(step_schedule):
             iteration += 1
             step_scale = step_schedule[iteration - 1]
@@ -1762,11 +1779,13 @@ class HistorySeededGenerator(object):
                     ])
                     if len(batch_evaluations) != len(pending):
                         batch_evaluations = None
-                except Exception:
+                except Exception as exc:
                     # Keep the old candidate-level failure semantics if a remote
                     # batch cannot be processed as a whole.
+                    record_rejection("batch_evaluation", "SEARCH-BATCH-%02d" % iteration, exc)
                     batch_evaluations = None
             for pending_index, item in enumerate(pending):
+                attempted_evaluations += 1
                 try:
                     evaluation = batch_evaluations[pending_index] if batch_evaluations is not None else None
                     record = self._record_from_params(
@@ -1778,8 +1797,9 @@ class HistorySeededGenerator(object):
                         inactive_parameters=item.get("inactive_parameters"),
                         projection_repairs=item.get("projection_repairs"),
                     )
-                except Exception:
+                except Exception as exc:
                     rejection["model_input"] += 1
+                    record_rejection("model_evaluation", "SEARCH-%02d-%04d" % (iteration, pending_index), exc)
                     continue
                 evaluations += 1
                 record["_base"] = item["base"]
@@ -1797,6 +1817,7 @@ class HistorySeededGenerator(object):
             # requested amount caused unnecessary model batches on easy demands.
             diverse_strict = self._diverse_strict_count(all_records, definitions, historical=history)
             if diverse_strict >= count:
+                stopped_for_count = True
                 break
             if not pending:
                 break
@@ -1926,6 +1947,19 @@ class HistorySeededGenerator(object):
         if rejection["hard_conflict"]:
             suggestions.append("部分用户目标与明确工程硬规则冲突，相关方案只能作为概念探索，不能直接用于工程实施。")
 
+        if stopped_for_count:
+            stopping_reason = "requested_count_met"
+        elif evaluations >= max_evaluations:
+            stopping_reason = "budget_exhausted"
+        elif iteration >= len(step_schedule):
+            stopping_reason = "max_rounds_reached"
+        elif not beam:
+            stopping_reason = "no_search_centers"
+        elif not pending:
+            stopping_reason = "no_more_proposals"
+        else:
+            stopping_reason = "search_completed"
+
         return {
             "candidates": public_selected,
             "requested_count": count,
@@ -1937,6 +1971,12 @@ class HistorySeededGenerator(object):
             "fallback_used": any(item.get("fallback_kind") == "closest_evaluated_result" for item in public_selected),
             "seed_agreements": [item["agreement_id"] for item in seeds],
             "rejection_statistics": rejection,
+            "rejection_details": rejection_details,
+            "generation_budget": max_evaluations,
+            "actual_budget_used": min(attempted_evaluations, max_evaluations),
+            "max_rounds": max_rounds,
+            "actual_rounds": iteration,
+            "stopping_reason": stopping_reason,
             "strict_filter_satisfied": strict_available,
             "strict_candidate_count": len(strict_candidates),
             "best_effort_used": not strict_available,
