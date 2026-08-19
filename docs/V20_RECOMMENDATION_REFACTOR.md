@@ -280,4 +280,25 @@ Phase 5 前补的三个 P1 + 一个 `-1` 阻断项 + UI 收尾。
 ### 测试（累计 58 个，仍 2 个因沙箱临时目录权限无法运行）
 新增 `datamaster_optional_sheet_test.py`、`product_release_parameter_groups_roundtrip_test.py`、`generation_budget_hard_cap_test.py`、`frontend_empty_result_ui_test.py`。
 
+---
+
+## V20 P1 Closure 尾部补丁
+
+在 `7ed59a3` 后收掉 3 个边缘漏口，不再横向扩散。
+
+| 提交 | 主题 |
+| --- | --- |
+| `2391d09` | 旧发布包 hash 校验先于 optional `parameter_groups` 补齐 |
+| `bd3942d` | emergency fallback 纳入 generation hard budget |
+| `fbe38e7` | `recommend()` 空任务分支显示诊断面板后 return，避免被 `renderResults()` 隐藏 |
+
+### 关键改动
+- `import_package()` 先对 transport payload 验 hash，再 `setdefault("parameter_groups", [])`；旧 JSON 发布包真正可导入。
+- `_emergency_candidate()` 接收 `budget` 状态，每次 `_record_from_params` 都计入 `attempted_evaluations`；`actual_budget_used` 与真实模型调用次数一致。
+- 前端 `recommend()` 的 completed+empty 分支先 `renderResults(data)` 再 `showEmptyGeneration(gt)` 并 `return`，诊断面板不会被后续 `renderResults()` 隐藏。
+
+### 测试（累计 60 个，全部通过）
+新增 `product_release_legacy_package_test.py`、`emergency_budget_hard_cap_test.py`；强化 `frontend_empty_result_ui_test.py` 断言空分支包含 `return`。
+
+
 
