@@ -4,62 +4,112 @@ from __future__ import print_function
 
 from .value_semantics import normalize_numeric
 
+_POS_INF = float("inf")
+_NEG_INF = float("-inf")
+
 
 def _num(value):
     result = normalize_numeric(value)
     return result if result is not None else None
 
 
+def _finite(value):
+    """Return the value if finite, otherwise None (for public JSON payloads)."""
+    if value is None:
+        return None
+    number = float(value)
+    if number in (_POS_INF, _NEG_INF) or number != number:  # NaN check
+        return None
+    return number
+
+
+def _conflict(key, definition, op, lower, lower_inclusive, upper, upper_inclusive,
+              engineering_min, engineering_max, closest, reason, requested_value=None):
+    return {
+        "parameter_id": key,
+        "label": definition.get("label", key),
+        "operator": op,
+        "requested_min": _finite(lower),
+        "requested_min_inclusive": bool(lower_inclusive),
+        "requested_max": _finite(upper),
+        "requested_max_inclusive": bool(upper_inclusive),
+        "requested_value": _finite(requested_value),
+        "engineering_min": engineering_min,
+        "engineering_max": engineering_max,
+        "closest_feasible_value": _finite(closest),
+        "reason": reason,
+    }
+
+
 def _merge_requested_interval(rules, definitions):
-    """Merge AND constraints for one parameter into a requested interval.
+    """Intersect AND constraints for one parameter into a requested interval.
 
     Returns ``(lower, lower_inclusive, upper, upper_inclusive, conflict)``.
     ``conflict`` is a dict when the user's own conditions are mutually
-    inconsistent.
+    inconsistent.  The merge is order-independent: constraints are intersected,
+    never assigned over previous bounds.
     """
-    lower = float("-inf")
+    lower = _NEG_INF
     lower_inclusive = True
-    upper = float("inf")
+    upper = _POS_INF
     upper_inclusive = True
     conflict = None
+    key = None
+    definition = {}
+
     for rule in rules or []:
+        key = rule.get("parameter_id")
+        definition = definitions.get(key) or {}
         op = rule.get("operator")
         v1 = _num(rule.get("value1"))
         v2 = _num(rule.get("value2"))
-        key = rule.get("parameter_id")
-        definition = definitions.get(key) or {}
-        label = definition.get("label", key)
+
         if op in ("gte", "gt") and v1 is not None:
-            new_lower = v1
             new_inclusive = op == "gte"
-            if new_lower > lower or (new_lower == lower and new_inclusive and not lower_inclusive):
-                lower = new_lower
+            if v1 > lower or (v1 == lower and not new_inclusive and lower_inclusive):
+                lower = v1
                 lower_inclusive = new_inclusive
+            elif v1 == lower:
+                # Any strict > makes the shared lower bound exclusive.
+                lower_inclusive = lower_inclusive and new_inclusive
         elif op in ("lte", "lt") and v1 is not None:
-            new_upper = v1
             new_inclusive = op == "lte"
-            if new_upper < upper or (new_upper == upper and new_inclusive and not upper_inclusive):
-                upper = new_upper
+            if v1 < upper or (v1 == upper and not new_inclusive and upper_inclusive):
+                upper = v1
                 upper_inclusive = new_inclusive
+            elif v1 == upper:
+                upper_inclusive = upper_inclusive and new_inclusive
         elif op == "eq" and v1 is not None:
-            lower = upper = v1
-            lower_inclusive = upper_inclusive = True
+            # Intersect with the exact point, never overwrite other bounds.
+            if v1 > lower or (v1 == lower and not lower_inclusive):
+                lower = v1
+                lower_inclusive = True
+            else:
+                lower_inclusive = lower_inclusive and True
+            if v1 < upper or (v1 == upper and not upper_inclusive):
+                upper = v1
+                upper_inclusive = True
+            else:
+                upper_inclusive = upper_inclusive and True
         elif op == "range_inside" and v1 is not None and v2 is not None:
             lo, hi = min(v1, v2), max(v1, v2)
-            lower = max(lower, lo)
-            upper = min(upper, hi)
-            lower_inclusive = True
-            upper_inclusive = True
+            if lo > lower or (lo == lower and not lower_inclusive):
+                lower = lo
+                lower_inclusive = True
+            else:
+                lower_inclusive = lower_inclusive and True
+            if hi < upper or (hi == upper and not upper_inclusive):
+                upper = hi
+                upper_inclusive = True
+            else:
+                upper_inclusive = upper_inclusive and True
+
     if lower > upper or (lower == upper and not (lower_inclusive and upper_inclusive)):
-        conflict = {
-            "parameter_id": rule.get("parameter_id") if rules else None,
-            "label": (definitions.get(rule.get("parameter_id")) or {}).get("label", rule.get("parameter_id")) if rules else None,
-            "operator": "and",
-            "requested_value": [lower, upper],
-            "engineering_min": None, "engineering_max": None,
-            "closest_feasible_value": None,
-            "reason": "explicit_filters_mutually_inconsistent",
-        }
+        conflict = _conflict(
+            key, definition, "and",
+            lower, lower_inclusive, upper, upper_inclusive,
+            None, None, None, "explicit_filters_mutually_inconsistent",
+        )
     return lower, lower_inclusive, upper, upper_inclusive, conflict
 
 
@@ -91,13 +141,17 @@ def assess_explicit_filter_feasibility(indicator_filters, definitions, mode="all
             v1 = _num(rule.get("value1"))
             conflict = None
             if op in ("lte", "lt") and v1 is not None and (v1 < engineering_min or (op == "lt" and v1 <= engineering_min)):
-                conflict = {"parameter_id": key, "label": definition.get("label", key), "operator": op,
-                            "requested_value": v1, "engineering_min": engineering_min, "engineering_max": engineering_max,
-                            "closest_feasible_value": engineering_min, "reason": "requested_upper_below_engineering_min"}
+                conflict = _conflict(
+                    key, definition, op, _NEG_INF, True, v1, op == "lte",
+                    engineering_min, engineering_max, engineering_min,
+                    "requested_upper_below_engineering_min", requested_value=v1,
+                )
             elif op in ("gte", "gt") and v1 is not None and (v1 > engineering_max or (op == "gt" and v1 >= engineering_max)):
-                conflict = {"parameter_id": key, "label": definition.get("label", key), "operator": op,
-                            "requested_value": v1, "engineering_min": engineering_min, "engineering_max": engineering_max,
-                            "closest_feasible_value": engineering_max, "reason": "requested_lower_above_engineering_max"}
+                conflict = _conflict(
+                    key, definition, op, v1, op == "gte", _POS_INF, True,
+                    engineering_min, engineering_max, engineering_max,
+                    "requested_lower_above_engineering_max", requested_value=v1,
+                )
             if conflict:
                 conflicts.append(conflict)
                 single_results.append(False)
@@ -125,7 +179,6 @@ def assess_explicit_filter_feasibility(indicator_filters, definitions, mode="all
         if mutual_conflict is not None:
             mutual_conflict["engineering_min"] = engineering_min
             mutual_conflict["engineering_max"] = engineering_max
-            mutual_conflict["closest_feasible_value"] = engineering_min if abs(engineering_min - lower) <= abs(engineering_max - upper) else engineering_max
             conflicts.append(mutual_conflict)
             continue
 
@@ -134,21 +187,19 @@ def assess_explicit_filter_feasibility(indicator_filters, definitions, mode="all
         below = upper < engineering_min or (upper == engineering_min and not upper_inclusive)
         above = lower > engineering_max or (lower == engineering_max and not lower_inclusive)
         if below:
-            conflicts.append({
-                "parameter_id": key, "label": definition.get("label", key),
-                "operator": "and", "requested_value": [lower, upper],
-                "engineering_min": engineering_min, "engineering_max": engineering_max,
-                "closest_feasible_value": engineering_min,
-                "reason": "requested_upper_below_engineering_min",
-            })
+            conflicts.append(_conflict(
+                key, definition, "and",
+                lower, lower_inclusive, upper, upper_inclusive,
+                engineering_min, engineering_max, engineering_min,
+                "requested_upper_below_engineering_min",
+            ))
         elif above:
-            conflicts.append({
-                "parameter_id": key, "label": definition.get("label", key),
-                "operator": "and", "requested_value": [lower, upper],
-                "engineering_min": engineering_min, "engineering_max": engineering_max,
-                "closest_feasible_value": engineering_max,
-                "reason": "requested_lower_above_engineering_max",
-            })
+            conflicts.append(_conflict(
+                key, definition, "and",
+                lower, lower_inclusive, upper, upper_inclusive,
+                engineering_min, engineering_max, engineering_max,
+                "requested_lower_above_engineering_max",
+            ))
 
     return {"strictly_feasible": not conflicts, "conflicts": conflicts}
 
