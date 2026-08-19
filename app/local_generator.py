@@ -1560,6 +1560,68 @@ class HistorySeededGenerator(object):
             return record, base
         return None, None
 
+    def _generation_input_preflight(self, pending_items, definitions):
+        """Check model-required fields before spending any evaluation budget.
+
+        Returns ``None`` when the runtime/store does not expose schema metadata
+        (e.g. unit tests with mocks); otherwise returns per-seed eligibility and
+        aggregated missing/unmapped diagnostics.
+        """
+        if not hasattr(self.runtime, "all_feature_specs") or not hasattr(self.store, "runtime_parameters"):
+            return None
+        try:
+            specs = self.runtime.all_feature_specs()
+        except Exception:
+            return None
+        required = {}
+        for spec in specs or []:
+            key = spec.get("key")
+            if key and spec.get("required") and (spec.get("missing_policy") or "reject") == "reject":
+                required[key] = spec
+        if not required:
+            return None
+        seed_results = []
+        missing_agg = {}
+        unmapped_agg = {}
+        for item in pending_items:
+            business = dict(item.get("params") or {})
+            model_params = self.store.runtime_parameters(business)
+            missing = [key for key, spec in required.items() if model_params.get(key) in (None, "")]
+            unmapped = []
+            for key, value in business.items():
+                definition = definitions.get(key) or {}
+                if str(definition.get("value_type") or "").lower() != "enum":
+                    continue
+                raw_mapping = definition.get("model_value_mapping_json")
+                if not raw_mapping:
+                    continue
+                try:
+                    mapping = json.loads(raw_mapping) if isinstance(raw_mapping, str) else raw_mapping
+                except Exception:
+                    mapping = {}
+                if not isinstance(mapping, dict):
+                    mapping = {}
+                text = str(value).strip() if value is not None else ""
+                if text and text not in mapping and normalize_numeric(text) is None:
+                    unmapped.append(key)
+            for key in missing:
+                missing_agg[key] = missing_agg.get(key, 0) + 1
+            for key in set(unmapped):
+                unmapped_agg.setdefault(key, []).append(str(business.get(key)))
+            seed_results.append({
+                "seed_id": (item.get("base") or {}).get("agreement_id"),
+                "eligible": not missing and not unmapped,
+                "missing_required_fields": missing,
+                "unmapped_values": sorted(set(unmapped)),
+            })
+        return {
+            "seed_count": len(pending_items),
+            "eligible_seed_count": sum(1 for r in seed_results if r["eligible"]),
+            "missing_required_fields": missing_agg,
+            "unmapped_values": dict((k, sorted(set(v))) for k, v in unmapped_agg.items()),
+            "seeds": seed_results,
+        }
+
     def generate(self, request, count=10, seed=None, budget=1200, search_mode="fast", progress_callback=None):
         rng = random.Random(seed if seed is not None else int(time.time() * 1000) % 2147483647)
         deep_search = str(search_mode or "fast") == "deep_extrapolation"
@@ -1629,6 +1691,32 @@ class HistorySeededGenerator(object):
         # Candidate evaluation budget is a hard cap: never exceed it with the
         # initial demand-anchored seed batch.
         initial_pending = initial_pending[:max_evaluations]
+
+        # Model-input preflight: reject seeds that would fail at evaluation time
+        # before spending any generation budget.
+        preflight = self._generation_input_preflight(initial_pending, definitions)
+        if preflight is not None:
+            initial_pending = [
+                item for item, result in zip(initial_pending, preflight["seeds"]) if result["eligible"]
+            ]
+            if not initial_pending:
+                early_rounds = int(request.get("generation_rounds") or (7 if deep_search else 6))
+                return {
+                    "candidates": [], "requested_count": count, "evaluated_count": 0,
+                    "all_records_count": 0, "usable_count": 0, "best_effort_candidate_count": 0,
+                    "final_selected_count": 0, "fallback_used": False, "seed_agreements": [],
+                    "rejection_statistics": rejection, "rejection_details": [],
+                    "generation_budget": max_evaluations, "actual_budget_used": 0,
+                    "max_rounds": early_rounds, "actual_rounds": 0,
+                    "stopping_reason": "generation_input_preflight_failed",
+                    "strict_filter_satisfied": False, "strict_candidate_count": 0,
+                    "best_effort_used": False, "bounds": branch_bounds,
+                    "relaxation_suggestions": ["历史参考方案缺少当前模型所需输入，请完善属性或模型值映射后再生成。"],
+                    "generation_method": "preflight", "search_iterations": 0,
+                    "search_mode": "deep_extrapolation" if deep_search else "fast",
+                    "empty_result": True, "preflight": preflight,
+                }
+
         initial_evaluations = None
         if initial_pending and self.evaluate_batch_callback:
             try:
@@ -2027,6 +2115,7 @@ class HistorySeededGenerator(object):
             "seed_agreements": [item["agreement_id"] for item in seeds],
             "rejection_statistics": rejection,
             "rejection_details": rejection_details,
+            "preflight": preflight,
             "generation_budget": max_evaluations,
             "actual_budget_used": attempted_evaluations,
             "max_rounds": max_rounds,
