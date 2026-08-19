@@ -1600,7 +1600,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"error":"admin_disabled","message":"当前公开演示未开放数据管理功能。请在本地启动或受保护的正式隧道中使用。"}, 403)
 
     def _json(self, payload, status=200):
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        data = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
         self.send_response(status); self.send_header("Content-Type","application/json; charset=utf-8"); self.send_header("Content-Length",str(len(data))); self.send_header("Cache-Control","no-store"); self.end_headers(); self.wfile.write(data)
 
     def _body(self):
