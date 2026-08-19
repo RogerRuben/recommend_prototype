@@ -293,6 +293,24 @@ def validate_business_data(data):
                     errors.append("指标%s的工程下限不能高于工程上限。" % pid)
             except (TypeError, ValueError):
                 errors.append("指标%s的工程上下限必须是数字。" % pid)
+        if item.get("value_type") == "enum":
+            allowed = _json_allowed(item.get("allowed_values_json"))
+            raw_mapping = item.get("model_value_mapping_json")
+            mapping = {}
+            if raw_mapping:
+                try:
+                    parsed_mapping = json.loads(raw_mapping) if isinstance(raw_mapping, str) else raw_mapping
+                    if isinstance(parsed_mapping, dict):
+                        mapping = {str(k): v for k, v in parsed_mapping.items()}
+                except Exception:
+                    pass
+            if allowed and mapping:
+                missing = [str(v) for v in allowed if str(v).strip() and str(v).strip() not in mapping]
+                if missing:
+                    warnings.append(
+                        "指标「%s」有 %d 个业务可选值，但当前模型值映射只覆盖 %d 个。缺少：%s。请为该业务值填写模型实际使用的编码。"
+                        % (item.get("label") or pid, len(allowed), len(mapping), "、".join(missing))
+                    )
 
     tag_ids = set(clean(item.get("tag_id")) for item in (data.get("tags") or []) if clean(item.get("tag_id")))
     for item in data.get("tag_rules") or []:
