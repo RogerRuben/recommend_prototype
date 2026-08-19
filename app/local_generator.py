@@ -217,7 +217,7 @@ def filters_to_anchors(filters, definitions=None, mode="all"):
             else:
                 mapped = mapping_target(rule.get("value1"), definition)
                 if mapped is not None:
-                    item["allowed"] = [float(mapped)]
+                    item["allowed"] = [mapped]
         elif op == "boolean_is":
             canonical = canonical_filter_value(rule.get("value1"), definition)
             if isinstance(canonical, bool):
@@ -225,7 +225,7 @@ def filters_to_anchors(filters, definitions=None, mode="all"):
             else:
                 mapped = mapping_target(rule.get("value1"), definition)
                 if mapped is not None:
-                    item["allowed"] = [float(mapped)]
+                    item["allowed"] = [mapped]
                 else:
                     item["min"] = item["max"] = 1.0 if _truth(rule.get("value1")) else 0.0
         elif op == "text_equals":
@@ -236,7 +236,7 @@ def filters_to_anchors(filters, definitions=None, mode="all"):
             else:
                 mapped = mapping_target(rule.get("value1"), definition)
                 if mapped is not None:
-                    item["allowed"] = [float(mapped)]
+                    item["allowed"] = [mapped]
         elif op == "range_inside" and v1 is not None and v2 is not None:
             item["min"], item["max"] = min(v1, v2), max(v1, v2)
         elif not item:
@@ -482,13 +482,26 @@ class HistorySeededGenerator(object):
             engineering_max = float(definition.get("max_value") if definition.get("max_value") is not None else 1e99)
             allowed = rule.get("allowed")
             if allowed:
-                numeric_allowed = [_float(x) for x in allowed]
-                numeric_allowed = [x for x in numeric_allowed if x is not None and engineering_min <= x <= engineering_max]
-                if numeric_allowed:
-                    current = float(params[key])
-                    value = min(numeric_allowed, key=lambda x: abs(x - current))
+                numeric_allowed = []
+                string_allowed = []
+                for candidate in allowed:
+                    candidate_num = _float(candidate)
+                    if candidate_num is not None and engineering_min <= candidate_num <= engineering_max:
+                        numeric_allowed.append(candidate_num)
+                    else:
+                        string_allowed.append(candidate)
+                current = params.get(key)
+                current_num = _float(current)
+                if numeric_allowed and current_num is not None:
+                    value = min(numeric_allowed, key=lambda x: abs(x - current_num))
+                elif any(self._value_equal(current, candidate, definition) for candidate in allowed):
+                    value = current
+                elif string_allowed:
+                    value = string_allowed[0]
+                elif numeric_allowed:
+                    value = numeric_allowed[0]
                 else:
-                    value = _clamp(float(params[key]), engineering_min, engineering_max)
+                    value = _clamp(current_num if current_num is not None else 0, engineering_min, engineering_max)
                     conflicts.append({"parameter_id": key, "reason": "筛选允许值与工程范围没有交集"})
             else:
                 requested_lo = float(rule.get("min", -1e99))
@@ -517,7 +530,8 @@ class HistorySeededGenerator(object):
             kind = self._search_type(definition)
             if kind == "boolean":
                 if allowed is not None and any(_float(x) not in (0.0, 1.0) for x in allowed):
-                    value = float(value)
+                    if _float(value) is not None:
+                        value = float(value)
                 else:
                     value = 1 if float(value) >= 0.5 else 0
             elif kind == "integer":
