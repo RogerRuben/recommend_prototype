@@ -98,6 +98,8 @@ def project_constraints(params, definitions, rules, locked=None, seed_values=Non
                         for candidate in allowed
                     )
                 if locked_ok:
+                    if mode == "not_applicable":
+                        inactive_parameters.append(target)
                     continue
                 conflicts.append({
                     "type": "frozen_conditional_conflict", "parameter": target,

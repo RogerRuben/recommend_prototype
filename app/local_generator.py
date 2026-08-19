@@ -1607,10 +1607,19 @@ class HistorySeededGenerator(object):
                 if not isinstance(mapping, dict):
                     mapping = {}
                 text = str(value).strip() if value is not None else ""
-                business_keys = {str(k).strip() for k in mapping}
-                model_values = {str(v).strip() for v in mapping.values()}
-                if text and text not in business_keys and text not in model_values and normalize_numeric(text) is None:
-                    unmapped.append(key)
+                if text:
+                    business_keys = {str(k).strip() for k in mapping}
+                    model_values = {str(v).strip() for v in mapping.values()}
+                    text_num = normalize_numeric(text)
+                    known = text in business_keys or text in model_values
+                    if not known and text_num is not None:
+                        for candidate in list(business_keys) + list(model_values):
+                            candidate_num = normalize_numeric(candidate)
+                            if candidate_num is not None and abs(text_num - candidate_num) < 1e-9:
+                                known = True
+                                break
+                    if not known:
+                        unmapped.append(key)
             for key in missing:
                 missing_agg[key] = missing_agg.get(key, 0) + 1
             for key in set(unmapped):

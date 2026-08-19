@@ -693,12 +693,18 @@ class DataMasterService(object):
                     derived_group_names.append(g)
             if "其他" not in derived_group_names:
                 derived_group_names.append("其他")
-            if not group_items:
+            if "指标分组" not in workbook:
                 # Legacy workbook without a group master sheet: derive from
                 # parameter definitions to stay backward compatible.
                 group_items = [{"group_name": g, "display_order": i + 1, "description": "", "enabled": 1, "default_collapsed": 0} for i, g in enumerate(derived_group_names)]
-            # If a group master sheet is present, do NOT silently create unknown
-            # groups; validate_business_data will report unknown references.
+            if "指标分组" in workbook:
+                # If a group master sheet is present (even empty), do NOT silently
+                # create unknown groups; report unknown references directly.
+                existing_group_names = set(x["group_name"] for x in group_items)
+                for p in parameters:
+                    g = p.get("parameter_group") or "其他"
+                    if g not in existing_group_names:
+                        report["errors"].append("指标%s引用了不存在的指标分组%s。" % (p.get("parameter_id"), g))
             report["data"]["parameter_groups"] = group_items
 
             tags = []
