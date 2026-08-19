@@ -33,7 +33,7 @@ from .constraint_projection import active_parameter_set, project_constraints
 from .coupling_pairs import build_coupling_pairs, exploration_pairs
 from .recommender import rank_agreements
 from .requirement_assessment import assess_requirements
-from .value_semantics import canonicalize_parameter_value, nice_engineering_step, normalize_boolean, normalize_numeric, values_equal
+from .value_semantics import canonical_filter_value, canonicalize_parameter_value, mapping_target, nice_engineering_step, normalize_boolean, normalize_numeric, values_equal
 
 
 def _float(value, default=None):
@@ -181,15 +181,24 @@ def merge_bounds(base, extra):
     return result
 
 
-def filters_to_bounds(filters, mode="all"):
+def filters_to_anchors(filters, definitions=None, mode="all"):
+    """Compile explicit user filters into generator demand anchors.
+
+    This is the generation-side counterpart of ``RequirementAssessment``:
+    numeric rules become min/max boxes, while mapped enums and boolean third
+    states become ``allowed`` model-value sets so the seed projection locks the
+    exact encoded value the user asked for.
+    """
     # OR filters cannot safely be reduced to one joint generation box.
     if mode != "all":
         return {}
+    definitions = definitions or {}
     result = {}
     for rule in filters or []:
         key, op = rule.get("parameter_id"), rule.get("operator")
         if not key:
             continue
+        definition = definitions.get(key) or {}
         item = result.setdefault(key, {})
         v1, v2 = _float(rule.get("value1")), _float(rule.get("value2"))
         if op == "gte" and v1 is not None:
@@ -200,16 +209,44 @@ def filters_to_bounds(filters, mode="all"):
             item["max"] = min(v1, float(item.get("max", v1)))
         elif op == "lt" and v1 is not None:
             item["max"] = min(v1 - 1e-7, float(item.get("max", v1 - 1e-7)))
-        elif op == "eq" and v1 is not None:
-            item["min"] = v1
-            item["max"] = v1
+        elif op == "eq":
+            canonical = canonical_filter_value(rule.get("value1"), definition)
+            numeric = _float(canonical)
+            if numeric is not None:
+                item["min"] = item["max"] = numeric
+            else:
+                mapped = mapping_target(rule.get("value1"), definition)
+                if mapped is not None:
+                    item["allowed"] = [float(mapped)]
         elif op == "boolean_is":
-            item["min"] = item["max"] = 1.0 if _truth(rule.get("value1")) else 0.0
+            canonical = canonical_filter_value(rule.get("value1"), definition)
+            if isinstance(canonical, bool):
+                item["min"] = item["max"] = 1.0 if canonical else 0.0
+            else:
+                mapped = mapping_target(rule.get("value1"), definition)
+                if mapped is not None:
+                    item["allowed"] = [float(mapped)]
+                else:
+                    item["min"] = item["max"] = 1.0 if _truth(rule.get("value1")) else 0.0
+        elif op == "text_equals":
+            canonical = canonical_filter_value(rule.get("value1"), definition)
+            numeric = _float(canonical)
+            if numeric is not None:
+                item["allowed"] = [numeric]
+            else:
+                mapped = mapping_target(rule.get("value1"), definition)
+                if mapped is not None:
+                    item["allowed"] = [float(mapped)]
         elif op == "range_inside" and v1 is not None and v2 is not None:
             item["min"], item["max"] = min(v1, v2), max(v1, v2)
         elif not item:
             result.pop(key, None)
     return result
+
+
+def filters_to_bounds(filters, mode="all"):
+    """Backward-compatible wrapper (definitions are optional in older callers)."""
+    return filters_to_anchors(filters, None, mode)
 
 
 class HistorySeededGenerator(object):
@@ -479,7 +516,10 @@ class HistorySeededGenerator(object):
                     })
             kind = self._search_type(definition)
             if kind == "boolean":
-                value = 1 if float(value) >= 0.5 else 0
+                if allowed is not None and any(_float(x) not in (0.0, 1.0) for x in allowed):
+                    value = float(value)
+                else:
+                    value = 1 if float(value) >= 0.5 else 0
             elif kind == "integer":
                 value = int(round(float(value)))
             elif kind == "ordered_discrete":
@@ -808,9 +848,10 @@ class HistorySeededGenerator(object):
                 branch_request["min_feasibility"] = value if current in (None, "") else max(float(current), value)
             elif not key.startswith("__"):
                 technical.append({"parameter_id": key, "operator": op, "value1": rule.get("value1"), "value2": rule.get("value2")})
+        definitions = self._parameter_definitions()
         bounds = merge_bounds(
-            filters_to_bounds(technical, "all"),
-            filters_to_bounds(request.get("indicator_filters"), request.get("indicator_filter_mode", "all")),
+            filters_to_anchors(technical, definitions, "all"),
+            filters_to_anchors(request.get("indicator_filters"), definitions, request.get("indicator_filter_mode", "all")),
         )
         return bounds, branch_request, {
             "tag_rule_groups": dict(branch.get("tag_groups") or {}),
