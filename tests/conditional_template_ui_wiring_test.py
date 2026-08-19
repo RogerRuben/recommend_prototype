@@ -32,6 +32,11 @@ def main():
     # The main CRUD table carries the id used by the scoped handlers.
     assert 'id="mainAdminTable"' in source
 
+    # Conditional-template editor now submits a V2 relationship payload.
+    assert 'tpl.template="conditional_applicability_v2"' in source
+    assert 'tpl.then={mode:"not_applicable"' in source
+    assert 'otherwise_min' in source
+
     print(json.dumps({"status": "PASS", "message": "条件属性按钮与通用 CRUD 事件作用域已隔离"}, ensure_ascii=False))
 
 
