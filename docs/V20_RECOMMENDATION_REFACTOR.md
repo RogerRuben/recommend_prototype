@@ -445,6 +445,27 @@ Phase 5 前补的三个 P1 + 一个 `-1` 阻断项 + UI 收尾。
 ### 测试（累计 88 个，全部通过）
 新增 `joint_explicit_filter_conflict_test.py`、`strict_boundary_anchor_feasibility_test.py`、`anchor_resolution_descendant_trace_test.py`、`emergency_anchor_invariant_test.py`、`nonempty_feasibility_ui_test.py`。
 
+---
+
+## V20 Anchor JSON Contract Hotfix
+
+在 `fce7322` 后修复 `-Infinity` 泄漏到 HTTP JSON 的 P0，并补区间合并顺序/开闭边界。
+
+| 提交 | 主题 |
+| --- | --- |
+| `695e512` | 公开可行性诊断不再输出非有限数，无界用 `null` |
+| `36a5aa6` | 区间交集合并顺序无关，开闭边界正确 |
+| `50541e1` | HTTP `_json` 使用 `allow_nan=False` 最后一道防线 |
+
+### 关键改动
+- `assess_explicit_filter_feasibility()` 的 conflict 改为 `requested_min/requested_max/requested_min_inclusive/requested_max_inclusive`，无界端点用 `None`。
+- 区间合并改为真正的交集运算：`>=4 AND >4 => >4`，`eq`/`range_inside` 不再覆盖已有边界，结果与条件顺序无关。
+- `Server._json()` 使用 `json.dumps(..., allow_nan=False)`，任何 `NaN/Infinity/-Infinity` 都会在服务端直接失败，而不是发给浏览器。
+
+### 测试（累计 91 个，全部通过）
+新增 `anchor_feasibility_json_contract_test.py`、`generation_task_json_contract_test.py`、`interval_merge_order_independence_test.py`。
+
+
 
 
 
