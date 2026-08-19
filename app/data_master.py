@@ -543,7 +543,7 @@ class DataMasterService(object):
         missing_sheets = [name for name in SHEETS if name not in workbook and name not in OPTIONAL_SHEETS]
         if missing_sheets:
             raise ValueError("DataMaster缺少工作表：%s" % "、".join(missing_sheets))
-        parsed = dict((name, rows_to_dicts(workbook[name])) for name in SHEETS)
+        parsed = {name: rows_to_dicts(workbook[name]) if name in workbook else [] for name in SHEETS}
         report = {
             "filename": filename, "valid": True, "errors": [], "warnings": [], "counts": {}, "data": {},
             "scope": "business_data_only", "model_contract_checked": False,
