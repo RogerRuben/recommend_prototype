@@ -205,6 +205,7 @@ OUTPUT_FIELDS = ("__predicted_price_wan", "__capability_score", "__feasibility_p
 _SECTION_REQUIRED = {
     "products": ("product_code", "product_name"),
     "parameters": ("parameter_id", "label"),
+    "parameter_groups": ("group_name",),
     "tags": ("tag_id", "tag_name"),
     "tag_rules": ("rule_id", "tag_id", "parameter_id"),
     "couplings": ("coupling_id", "coupling_name", "parameter_a", "parameter_b"),
@@ -214,6 +215,7 @@ _SECTION_REQUIRED = {
 _SECTION_PK = {
     "products": "product_code",
     "parameters": "parameter_id",
+    "parameter_groups": "group_name",
     "tags": "tag_id",
     "tag_rules": "rule_id",
     "couplings": "coupling_id",
@@ -221,9 +223,9 @@ _SECTION_PK = {
     "agreements": "agreement_id",
 }
 _SECTION_TITLE = {
-    "products": "成品信息", "parameters": "指标定义", "tags": "标签字典",
-    "tag_rules": "标签规则", "couplings": "耦合关系", "constraints": "约束规则",
-    "agreements": "历史协议",
+    "products": "成品信息", "parameters": "指标定义", "parameter_groups": "指标分组",
+    "tags": "标签字典", "tag_rules": "标签规则", "couplings": "耦合关系",
+    "constraints": "约束规则", "agreements": "历史协议",
 }
 
 
@@ -262,7 +264,7 @@ def validate_business_data(data):
         if index == 1:
             product_code = clean(item.get("product_code"))
 
-    for section in ("parameters", "tags", "tag_rules", "couplings", "constraints", "agreements"):
+    for section in ("parameters", "parameter_groups", "tags", "tag_rules", "couplings", "constraints", "agreements"):
         items = data.get(section) or []
         title = _SECTION_TITLE[section]
         pk = _SECTION_PK[section]

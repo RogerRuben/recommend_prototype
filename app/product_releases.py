@@ -36,11 +36,12 @@ from .wide_import import WideTableParser, parse_bool, read_table_bytes
 from .xlsx_utils import read_workbook_bytes
 
 
-SECTIONS = ("products", "parameters", "tags", "tag_rules", "couplings", "constraints", "agreements")
+SECTIONS = ("products", "parameters", "parameter_groups", "tags", "tag_rules", "couplings", "constraints", "agreements")
 
 SECTION_TITLES = {
     "products": "成品信息",
     "parameters": "指标定义",
+    "parameter_groups": "指标分组",
     "tags": "标签字典",
     "tag_rules": "标签规则",
     "couplings": "耦合关系",
@@ -58,6 +59,7 @@ HEADER_ALIASES = {
     "parameters": {
         "parameter_id": ("parameter_id", "指标编号", "字段编号"),
         "label": ("label", "指标名称", "字段名称"),
+        "parameter_group": ("parameter_group", "指标分组"),
         "unit": ("unit", "单位"),
         "value_type": ("value_type", "取值类型", "数据类型"),
         "search_type": ("search_type", "搜索类型"),
@@ -74,6 +76,13 @@ HEADER_ALIASES = {
         "display_order": ("display_order", "显示顺序"),
         "enabled": ("enabled", "是否启用"),
         "model_bound": ("model_bound", "模型字段", "是否模型字段"),
+    },
+    "parameter_groups": {
+        "group_name": ("group_name", "分组名称"),
+        "display_order": ("display_order", "显示顺序"),
+        "description": ("description", "说明"),
+        "enabled": ("enabled", "是否启用"),
+        "default_collapsed": ("default_collapsed", "默认折叠"),
     },
     "tags": {
         "tag_id": ("tag_id", "标签编号"),
@@ -129,6 +138,7 @@ HEADER_ALIASES = {
 REQUIRED_COLUMNS = {
     "products": ("product_code", "product_name"),
     "parameters": ("parameter_id", "label", "value_type"),
+    "parameter_groups": ("group_name",),
     "tags": ("tag_id", "tag_name"),
     "tag_rules": ("rule_id", "tag_id", "parameter_id", "operator"),
     "couplings": ("coupling_id", "coupling_name", "coupling_type", "parameter_a", "parameter_b"),
@@ -138,6 +148,7 @@ REQUIRED_COLUMNS = {
 PRIMARY_KEYS = {
     "products": "product_code",
     "parameters": "parameter_id",
+    "parameter_groups": "group_name",
     "tags": "tag_id",
     "tag_rules": "rule_id",
     "couplings": "coupling_id",
@@ -151,7 +162,7 @@ CSV_COLUMNS = {
         ("product_description", "成品说明"), ("enabled", "是否启用"),
     ),
     "parameters": (
-        ("parameter_id", "指标编号"), ("label", "指标名称"), ("unit", "单位"),
+        ("parameter_id", "指标编号"), ("label", "指标名称"), ("parameter_group", "指标分组"), ("unit", "单位"),
         ("value_type", "取值类型"), ("search_type", "搜索类型"),
         ("min_value", "工程下限"), ("max_value", "工程上限"),
         ("preference", "效能方向"), ("description", "指标说明"),
@@ -160,6 +171,10 @@ CSV_COLUMNS = {
         ("required", "是否必填"), ("auto_adjustable", "允许自动调整"),
         ("decimal_places", "显示小数位"), ("display_order", "显示顺序"),
         ("enabled", "是否启用"), ("model_bound", "是否模型字段"),
+    ),
+    "parameter_groups": (
+        ("group_name", "分组名称"), ("display_order", "显示顺序"),
+        ("description", "说明"), ("enabled", "是否启用"), ("default_collapsed", "默认折叠"),
     ),
     "tags": (
         ("tag_id", "标签编号"), ("tag_name", "标签名称"), ("tag_group", "标签分组"),
@@ -242,8 +257,8 @@ class ProductReleaseService(object):
             raise ValueError("维护工作簿仅支持.xlsx文件。")
         workbook = read_workbook_bytes(raw)
         sheet_sections = (
-            ("成品信息", "products"), ("指标定义", "parameters"), ("标签字典", "tags"),
-            ("标签规则", "tag_rules"), ("耦合关系", "couplings"),
+            ("成品信息", "products"), ("指标定义", "parameters"), ("指标分组", "parameter_groups"),
+            ("标签字典", "tags"), ("标签规则", "tag_rules"), ("耦合关系", "couplings"),
             ("约束规则", "constraints"), ("历史协议", "agreements"),
         )
         if not any(sheet in workbook for sheet, _section in sheet_sections):
@@ -338,6 +353,7 @@ class ProductReleaseService(object):
         data = {
             "products": [dict(product)],
             "parameters": [dict(item) for item in snapshot.get("parameters", [])],
+            "parameter_groups": [dict(item) for item in snapshot.get("parameter_groups", [])],
             "tags": [dict(item) for item in snapshot.get("tags", [])],
             "tag_rules": [dict(item) for item in snapshot.get("tag_rules", [])],
             "couplings": [dict(item) for item in snapshot.get("couplings", [])],
@@ -379,9 +395,10 @@ class ProductReleaseService(object):
         data = package.get("data")
         if not isinstance(data, dict):
             raise ValueError("离线发布包缺少data对象。")
-        missing = [section for section in SECTIONS if not isinstance(data.get(section), list)]
+        missing = [section for section in SECTIONS if section != "parameter_groups" and not isinstance(data.get(section), list)]
         if missing:
             raise ValueError("离线发布包缺少数据模块：%s" % "、".join(missing))
+        data.setdefault("parameter_groups", [])
         core = {
             "format": PACKAGE_FORMAT,
             "product_code": clean(package.get("product_code")),
@@ -456,6 +473,7 @@ class ProductReleaseService(object):
             "parameters": {"value_type":"number", "search_type":"auto", "required":0,
                            "auto_adjustable":1, "decimal_places":3, "display_order":1,
                            "enabled":1, "model_bound":0},
+            "parameter_groups": {"display_order":9999, "enabled":1, "default_collapsed":0},
             "tags": {"weight":1.0, "derivation_mode":"rule", "enabled":1},
             "tag_rules": {"operator":"gte", "rule_group":"default", "enabled":1},
             "couplings": {"coupling_type":"positive", "domain_operator":"gte", "multiplier":1.0,
@@ -576,6 +594,7 @@ class ProductReleaseService(object):
                 mapping = json.dumps(parsed_mapping, ensure_ascii=False)
             return {
                 "parameter_id": clean(row.get("parameter_id")), "label": clean(row.get("label")),
+                "parameter_group": clean(row.get("parameter_group")) or "其他",
                 "unit": clean(row.get("unit")), "value_type": normalize_value_type(row.get("value_type")),
                 "min_value": num(row.get("min_value")), "max_value": num(row.get("max_value")),
                 "preference": normalize_preference(row.get("preference")),
@@ -587,6 +606,14 @@ class ProductReleaseService(object):
                 "decimal_places": integer(row.get("decimal_places"), 3),
                 "display_order": integer(row.get("display_order"), row_number - 1),
                 "enabled": _bool(row.get("enabled")), "model_bound": _bool(row.get("model_bound")),
+            }
+        if section == "parameter_groups":
+            return {
+                "group_name": clean(row.get("group_name")),
+                "display_order": integer(row.get("display_order"), 9999),
+                "description": clean(row.get("description")),
+                "enabled": _bool(row.get("enabled")),
+                "default_collapsed": _bool(row.get("default_collapsed")),
             }
         if section == "tags":
             return {
