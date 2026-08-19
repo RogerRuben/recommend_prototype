@@ -378,6 +378,32 @@ Phase 5 前补的三个 P1 + 一个 `-1` 阻断项 + UI 收尾。
 ### 测试（累计 77 个，全部通过）
 新增 `conditional_v2_full_chain_test.py`、`datamaster_group_sheet_strict_test.py`、`string_enum_preflight_test.py`。
 
+---
+
+## V20 Final Conditional Integration Guard
+
+在 `b5d8e96` 后的最终收口，只补条件关系保存/展示/模型契约边界。
+
+| 提交 | 主题 |
+| --- | --- |
+| `6eb820f` | admin V2 列表摘要渲染 V2 metadata |
+| `8b7106e` | 条件关系保存校验拆分 business/model errors |
+| `9b9b513` | 共享 target 同时校验 effectiveness 与 price 模型契约 |
+| `ec3f618` | 空分组 sheet / inactive-lock / mapped-enum 数字编码边界收紧 |
+| `3fbb5b7` | 离线非法业务规则与 price/effectiveness 范围冲突测试 |
+
+### 关键改动
+- `renderConditionalTemplates()` 对 V2 显示 `when.business_value → then.business_value/model_value → otherwise`，不再读 V1 字段。
+- `validate_conditional_relationship()` 返回 `business_errors`（始终阻止保存）与 `model_errors`（在线阻止、离线 pending）；保存结果携带 `compatibility`。
+- 新增 `runtime.model_feature_specs()`，条件关系保存校验使用未去重的 effectiveness/price 两套契约，shared target 不再只查一套。
+- DataMaster 有分组 sheet（即使为空）时，未知 `parameter_group` 直接报错，不再当作 legacy 缺表推导。
+- V2 `not_applicable` 分支中兼容的 locked target 仍会进入 `inactive_parameters`。
+- Preflight 有 mapping 时只接受 mapping key/value 或其数值等价值，任意数字编码（如 `999`）不再放行。
+
+### 测试（累计 78 个，全部通过）
+新增 `final_conditional_micro_patch_test.py`；强化 `conditional_v2_full_chain_test.py`、`datamaster_group_sheet_strict_test.py`、`string_enum_preflight_test.py`。
+
+
 
 
 
