@@ -13,7 +13,7 @@ subordinate.
 """
 from __future__ import print_function
 
-from .conditional_constraint import TEMPLATE_KIND, expected_range, parse_template_metadata
+from .conditional_constraint import TEMPLATE_KIND, TEMPLATE_KIND_V2, expected_range, parse_template_metadata
 from .value_semantics import normalize_numeric
 
 
@@ -60,7 +60,66 @@ def project_constraints(params, definitions, rules, locked=None, seed_values=Non
 
     for group, group_rules in _group_conditional_rules(rules).items():
         meta = parse_template_metadata(group_rules[0])
-        if not meta or meta.get("template") != TEMPLATE_KIND:
+        if not meta:
+            continue
+        if meta.get("template") == TEMPLATE_KIND_V2:
+            controller = meta.get("controller")
+            target = meta.get("target")
+            if controller not in params:
+                continue
+            when = meta.get("when") or {}
+            then = meta.get("then") or {}
+            otherwise = meta.get("otherwise") or {}
+            when_model = when.get("model_value")
+            controller_num = _num(params.get(controller))
+            active = controller_num is not None and _num(when_model) is not None and abs(controller_num - _num(when_model)) < 1e-9
+            branch = then if active else otherwise
+            mode = branch.get("mode") or "not_applicable"
+            current = params.get(target)
+            if target in locked:
+                conflicts.append({
+                    "type": "frozen_conditional_conflict", "parameter": target,
+                    "controller": controller, "controller_value": params.get(controller),
+                    "reason": "用户冻结与条件关系冲突",
+                })
+                continue
+            if mode in ("not_applicable", "fixed"):
+                model_value = branch.get("model_value")
+                if model_value is not None:
+                    params[target] = model_value
+                    if mode == "not_applicable":
+                        inactive_parameters.append(target)
+                    repairs.append({
+                        "type": "conditional_deactivation" if mode == "not_applicable" else "conditional_fixed",
+                        "parameter": target, "before": current, "after": model_value,
+                        "reason": "控制指标%s%s，从属指标按配置处理" % (controller, "命中不适用" if active else "未命中"),
+                    })
+            elif mode == "range":
+                lo = float(branch.get("min", 0))
+                hi = float(branch.get("max", 1))
+                if lo > hi:
+                    lo, hi = hi, lo
+                current_num = _num(current)
+                if current_num is None:
+                    current_num = (lo + hi) / 2.0
+                params[target] = max(lo, min(hi, current_num))
+                repairs.append({
+                    "type": "conditional_clamp", "parameter": target,
+                    "before": current, "after": params[target],
+                    "reason": "控制指标%s，从属指标限制在范围内" % controller,
+                })
+            elif mode == "enum":
+                allowed = branch.get("allowed") or []
+                if allowed:
+                    if current not in allowed:
+                        params[target] = allowed[0]
+                    repairs.append({
+                        "type": "conditional_enum", "parameter": target,
+                        "before": current, "after": params[target],
+                        "reason": "控制指标%s，从属指标限制为可选值" % controller,
+                    })
+            continue
+        if meta.get("template") != TEMPLATE_KIND:
             continue
         controller = meta.get("controller")
         target = meta.get("target")

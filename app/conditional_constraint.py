@@ -25,6 +25,7 @@ import uuid
 from .value_semantics import normalize_numeric
 
 TEMPLATE_KIND = "conditional_numeric_applicability"
+TEMPLATE_KIND_V2 = "conditional_applicability_v2"
 
 
 def compile_conditional_constraint(controller, active_value, target,
@@ -74,6 +75,46 @@ def compile_conditional_constraint(controller, active_value, target,
         "template_metadata_json": json.dumps(template_metadata, ensure_ascii=False),
     }
     return {"constraint_group": group, "template_metadata": template_metadata, "rules": [lower, upper]}
+
+
+def compile_conditional_relationship_v2(controller, when, target, then, otherwise, group_prefix="cond"):
+    """Compile a V2 business-facing conditional relationship.
+
+    ``when`` describes the controller state that triggers ``then``; ``otherwise``
+    is the active/fallback branch.  The metadata is the source of truth; the two
+    affine rule rows are retained only so existing group delete/list machinery
+    stays atomic.
+    """
+    group = "%s_%s_%s" % (group_prefix, str(controller), str(target))
+    metadata = {
+        "template": TEMPLATE_KIND_V2,
+        "controller": controller,
+        "when": dict(when or {}),
+        "target": target,
+        "then": dict(then or {}),
+        "otherwise": dict(otherwise or {}),
+    }
+    lower = {
+        "rule_kind": "conditional_lower",
+        "constraint_group": group,
+        "left_parameter": target,
+        "operator": "gte",
+        "right_parameter": controller,
+        "multiplier": 0,
+        "offset": 0,
+        "template_metadata_json": json.dumps(metadata, ensure_ascii=False),
+    }
+    upper = {
+        "rule_kind": "conditional_upper",
+        "constraint_group": group,
+        "left_parameter": target,
+        "operator": "lte",
+        "right_parameter": controller,
+        "multiplier": 0,
+        "offset": 0,
+        "template_metadata_json": json.dumps(metadata, ensure_ascii=False),
+    }
+    return {"constraint_group": group, "template_metadata": metadata, "rules": [lower, upper]}
 
 
 def affine_bound(rule, controller_value):

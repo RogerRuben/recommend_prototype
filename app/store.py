@@ -1045,7 +1045,7 @@ class Store(object):
 
     def upsert_conditional_template(self, payload):
         """Create or replace a conditional-attribute template as one atomic group."""
-        from .conditional_constraint import build_rule_id, compile_conditional_constraint
+        from .conditional_constraint import build_rule_id, compile_conditional_constraint, compile_conditional_relationship_v2
         payload = dict(payload or {})
         controller = str(payload.get("controller") or "").strip()
         target = str(payload.get("target") or "").strip()
@@ -1059,12 +1059,21 @@ class Store(object):
         active_value = payload.get("active_value")
         if active_value in (None, ""):
             active_value = 1
-        compiled = compile_conditional_constraint(
-            controller, active_value, target,
-            payload.get("inactive_value", -1),
-            payload.get("active_min", 0),
-            payload.get("active_max", 1),
-        )
+        if payload.get("template") == "conditional_applicability_v2" or (payload.get("then") is not None and payload.get("otherwise") is not None):
+            compiled = compile_conditional_relationship_v2(
+                controller,
+                payload.get("when") or {},
+                target,
+                payload.get("then") or {},
+                payload.get("otherwise") or {},
+            )
+        else:
+            compiled = compile_conditional_constraint(
+                controller, active_value, target,
+                payload.get("inactive_value", -1),
+                payload.get("active_min", 0),
+                payload.get("active_max", 1),
+            )
         group = compiled["constraint_group"]
         original_group = str(payload.get("original_constraint_group") or "").strip() or None
         severity = payload.get("severity") or "warning"
