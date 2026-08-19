@@ -6,15 +6,16 @@ from .value_semantics import normalize_numeric
 
 
 def validate_conditional_relationship(metadata, definitions=None, model_specs=None):
-    """Return ``{"compatible", "errors", "warnings", "model_compatibility"}``.
+    """Return compatibility with business and model errors separated.
 
-    ``model_specs`` is optional; when absent only the DataMaster definition is
-    checked.  The caller decides whether service-offline should downgrade errors
-    to warnings.
+    ``business_errors`` are DataMaster-level configuration errors and must always
+    block saving.  ``model_errors`` are model-contract conflicts; the caller may
+    allow saving when model services are offline.
     """
     definitions = definitions or {}
     model_specs = model_specs or []
-    errors = []
+    business_errors = []
+    model_errors = []
     warnings = []
     model_compatibility = {}
     target = metadata.get("target")
@@ -30,7 +31,7 @@ def validate_conditional_relationship(metadata, definitions=None, model_specs=No
             if model_value is not None and target_min is not None and target_max is not None:
                 number = normalize_numeric(model_value)
                 if number is not None and (number < float(target_min) or number > float(target_max)):
-                    errors.append(
+                    business_errors.append(
                         "从属指标「%s」的%s模型值 %s 不在业务允许范围 %s~%s 内。"
                         % (target, branch_name, model_value, target_min, target_max)
                     )
@@ -38,7 +39,7 @@ def validate_conditional_relationship(metadata, definitions=None, model_specs=No
             lo = normalize_numeric(branch.get("min"))
             hi = normalize_numeric(branch.get("max"))
             if lo is not None and hi is not None and lo > hi:
-                errors.append("从属指标「%s」的%s范围下限高于上限。" % (target, branch_name))
+                business_errors.append("从属指标「%s」的%s范围下限高于上限。" % (target, branch_name))
             if lo is not None and target_min is not None and lo < float(target_min):
                 warnings.append("从属指标「%s」的%s范围下限低于指标允许下限。" % (target, branch_name))
             if hi is not None and target_max is not None and hi > float(target_max):
@@ -68,15 +69,18 @@ def validate_conditional_relationship(metadata, definitions=None, model_specs=No
                     spec_errors.append("%s范围下限 %s 低于模型允许下限 %s" % (branch_name, branch.get("min"), spec_min))
                 if hi is not None and spec_max is not None and hi > float(spec_max):
                     spec_errors.append("%s范围上限 %s 高于模型允许上限 %s" % (branch_name, branch.get("max"), spec_max))
-        model_compatibility[spec.get("model_role") or "model"] = {
+        model_compatibility[spec.get("model_kind") or spec.get("model_role") or "model"] = {
             "compatible": not spec_errors,
             "errors": spec_errors,
         }
-        errors.extend(spec_errors)
+        model_errors.extend(spec_errors)
 
+    errors = business_errors + model_errors
     return {
         "compatible": not errors,
         "errors": errors,
+        "business_errors": business_errors,
+        "model_errors": model_errors,
         "warnings": warnings,
         "model_compatibility": model_compatibility,
     }

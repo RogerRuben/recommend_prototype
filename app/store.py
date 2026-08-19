@@ -1075,12 +1075,19 @@ class Store(object):
                 payload.get("active_max", 1),
             )
         from .conditional_compatibility import validate_conditional_relationship
-        model_specs = self.runtime.all_feature_specs() if hasattr(self.runtime, "all_feature_specs") else []
+        if hasattr(self.runtime, "model_feature_specs"):
+            model_specs = self.runtime.model_feature_specs()
+        elif hasattr(self.runtime, "all_feature_specs"):
+            model_specs = self.runtime.all_feature_specs()
+        else:
+            model_specs = []
         compatibility = validate_conditional_relationship(compiled["template_metadata"], self.parameter_map(), model_specs)
-        if not compatibility["compatible"]:
+        if compatibility["business_errors"]:
+            raise ValueError("；".join(compatibility["business_errors"]))
+        if compatibility["model_errors"]:
             manifest = self.runtime.manifest()
             if manifest.get("calculation_available") is not False:
-                raise ValueError("；".join(compatibility["errors"]))
+                raise ValueError("；".join(compatibility["model_errors"]))
         group = compiled["constraint_group"]
         original_group = str(payload.get("original_constraint_group") or "").strip() or None
         severity = payload.get("severity") or "warning"
@@ -1110,7 +1117,7 @@ class Store(object):
                 conn.commit()
             finally:
                 conn.close()
-        return {"saved": True, "constraint_group": group, "rules": len(compiled["rules"]), "template_metadata": compiled["template_metadata"]}
+        return {"saved": True, "constraint_group": group, "rules": len(compiled["rules"]), "template_metadata": compiled["template_metadata"], "compatibility": compatibility}
 
     def delete_conditional_template(self, constraint_group):
         with self.lock:
