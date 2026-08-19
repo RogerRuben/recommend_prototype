@@ -403,6 +403,28 @@ Phase 5 前补的三个 P1 + 一个 `-1` 阻断项 + UI 收尾。
 ### 测试（累计 78 个，全部通过）
 新增 `final_conditional_micro_patch_test.py`；强化 `conditional_v2_full_chain_test.py`、`datamaster_group_sheet_strict_test.py`、`string_enum_preflight_test.py`。
 
+---
+
+## V20 Anchor Feasibility Diagnostics
+
+在 `f48b1b3` 后补显式技术指标可行性与 Anchor Invariant 诊断。
+
+| 提交 | 主题 |
+| --- | --- |
+| `0834d1e` | 显式指标工程域可行性评估 |
+| `79fdf5e` | 工程边界 anchor resolution 诊断与前端报告 |
+
+### 关键改动
+- 新增 `assess_explicit_filter_feasibility()`：检查 numeric 显式条件与工程 `[min,max]` 是否有交集，返回 `strictly_feasible` 与 `conflicts`（含 `closest_feasible_value`、`reason`）。
+- Generator 结果新增 `explicit_filter_feasibility`，区分“技术输入条件不可实现”与“模型输出目标未达到”。
+- `_anchor_demands()` 的工程边界截断记录 `anchor_resolutions`，`locked_sources` 标记为 `engineering_boundary_fallback`。
+- 送模型前执行 `validate_anchor_integrity()`：本来可实现的显式条件若被违反，该 candidate 不进入模型评价，并计入 `rejection.anchor_invariant`。
+- 前端空结果报告新增「技术条件工程可行性」区块，展示要求值、工程范围与最近可实现值。
+
+### 测试（累计 83 个，全部通过）
+新增 `explicit_anchor_feasibility_test.py`、`explicit_anchor_engineering_conflict_test.py`、`mixed_output_unreachable_anchor_feasible_test.py`、`mixed_output_unreachable_anchor_infeasible_test.py`。
+
+
 
 
 
