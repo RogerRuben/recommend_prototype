@@ -224,3 +224,36 @@ Phase 5 前补的三个 P1 + 一个 `-1` 阻断项 + UI 收尾。
 
 
 
+
+---
+
+## V20 Generation Reliability & Admin UX Hardening
+
+从 `fcf2245` 起的可靠性收口：修复条件属性管理事件冲突、指标分组主数据、需求计数语义、生成锚定语义、空结果缓存、失败诊断与前端状态恢复。
+
+| 提交 | 主题 |
+| --- | --- |
+| `825b792` | 条件属性按钮与通用 CRUD 事件作用域隔离 |
+| `f576a55` | 指标分组主数据 + DataMaster round-trip + Frozen 真 Accordion |
+| `cb34e04` | 需求匹配按“一个用户输入 = 一个条件”计数 |
+| `c40a5a4` | Generator 枚举/布尔第三态/标签规则统一编译为锚定 |
+| `f4d2caa` | 空生成结果可重试，不再被 fingerprint 缓存 |
+| `ddbfe28` | 暴露 rejection 详情、预算/轮数/停止原因 |
+| `95f7e89` | 前端生成条件变化即标记脏状态，requestSnapshot 补 budget/rounds |
+| `55b11bc` | 极端门锁混合条件回归测试 |
+| `1aba1fc` | 真实 E2E 生成路径回放 + 条件属性高级信息折叠 |
+
+### 关键改动
+- `cond-template-edit/delete` 不再携带 `edit-row/purge-row`；通用 CRUD handler 限定 `#mainAdminTable`，根除事件覆盖。
+- 新增 `parameter_groups` 主数据（group_name/display_order/description/enabled/default_collapsed），从 `parameter_definitions.parameter_group` 自动迁移；DataMaster 新增「指标分组」sheet，旧工作簿缺表时自动由指标定义推导。
+- Frozen 面板按 `parameter_groups` 排序并支持组折叠/全选/半选，组头展开与整组全选分离；删除重复 `collectFrozen`。
+- `RequirementAssessment` 对每条价格/标签/技术指标分别计数，`indicator_logic` 独立承载 AND/OR 判定；不再向 `conditions` 塞 `parameter_group` 伪条件。
+- `filters_to_anchors` 替代仅数值的 `filters_to_bounds`：mapped enum `text_equals` → `allowed`，布尔第三态保留为 `allowed`，标签分支复用同一编译函数。
+- 空 `candidates` 任务标记 `empty_result` 并从 fingerprint 缓存摘除；再次相同请求会真正重新搜索。
+- 生成结果新增 `rejection_details`（前 5 条）、`generation_budget`、`actual_budget_used`、`max_rounds`、`actual_rounds`、`stopping_reason`。
+- 前端所有生成相关条件变化（标签/价格/效能/技术筛选/AND-OR/Frozen/数量/Budget/Rounds/协议）调用 `markGenerationCriteriaDirty()`；`requestSnapshot()` 纳入 budget/rounds。
+- 条件属性管理编辑框增加「高级信息（编译后约束）」折叠；普通需求 chip 对 inactive 属性显示“无该属性”并提供受控关系 tooltip。
+
+### 测试（累计 54 个，2 个因沙箱临时目录权限无法运行）
+新增 `conditional_template_ui_wiring_test.py`、`parameter_groups_admin_test.py`、`requirement_count_user_conditions_test.py`、`enum_filter_anchor_test.py`、`empty_generation_retry_test.py`、`generation_failure_diagnostics_test.py`、`frontend_generation_dirty_test.py`、`extreme_mixed_filter_generation_test.py`、`real_generation_path_replay_test.py`、`conditional_advanced_fold_test.py`。
+
