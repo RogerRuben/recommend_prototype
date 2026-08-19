@@ -1537,7 +1537,7 @@ class HistorySeededGenerator(object):
         rejection_details = []
         evaluations = 0
         attempted_evaluations = 0
-        max_evaluations = max(int(budget), count * 10)
+        max_evaluations = max(1, int(budget))
         beam = []
 
         def record_rejection(stage, candidate_id, exc):
@@ -1581,6 +1581,9 @@ class HistorySeededGenerator(object):
                 "attempt": seed_index + 1,
             })
 
+        # Candidate evaluation budget is a hard cap: never exceed it with the
+        # initial demand-anchored seed batch.
+        initial_pending = initial_pending[:max_evaluations]
         initial_evaluations = None
         if initial_pending and self.evaluate_batch_callback:
             try:
@@ -1636,13 +1639,13 @@ class HistorySeededGenerator(object):
         diverse_strict = 0
         stopped_for_count = False
         pending = []
-        while beam and evaluations < max_evaluations and iteration < len(step_schedule):
+        while beam and attempted_evaluations < max_evaluations and iteration < len(step_schedule):
             iteration += 1
             step_scale = step_schedule[iteration - 1]
             round_records = list(beam)
             pending = []
             remaining_rounds = len(step_schedule) - iteration + 1
-            remaining_budget = max_evaluations - evaluations
+            remaining_budget = max_evaluations - attempted_evaluations
             # Retain budget for cumulative multi-round movement in both modes.
             # A single first-round coordinate scan must not consume the whole
             # budget and degrade the search into one shallow neighborhood.
@@ -1785,6 +1788,8 @@ class HistorySeededGenerator(object):
                     record_rejection("batch_evaluation", "SEARCH-BATCH-%02d" % iteration, exc)
                     batch_evaluations = None
             for pending_index, item in enumerate(pending):
+                if attempted_evaluations >= max_evaluations:
+                    break
                 attempted_evaluations += 1
                 try:
                     evaluation = batch_evaluations[pending_index] if batch_evaluations is not None else None
@@ -1949,7 +1954,7 @@ class HistorySeededGenerator(object):
 
         if stopped_for_count:
             stopping_reason = "requested_count_met"
-        elif evaluations >= max_evaluations:
+        elif attempted_evaluations >= max_evaluations:
             stopping_reason = "budget_exhausted"
         elif iteration >= len(step_schedule):
             stopping_reason = "max_rounds_reached"
@@ -1973,7 +1978,7 @@ class HistorySeededGenerator(object):
             "rejection_statistics": rejection,
             "rejection_details": rejection_details,
             "generation_budget": max_evaluations,
-            "actual_budget_used": min(attempted_evaluations, max_evaluations),
+            "actual_budget_used": attempted_evaluations,
             "max_rounds": max_rounds,
             "actual_rounds": iteration,
             "stopping_reason": stopping_reason,

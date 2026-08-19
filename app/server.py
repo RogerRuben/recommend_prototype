@@ -1006,6 +1006,8 @@ class Application(object):
                 search_profile.get("warning") or "正在分析相近方案与当前需求",
             )
         has_output_target = any(req.get(key) not in (None, "") for key in ("max_price", "min_capability", "min_cost_effectiveness", "min_feasibility"))
+        max_budget = self.generation_budget_limit()
+        max_rounds = self.generation_rounds_limit()
         # HTTP-backed models are the dominant cost.  A compact adaptive budget
         # plus convergence stopping gives the same staged search semantics while
         # avoiding hundreds of redundant single-candidate service calls.
@@ -1013,10 +1015,15 @@ class Application(object):
             budget = max(360, count * 60)
         else:
             budget = max(120, count * 22) if has_output_target else max(80, count * 14)
-        # User-tunable candidate evaluation budget (clamped by server limits).
+        # Automatic budgets are also clamped by server limits.
+        budget = min(budget, max_budget)
+        # User-tunable candidate evaluation budget is a strict hard cap.
         if req.get("generation_budget") not in (None, ""):
-            budget = max(1, int(req["generation_budget"]))
-            budget = min(budget, self.generation_budget_limit())
+            budget = max(1, min(int(req["generation_budget"]), max_budget))
+        req["generation_budget"] = budget
+        # Generation rounds are canonicalized here too for synchronous callers.
+        if req.get("generation_rounds") not in (None, ""):
+            req["generation_rounds"] = max(1, min(int(req["generation_rounds"]), max_rounds))
         result = self.generator.generate(
             req, count=count, seed=req.get("seed"), budget=budget,
             search_mode=search_mode, progress_callback=progress_callback,

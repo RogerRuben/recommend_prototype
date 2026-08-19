@@ -47,6 +47,16 @@ class GenerationTaskManager(object):
         session_id = str(req.get("session_id") or "default")
         req["session_id"] = session_id
         req["count"] = max(1, min(int(req.get("count") or 10), 30))
+        # Canonicalize user-tunable limits before fingerprinting so raw values
+        # like rounds=100 and rounds=1000 map to the same clamped task.
+        if req.get("generation_budget") not in (None, ""):
+            req["generation_budget"] = max(1, min(int(req["generation_budget"]), self.app.generation_budget_limit()))
+        else:
+            req["generation_budget"] = None
+        if req.get("generation_rounds") not in (None, ""):
+            req["generation_rounds"] = max(1, min(int(req["generation_rounds"]), self.app.generation_rounds_limit()))
+        else:
+            req["generation_rounds"] = None
         fp = self.fingerprint(req)
         with self.lock:
             old_id = self.by_fingerprint.get(fp)
