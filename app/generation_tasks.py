@@ -53,13 +53,21 @@ class GenerationTaskManager(object):
             if old_id and old_id in self.tasks and not force:
                 task = self.tasks[old_id]
                 if task["status"] == "completed":
+                    result = task.get("result") or {}
+                    if not result.get("empty_result"):
+                        return self.public(task)
+                    # An empty completed task is not a reusable success: the next
+                    # identical request must actually search again.
+                    self.tasks.pop(old_id, None)
+                    if self.by_fingerprint.get(fp) == old_id:
+                        self.by_fingerprint.pop(fp, None)
+                elif task["status"] in ("queued", "running"):
                     return self.public(task)
-                if task["status"] in ("queued", "running"):
-                    return self.public(task)
-                # A failed cached task must not permanently block the same request.
-                self.tasks.pop(old_id, None)
-                if self.by_fingerprint.get(fp) == old_id:
-                    self.by_fingerprint.pop(fp, None)
+                else:
+                    # A failed cached task must not permanently block the same request.
+                    self.tasks.pop(old_id, None)
+                    if self.by_fingerprint.get(fp) == old_id:
+                        self.by_fingerprint.pop(fp, None)
             task_id = "GENTASK-" + uuid.uuid4().hex[:12].upper()
             task = {
                 "task_id": task_id,
@@ -98,11 +106,19 @@ class GenerationTaskManager(object):
                         task.update(progress=int(progress), message=str(message), updated_at=time.time())
             result = self.app._generate_sync(self.tasks[task_id]["request"], progress_callback=update)
             session_id = self.tasks[task_id]["session_id"]
+            empty_result = not (result.get("candidates") or [])
+            result["empty_result"] = empty_result
+            if empty_result:
+                result["message"] = result.get("message") or "未找到任何满足条件的方案；此结果不会被缓存，再次生成会重新搜索。"
             batch_id, prepared = self.app.sessions.add_batch(session_id, result.get("candidates", []), fingerprint=self.tasks[task_id].get("fingerprint"))
             result["batch_id"] = batch_id
             result["candidates"] = prepared
             with self.lock:
                 self.tasks[task_id].update(status="completed", progress=100, message=result.get("message") or "生成完成", result=result, batch_id=batch_id, updated_at=time.time())
+                if empty_result:
+                    fp = self.tasks[task_id].get("fingerprint")
+                    if self.by_fingerprint.get(fp) == task_id:
+                        self.by_fingerprint.pop(fp, None)
         except Exception as exc:
             traceback.print_exc()
             with self.lock:
@@ -124,7 +140,7 @@ class GenerationTaskManager(object):
                 "best_effort_candidate_count", "final_selected_count", "fallback_used",
                 "strict_filter_satisfied", "strict_candidate_count", "best_effort_used", "rejection_statistics",
                 "seed_agreements", "message", "batch_id", "search_profile", "search_warning",
-                "search_iterations", "generation_method"
+                "search_iterations", "generation_method", "empty_result"
             ))
             payload["candidates_count"] = len(result.get("candidates") or [])
         return payload
