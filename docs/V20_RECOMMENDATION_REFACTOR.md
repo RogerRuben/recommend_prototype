@@ -320,6 +320,39 @@ Phase 5 前补的三个 P1 + 一个 `-1` 阻断项 + UI 收尾。
 ### 测试（累计 63 个，全部通过）
 新增 `product_release_conditional_template_roundtrip_test.py`、`parameter_groups_disabled_semantics_test.py`、`string_enum_anchor_test.py`。
 
+---
+
+## V20 Pre-Release Runtime & Data Configuration Hardening
+
+在 `4e9ed02` 后按任务书收口启动、DataMaster、生成预检、枚举映射与条件属性关系。
+
+| 提交 | 主题 |
+| --- | --- |
+| `7d50911` | 修复前端初始化 groups 未定义 |
+| `b4a432c` | DataMaster 指标定义校验列对齐 + 分组下拉 |
+| `bb85ff9` | 缺失 Seed 字段由明确生成条件创建 |
+| `9104395` | 生成模型输入 Preflight + Seed 可用性诊断 |
+| `75bae56` | 业务枚举映射完整性检查 |
+| `4619ad1` | 条件属性关系 V2 Metadata + 业务命名 |
+| `9467b21` | 条件关系保存前模型兼容检查 |
+| `3ec13f4` | 删除指标组后可编辑性回归 |
+| `3a4eb27` | DataMaster Validation Hardening |
+| `3dc49ac` | 前端空结果报告展示 Preflight 诊断 |
+| `fa1461b` | 真实不完整 Seed 生成链测试 |
+
+### 关键改动
+- `renderFrozenParams()` 所有局部变量显式声明，初始化不再抛 `ReferenceError`。
+- DataMaster「指标定义」校验列对齐当前列位置，并新增 C 列 `DM_PARAMETER_GROUPS` 下拉。
+- `_anchor_demands()` 允许为缺失 Seed 创建用户明确要求的字段，并统一 canonicalize。
+- 新增 `_generation_input_preflight()`：在消耗评价额度前检查模型必填字段与未映射枚举；无可用 Seed 时直接返回 `empty_result + stopping_reason=generation_input_preflight_failed`，`actual_budget_used=0`。
+- DataMaster 校验增加：分组引用存在性、allowed_values 数组、mapping 对象、枚举映射覆盖、条件关系 controller/target 引用。
+- 条件属性关系新增 V2 Metadata（`conditional_applicability_v2`），Projection 直接读取 Metadata；V1 继续兼容；保存前可做参数/模型契约兼容检查。
+- 前端空结果报告新增「模型输入预检」区块，展示可用 Seed 数、缺失字段统计与未映射枚举。
+
+### 测试（累计 74 个，全部通过）
+新增 `frontend_app_initialization_test.py`、`datamaster_parameter_validation_alignment_test.py`、`missing_seed_parameter_anchor_test.py`、`generation_model_input_preflight_test.py`、`model_value_mapping_generation_input_test.py`、`conditional_relationship_v2_test.py`、`conditional_relationship_v1_migration_test.py`、`conditional_relationship_model_compatibility_test.py`、`parameter_group_delete_editability_test.py`、`datamaster_validation_hardening_test.py`、`real_generation_incomplete_seed_test.py`。
+
+
 
 
 
