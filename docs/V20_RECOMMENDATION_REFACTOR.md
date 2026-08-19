@@ -424,6 +424,28 @@ Phase 5 前补的三个 P1 + 一个 `-1` 阻断项 + UI 收尾。
 ### 测试（累计 83 个，全部通过）
 新增 `explicit_anchor_feasibility_test.py`、`explicit_anchor_engineering_conflict_test.py`、`mixed_output_unreachable_anchor_feasible_test.py`、`mixed_output_unreachable_anchor_infeasible_test.py`。
 
+---
+
+## V20 Anchor Diagnostics Closure
+
+在 `985efcd` 后补齐联合显式条件、子节点 trace 与非空 best-effort UI 提示。
+
+| 提交 | 主题 |
+| --- | --- |
+| `9ecd285` | 联合显式条件可行性 + 严格边界语义 |
+| `88d47c1` | anchor_resolutions 跨生成路径继承 + emergency invariant |
+| `15a6288` | 非空 best-effort 页面展示工程不可行提示 |
+
+### 关键改动
+- AND 同一参数多条件先合并为请求区间，再与工程域求交；`weight>=6 AND weight<=4` 识别为 `explicit_filters_mutually_inconsistent`。
+- 严格边界 `<` / `>` 在工程边界上视为无交集。
+- 搜索子节点继承 `anchor_resolutions` 与 `engineering_boundary_fallback`；emergency fallback 同样执行 `validate_anchor_integrity()` 并记录 rejection_details。
+- 前端抽 `feasibilityReportHtml()`，空结果与普通 best-effort 共用，展示用户要求、工程范围、最近可实现值。
+
+### 测试（累计 88 个，全部通过）
+新增 `joint_explicit_filter_conflict_test.py`、`strict_boundary_anchor_feasibility_test.py`、`anchor_resolution_descendant_trace_test.py`、`emergency_anchor_invariant_test.py`、`nonempty_feasibility_ui_test.py`。
+
+
 
 
 
