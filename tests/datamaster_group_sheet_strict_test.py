@@ -58,6 +58,25 @@ def main():
         assert "环境属性" in group_names, group_names
         assert report["valid"] is False, report["errors"]
         assert any("环境 属性" in e for e in report["errors"]), report["errors"]
+
+        # Empty group master sheet must not be treated as legacy missing sheet.
+        sheets2 = [
+            ("成品信息", [SHEETS["成品信息"], ["P1", "产品", "", "是"]]),
+            ("指标定义", [
+                parameter_header,
+                ["A1", "A1", "环境属性", "", "数值", "连续数值", "0", "10", "中性", "", "", "", "是", "是", "2", "1", "是", ""],
+            ]),
+            ("指标分组", [group_header]),
+            ("标签字典", [SHEETS["标签字典"]]),
+            ("标签规则", [SHEETS["标签规则"]]),
+            ("耦合关系", [SHEETS["耦合关系"]]),
+            ("约束规则", [SHEETS["约束规则"]]),
+            ("历史协议", [SHEETS["历史协议"]]),
+            ("模型字段绑定", [SHEETS["模型字段绑定"]]),
+        ]
+        report2 = service.parse("empty-sheet.xlsx", write_workbook_bytes(sheets2))
+        assert report2["valid"] is False, report2["errors"]
+        assert any("环境属性" in e for e in report2["errors"]), report2["errors"]
     finally:
         for candidate in (db_path, Path(str(db_path) + "-wal"), Path(str(db_path) + "-shm")):
             if candidate.exists():

@@ -99,6 +99,12 @@ def main():
         assert inactive["parameters"]["attr_bool"] == 0, inactive["parameters"]
         assert "attr_num" in inactive["inactive_parameters"]
 
+        # A compatible locked target in the inactive branch is still inactive.
+        locked_inactive = project_constraints(
+            {"attr_001": 0, "attr_num": 0}, definitions, rules, locked={"attr_num"},
+        )
+        assert "attr_num" in locked_inactive["inactive_parameters"], locked_inactive
+
         # Active controller: range/enum/fixed branches apply without affine errors.
         active = project_constraints(
             {"attr_001": 1, "attr_num": 5, "attr_mat": "TI", "attr_bool": 0},
