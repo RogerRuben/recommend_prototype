@@ -368,12 +368,14 @@ class DataMasterService(object):
     def _dictionary_sheet(self, snap):
         parameters = [str(item.get("parameter_id")) for item in snap.get("parameters", []) if item.get("parameter_id")]
         tags = [str(item.get("tag_id")) for item in snap.get("tags", []) if item.get("tag_id")]
+        active_groups = [str(g.get("group_name")) for g in snap.get("parameter_groups", []) if g.get("group_name") and int(g.get("enabled", 1) or 0) != 0]
         dictionaries = OrderedDict([
             ("是否", ["是", "否"]),
             ("布尔取值", ["有", "无"]),
             ("取值类型", ["数值", "布尔", "IP等级", "枚举", "文本"]),
             ("搜索类型", ["自动识别", "连续数值", "整数数值", "有序离散", "无序枚举", "布尔开关"]),
             ("效能方向", ["越大越好", "越小越好", "中性"]),
+            ("指标分组", active_groups),
             ("标签判定方式", ["规则判定", "从种子继承", "人工维护"]),
             ("比较关系", ["≥", ">", "≤", "<", "=", "为", "等于", "包含", "范围位于", "范围相交"]),
             ("耦合类型", ["正向", "负向", "可行域"]),
@@ -395,7 +397,8 @@ class DataMasterService(object):
         names = OrderedDict()
         name_map = {
             "是否":"DM_YES_NO", "布尔取值":"DM_BOOLEAN_VALUES", "取值类型":"DM_VALUE_TYPES",
-            "搜索类型":"DM_SEARCH_TYPES", "效能方向":"DM_PREFERENCES", "标签判定方式":"DM_TAG_DERIVATIONS",
+            "搜索类型":"DM_SEARCH_TYPES", "效能方向":"DM_PREFERENCES", "指标分组":"DM_PARAMETER_GROUPS",
+            "标签判定方式":"DM_TAG_DERIVATIONS",
             "比较关系":"DM_OPERATORS", "耦合类型":"DM_COUPLING_TYPES", "提示级别":"DM_SEVERITIES",
             "协议来源":"DM_PROTOCOL_SOURCES", "模型类型":"DM_MODEL_KINDS", "字段来源":"DM_SOURCE_TYPES",
             "模型数据类型":"DM_MODEL_DATA_TYPES", "缺失策略":"DM_MISSING_POLICIES",
@@ -417,11 +420,13 @@ class DataMasterService(object):
         result = {
             "成品信息": [v("D2:D100", "DM_YES_NO", "是否启用", "当前版本必须保留一个启用成品。")],
             "指标定义": [
-                v("D2:D1000", "DM_VALUE_TYPES", "取值类型", "选择字段存储的值类型。布尔字段这里只选“布尔”，具体值在历史协议中填有/无。"),
-                v("E2:E1000", "DM_SEARCH_TYPES", "搜索类型", "选择智能生成如何改变该属性。"),
-                v("H2:H1000", "DM_PREFERENCES", "效能方向", "这是偏好方向，不是工程硬约束。"),
-                v("L2:M1000", "DM_YES_NO", "是/否字段", "请直接选择是或否。"),
-                v("P2:P1000", "DM_YES_NO", "是否启用", "停用后该业务属性不再参与数据中心运行；与当前模型是否使用无关。"),
+                v("C2:C1000", "DM_PARAMETER_GROUPS", "指标分组", "从已启用的指标分组中选择。"),
+                v("E2:E1000", "DM_VALUE_TYPES", "取值类型", "选择字段存储的值类型。布尔字段这里只选“布尔”，具体值在历史协议中填有/无。"),
+                v("F2:F1000", "DM_SEARCH_TYPES", "搜索类型", "选择智能生成如何改变该属性。"),
+                v("I2:I1000", "DM_PREFERENCES", "效能方向", "这是偏好方向，不是工程硬约束。"),
+                v("M2:M1000", "DM_YES_NO", "是否必填", "请直接选择是或否。"),
+                v("N2:N1000", "DM_YES_NO", "允许自动调整", "请直接选择是或否。"),
+                v("Q2:Q1000", "DM_YES_NO", "是否启用", "停用后该业务属性不再参与数据中心运行；与当前模型是否使用无关。"),
             ],
             "标签字典": [v("E2:E1000", "DM_TAG_DERIVATIONS", "标签判定方式", "规则判定、从种子继承或人工维护。"), v("G2:G1000", "DM_YES_NO", "是否启用", "停用后不参与推荐，但记录仍保留。")],
             "标签规则": [v("B2:B3000", "DM_TAG_IDS", "标签编号", "从标签字典选择。"), v("C2:C3000", "DM_RULE_FIELDS", "指标编号", "从指标定义或三个模型输出字段中选择。"), v("D2:D3000", "DM_OPERATORS", "比较关系", "布尔字段通常选择“为”，条件值填写有/无。"), v("H2:H3000", "DM_YES_NO", "是否启用", "上级标签停用时规则暂不执行，但仍可保存编辑。")],
