@@ -56,8 +56,8 @@ def main():
     ], "indicator_filter_mode": "any"}
     c_item = _item("C", capability=100, price=10, params={"protection_grade": "IP64", "low_temp": 1})
     assess_c = assess_requirements(c_item, request_c, definitions, {})
-    group = [c for c in assess_c["conditions"] if c["kind"] == "parameter_group"]
-    assert group and group[0]["matched"] is True, "OR group must be satisfied when one side matches"
+    assert assess_c["indicator_logic"]["satisfied"] is True, "OR group must be satisfied when one side matches"
+    assert not any(c["kind"] == "parameter_group" for c in assess_c["conditions"]), "pseudo parameter_group condition should not be in chips"
     assert assess_c["strict_satisfied"] is True and assess_c["assessment_status"] == "satisfied"
 
     # Case D-ish / unknown: capability absent -> unknown, not unmatched.

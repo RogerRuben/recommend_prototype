@@ -918,6 +918,7 @@ class HistorySeededGenerator(object):
                                           getattr(self.store, "constraint_rows", lambda: [])())
         unmet = []
         failed_rule_labels = []
+        indicator_logic = assessment.get("indicator_logic")
         for condition in assessment["conditions"]:
             kind = condition.get("kind")
             if condition.get("status") != "unmatched":
@@ -926,16 +927,15 @@ class HistorySeededGenerator(object):
                 # Individual rule detail; reported together with the group verdict.
                 failed_rule_labels.append(condition.get("label", ""))
                 continue
-            if kind == "parameter_group":
-                detail = "；".join(failed_rule_labels) or "存在未满足项"
-                unmet.append("%s（%s）" % (condition.get("label", "技术指标条件未满足"), detail))
-                continue
             if kind == "tag":
                 unmet.append("缺少标签“%s”" % condition.get("label", ""))
                 continue
             label = condition.get("label", "")
             actual = condition.get("actual")
             unmet.append("%s（当前 %s）" % (label, actual) if actual is not None else label)
+        if indicator_logic and not indicator_logic.get("satisfied") and failed_rule_labels:
+            mode = indicator_logic.get("mode") or "all"
+            unmet.append("技术指标条件（%s）%s" % ("任一满足" if mode == "any" else "全部满足", "；".join(failed_rule_labels) or "存在未满足项"))
         return unmet, assessment["demand_penalty"], assessment
 
     @staticmethod

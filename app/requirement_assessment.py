@@ -75,6 +75,7 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
     matched = 0
     unmatched = 0
     unknown = 0
+    hard_unmatched = 0
 
     # Conditional-attribute targets: whose controller currently forces them
     # inactive, so evidence can say "当前无该属性" instead of a raw gap.
@@ -103,6 +104,7 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
         else:
             status, gap = "unmatched", round(actual - target, 6)
             unmatched += 1
+            hard_unmatched += 1
             penalty += 1.5 + gap / max(abs(target), 1.0)
         conditions.append({
             "kind": "price", "key": "max_price", "label": "价格 ≤ %.3f万元" % target,
@@ -122,13 +124,15 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
         else:
             status, gap = "unmatched", round(target - capability, 6)
             unmatched += 1
+            hard_unmatched += 1
             penalty += 1.5 + gap / max(abs(target), 1.0)
         conditions.append({
             "kind": "capability", "key": "min_capability", "label": "效能 ≥ %.3f" % target,
             "operator": "gte", "target": target, "actual": capability, "matched": status == "matched", "status": status, "gap": gap,
         })
 
-    # Technical indicator filters honour AND/OR semantics as one grouped condition.
+    # Technical indicator filters: each explicit filter is one counted condition;
+    # AND/OR semantics are reported separately in indicator_logic.
     rules = list(request.get("indicator_filters") or [])
     if rules:
         params = item.get("params") or {}
@@ -150,13 +154,14 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
         group_matched = any(results) if mode == "any" else all(results)
         if group_matched:
             group_gap = 0.0
-            matched += 1
         else:
             # The group's gap must express the same demand distance that feeds
             # demand_penalty: the closest alternative for ANY, the sum for AND.
             group_gap = min(gaps) if mode == "any" else sum(gaps)
-            unmatched += 1
+            hard_unmatched += 1
             penalty += group_gap
+        indicator_matched = 0
+        indicator_unmatched = 0
         for rule, ok, gap in zip(rules, results, gaps):
             key = rule.get("parameter_id")
             definition = definitions.get(key, {})
@@ -165,6 +170,12 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
             value1 = rule.get("value1")
             value2 = rule.get("value2")
             expected = "%s～%s" % (value1, value2) if str(operator).startswith("range_") else str(value1)
+            if ok:
+                matched += 1
+                indicator_matched += 1
+            else:
+                unmatched += 1
+                indicator_unmatched += 1
             condition = {
                 "kind": "parameter", "key": key, "parameter_id": key,
                 "label": "%s %s %s" % (label, _operator_text(operator), expected),
@@ -180,12 +191,16 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
                     "controller_value": params.get(meta.get("controller")),
                 }
             conditions.append(condition)
-        conditions.append({
-            "kind": "parameter_group", "key": "__indicator_filters__",
-            "label": "技术指标条件（%s）" % ("任一满足" if mode == "any" else "全部满足"),
-            "matched": group_matched, "status": "matched" if group_matched else "unmatched",
-            "mode": mode, "gap": round(group_gap, 6),
-        })
+        indicator_logic = {
+            "mode": mode,
+            "satisfied": group_matched,
+            "gap": round(group_gap, 6),
+            "matched_count": indicator_matched,
+            "unmatched_count": indicator_unmatched,
+            "total_count": len(rules),
+        }
+    else:
+        indicator_logic = None
 
     selected_tags = list(request.get("selected_tags") or [])
     own_tags = set(item.get("tags") or [])
@@ -196,6 +211,7 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
             matched += 1
         else:
             unmatched += 1
+            hard_unmatched += 1
             penalty += 2.0 * float(tag_map.get(tag_id, {}).get("weight", 1.0))
         conditions.append({
             "kind": "tag", "key": tag_id, "label": label,
@@ -203,8 +219,8 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
         })
 
     total = matched + unmatched + unknown
-    strict_satisfied = unmatched == 0 and unknown == 0
-    if unmatched > 0:
+    strict_satisfied = hard_unmatched == 0 and unknown == 0
+    if hard_unmatched > 0:
         assessment_status = "partial"
     elif unknown > 0:
         assessment_status = "unknown"
@@ -217,6 +233,7 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
         "unmatched_count": unmatched,
         "unknown_count": unknown,
         "total_count": total,
+        "indicator_logic": indicator_logic,
         "demand_penalty": round(penalty, 6),
         "strict_satisfied": strict_satisfied,
         "assessment_status": assessment_status,
