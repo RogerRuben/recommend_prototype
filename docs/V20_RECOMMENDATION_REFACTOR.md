@@ -300,5 +300,26 @@ Phase 5 前补的三个 P1 + 一个 `-1` 阻断项 + UI 收尾。
 ### 测试（累计 60 个，全部通过）
 新增 `product_release_legacy_package_test.py`、`emergency_budget_hard_cap_test.py`；强化 `frontend_empty_result_ui_test.py` 断言空分支包含 `return`。
 
+---
+
+## V20 封版前修补（P1 + 两个 P2）
+
+在 `038f195` 后补掉发布前检查发现的最后一个 P1 与两个已知 P2。
+
+| 提交 | 主题 |
+| --- | --- |
+| `5c779f3` | Product Release 维护工作簿保留条件属性模板元数据 |
+| `4e1680f` | 停用指标分组语义闭环（Frozen/Admin/后端分配拦截） |
+| `d5192b3` | mapped enum 生成锚定支持字符串模型编码 |
+
+### 关键改动
+- Product Release `constraints` 的 `HEADER_ALIASES/CSV_COLUMNS/_normalize_item` 补齐 `rule_kind / constraint_group / template_metadata_json`；`conditional_templates()` 的 rule 也暴露 `constraint_group/template_metadata_json`，维护工作簿 round-trip 后 Phase 5 投影仍生效。
+- 停用指标分组：已有指标保留原组；新指标/其他指标移入停用组会被后端拒绝；Frozen UI 对停用组标记“已停用”并默认折叠；管理指标分组下拉对停用组禁用（已选中的旧值保留可选）。
+- `filters_to_anchors` 对 mapped enum 不再强制 `float(mapped)`；`_anchor_demands` 的 allowed 分支支持字符串模型编码，`"不锈钢"→"SS"` 也能正确锁定。
+
+### 测试（累计 63 个，全部通过）
+新增 `product_release_conditional_template_roundtrip_test.py`、`parameter_groups_disabled_semantics_test.py`、`string_enum_anchor_test.py`。
+
+
 
 
