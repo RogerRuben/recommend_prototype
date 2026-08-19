@@ -392,22 +392,26 @@ class ProductReleaseService(object):
             raise ValueError("离线发布包不是有效UTF-8 JSON：%s" % exc)
         if package.get("format") != PACKAGE_FORMAT:
             raise ValueError("不支持的离线发布包格式：%s" % package.get("format"))
-        data = package.get("data")
-        if not isinstance(data, dict):
+        transport_data = package.get("data")
+        if not isinstance(transport_data, dict):
             raise ValueError("离线发布包缺少data对象。")
-        missing = [section for section in SECTIONS if section != "parameter_groups" and not isinstance(data.get(section), list)]
+        missing = [section for section in SECTIONS if section != "parameter_groups" and not isinstance(transport_data.get(section), list)]
         if missing:
             raise ValueError("离线发布包缺少数据模块：%s" % "、".join(missing))
-        data.setdefault("parameter_groups", [])
+        # Integrity hash must be verified against the exact transport payload.
+        # Older packages legitimately omit the optional parameter_groups section;
+        # we only add it after the hash has been confirmed.
         core = {
             "format": PACKAGE_FORMAT,
             "product_code": clean(package.get("product_code")),
             "product_name": clean(package.get("product_name")),
-            "data": data,
+            "data": transport_data,
         }
         expected = hashlib.sha256(self._canonical_json(core).encode("utf-8")).hexdigest()
         if clean(package.get("payload_sha256")) != expected:
             raise ValueError("离线发布包完整性校验失败，文件可能不完整或已被修改。")
+        data = dict(transport_data)
+        data.setdefault("parameter_groups", [])
         products = data.get("products") or []
         if len(products) != 1:
             raise ValueError("离线发布包中的成品信息必须且只能有一条。")
