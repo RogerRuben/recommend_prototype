@@ -23,6 +23,7 @@ def main():
     assert "rejection_details" in source
     assert "retryGenerationBtn" in source
     assert "empty-preflight" in source
+    assert "empty-feasibility" in source
 
     # Empty completed tasks must not auto-switch to the generated empty view.
     assert 'if(task.result&&task.result.empty_result){showEmptyGeneration(task);return}' in source
@@ -31,6 +32,7 @@ def main():
     # The report has visible styles.
     assert "generation-empty-report" in css
     assert "empty-preflight" in css
+    assert "empty-feasibility" in css
 
     print(json.dumps({"status": "PASS", "message": "前端已消费空结果与失败诊断，空结果不再自动切空页"}, ensure_ascii=False))
 

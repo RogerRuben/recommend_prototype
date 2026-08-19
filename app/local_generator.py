@@ -29,6 +29,7 @@ import math
 import random
 import time
 
+from .anchor_feasibility import assess_explicit_filter_feasibility, validate_anchor_integrity
 from .constraint_projection import active_parameter_set, project_constraints
 from .coupling_pairs import build_coupling_pairs, exploration_pairs
 from .recommender import rank_agreements
@@ -534,6 +535,9 @@ class HistorySeededGenerator(object):
                             "reason": "用户筛选范围与工程范围没有交集",
                             "requested_min": requested_lo,
                             "requested_max": requested_hi,
+                            "resolution": "nearest_engineering_boundary",
+                            "resolved_value": value,
+                            "closest_feasible_value": value,
                         })
                 elif lower <= upper:
                     # Minimal-change projection: retain a satisfying seed value;
@@ -552,6 +556,9 @@ class HistorySeededGenerator(object):
                         "reason": "用户筛选范围与工程范围没有交集",
                         "requested_min": requested_lo,
                         "requested_max": requested_hi,
+                        "resolution": "nearest_engineering_boundary",
+                        "resolved_value": value,
+                        "closest_feasible_value": value,
                     })
             kind = self._search_type(definition)
             if kind == "boolean":
@@ -1642,6 +1649,9 @@ class HistorySeededGenerator(object):
         rng = random.Random(seed if seed is not None else int(time.time() * 1000) % 2147483647)
         deep_search = str(search_mode or "fast") == "deep_extrapolation"
         definitions = self._parameter_definitions()
+        explicit_feasibility = assess_explicit_filter_feasibility(
+            request.get("indicator_filters"), definitions, request.get("indicator_filter_mode", "all")
+        )
         target_protocol = request.get("target_protocol")
         try:
             history = self.store.historical_agreements(target_protocol=target_protocol)
@@ -1656,7 +1666,7 @@ class HistorySeededGenerator(object):
         tag_weights = dict((key, value.get("weight", 1.0)) for key, value in tag_map.items())
         all_records = []
         seen = set()
-        rejection = {"not_changed": 0, "duplicate": 0, "model_input": 0, "hard_conflict": 0, "demand_unmet": 0, "extrapolation": 0, "known_boundary_repaired": 0, "repeated_risk_signature": 0, "conditional_frozen_conflict": 0}
+        rejection = {"not_changed": 0, "duplicate": 0, "model_input": 0, "hard_conflict": 0, "demand_unmet": 0, "extrapolation": 0, "known_boundary_repaired": 0, "repeated_risk_signature": 0, "conditional_frozen_conflict": 0, "anchor_invariant": 0}
         rejection_details = []
         evaluations = 0
         attempted_evaluations = 0
@@ -1681,9 +1691,36 @@ class HistorySeededGenerator(object):
             branch_bounds.append(bounds)
             params = dict(base["params"])
             locked, anchor_conflicts = self._anchor_demands(params, bounds, definitions)
+            anchor_resolutions = []
+            for conflict in anchor_conflicts:
+                if conflict.get("resolution") == "nearest_engineering_boundary":
+                    anchor_resolutions.append({
+                        "parameter_id": conflict["parameter_id"],
+                        "requested": {
+                            "min": conflict.get("requested_min"),
+                            "max": conflict.get("requested_max"),
+                        },
+                        "resolved_value": conflict.get("resolved_value"),
+                        "resolution": "nearest_engineering_boundary",
+                        "strictly_satisfies_request": False,
+                    })
             locked_sources = self._apply_frozen(params, locked, request.get("frozen_parameters"))
+            for resolution in anchor_resolutions:
+                locked_sources[resolution["parameter_id"]] = "engineering_boundary_fallback"
             finalized = self._finalize_params(params, base, locked, definitions, soft_strength=0.18)
             params = finalized["params"]
+            anchor_violations = validate_anchor_integrity(
+                params, request.get("indicator_filters"), definitions, request.get("indicator_filter_mode", "all")
+            )
+            if anchor_violations:
+                rejection["anchor_invariant"] += 1
+                rejection_details.append({
+                    "stage": "anchor_integrity",
+                    "candidate_id": "SEED-%04d" % seed_index,
+                    "error_type": "AnchorInvariantError",
+                    "message": "；".join("%s %s actual=%s" % (v["parameter_id"], v["requested"], v["actual"]) for v in anchor_violations),
+                })
+                continue
             signature = tuple((key, params[key]) for key in sorted(params))
             if signature in seen:
                 continue
@@ -1695,6 +1732,7 @@ class HistorySeededGenerator(object):
                 "locked": locked,
                 "locked_sources": locked_sources,
                 "anchor_conflicts": anchor_conflicts,
+                "anchor_resolutions": anchor_resolutions,
                 "repairs": finalized["repairs"],
                 "soft_moves": finalized["soft_moves"],
                 "constraint_conflicts": finalized["constraint_conflicts"],
@@ -1731,6 +1769,7 @@ class HistorySeededGenerator(object):
                     "generation_method": "preflight", "search_iterations": 0,
                     "search_mode": "deep_extrapolation" if deep_search else "fast",
                     "empty_result": True, "preflight": preflight,
+                    "explicit_filter_feasibility": explicit_feasibility,
                 }
 
         initial_evaluations = None
@@ -1775,6 +1814,7 @@ class HistorySeededGenerator(object):
             record["_request"] = item["request"]
             record["generation_trace"]["tag_branch"] = item["branch_info"]
             record["generation_trace"]["locked_sources"] = item["locked_sources"]
+            record["generation_trace"]["anchor_resolutions"] = item.get("anchor_resolutions") or []
             all_records.append(record)
             beam.append(record)
         beam_width = 14 if deep_search else 10
@@ -1826,6 +1866,12 @@ class HistorySeededGenerator(object):
                 for proposal_index, (params, move_label) in enumerate(proposals):
                     finalized = self._finalize_params(params, base, locked, definitions, soft_strength=0.32, repair_reference=center_record["params"])
                     params = finalized["params"]
+                    anchor_violations = validate_anchor_integrity(
+                        params, request.get("indicator_filters"), definitions, request.get("indicator_filter_mode", "all")
+                    )
+                    if anchor_violations:
+                        rejection["anchor_invariant"] += 1
+                        continue
                     changed = self._changed_parameters(params, base["params"], definitions)
                     if len(changed) < 1:
                         rejection["not_changed"] += 1
@@ -1861,6 +1907,12 @@ class HistorySeededGenerator(object):
                         repair_reference=center_record["params"],
                     )
                     params = finalized["params"]
+                    anchor_violations = validate_anchor_integrity(
+                        params, request.get("indicator_filters"), definitions, request.get("indicator_filter_mode", "all")
+                    )
+                    if anchor_violations:
+                        rejection["anchor_invariant"] += 1
+                        continue
                     if finalized["constraint_conflicts"]:
                         rejection["conditional_frozen_conflict"] = rejection.get("conditional_frozen_conflict", 0) + 1
                         continue
@@ -2148,4 +2200,5 @@ class HistorySeededGenerator(object):
             ),
             "search_iterations": iteration,
             "search_mode": "deep_extrapolation" if deep_search else "fast",
+            "explicit_filter_feasibility": explicit_feasibility,
         }
