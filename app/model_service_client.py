@@ -645,6 +645,30 @@ class ServiceBackedRuntime(object):
             seen.add(item["key"])
         return result
 
+    def model_feature_specs(self):
+        """Return per-model contracts without deduplicating shared keys.
+
+        Conditional-relationship compatibility needs both the effectiveness and
+        price contract for a shared target, because their allowed ranges may
+        differ in the HTTP service mode.
+        """
+        roles = self.feature_roles()
+        shared = set(roles["shared_features"])
+        result = []
+        for source in self._effect_features:
+            item = dict(source)
+            item["model_kind"] = "effectiveness"
+            item["model_role"] = "shared" if item["key"] in shared else "effectiveness_only"
+            result.append(item)
+        for source in self._price_features:
+            if source.get("source", "product_parameter") != "product_parameter":
+                continue
+            item = dict(source)
+            item["model_kind"] = "price"
+            item["model_role"] = "shared" if item["key"] in shared else "price_only"
+            result.append(item)
+        return result
+
     def evaluate(self, params, target_protocol=None):
         target_protocol = self._supported_target_protocol(target_protocol)
         try:
