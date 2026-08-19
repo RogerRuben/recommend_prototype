@@ -1028,7 +1028,7 @@ class HistorySeededGenerator(object):
             unmet.append("%s（当前 %s）" % (label, actual) if actual is not None else label)
         if indicator_logic and not indicator_logic.get("satisfied") and failed_rule_labels:
             mode = indicator_logic.get("mode") or "all"
-            unmet.append("技术指标条件（%s）%s" % ("任一满足" if mode == "any" else "全部满足", "；".join(failed_rule_labels) or "存在未满足项"))
+            unmet.append("技术指标条件（%s）%s" % ("任一满足即可" if mode == "any" else "需全部满足", "；".join(failed_rule_labels) or "存在未满足项"))
         return unmet, assessment["demand_penalty"], assessment
 
     @staticmethod
