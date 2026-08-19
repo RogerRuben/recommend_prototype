@@ -1074,6 +1074,13 @@ class Store(object):
                 payload.get("active_min", 0),
                 payload.get("active_max", 1),
             )
+        from .conditional_compatibility import validate_conditional_relationship
+        model_specs = self.runtime.all_feature_specs() if hasattr(self.runtime, "all_feature_specs") else []
+        compatibility = validate_conditional_relationship(compiled["template_metadata"], self.parameter_map(), model_specs)
+        if not compatibility["compatible"]:
+            manifest = self.runtime.manifest()
+            if manifest.get("calculation_available") is not False:
+                raise ValueError("；".join(compatibility["errors"]))
         group = compiled["constraint_group"]
         original_group = str(payload.get("original_constraint_group") or "").strip() or None
         severity = payload.get("severity") or "warning"
@@ -1154,7 +1161,10 @@ class Store(object):
             couplings = [dict(row) for row in conn.execute("SELECT * FROM indicator_couplings WHERE enabled=1 ORDER BY display_order")]
         finally: conn.close()
         messages = []
+        from .conditional_constraint import TEMPLATE_KIND_V2, parse_template_metadata
         for rule in constraints:
+            if parse_template_metadata(rule).get("template") == TEMPLATE_KIND_V2:
+                continue
             left_key, right_key = rule["left_parameter"], rule.get("right_parameter")
             if left_key not in params or (right_key and right_key not in params): continue
             left = float(params[left_key]); right = float(rule.get("offset") or 0)
