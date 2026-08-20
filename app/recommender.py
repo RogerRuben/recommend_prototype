@@ -36,6 +36,8 @@ def filter_match(params, rule, definition=None):
     if operator == "boolean_is":
         # A mapped third state (无该属性 -> -1) must match the stored inactive
         # value; compare through the mapping before the two-value boolean truth.
+        if values_equal(actual, value1, definition):
+            return True
         target = mapping_target(value1, definition)
         if target is not None:
             a = normalize_numeric(actual)

@@ -169,7 +169,6 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
             operator = rule.get("operator")
             value1 = rule.get("value1")
             value2 = rule.get("value2")
-            expected = "%s～%s" % (value1, value2) if str(operator).startswith("range_") else str(value1)
             if ok:
                 matched += 1
                 indicator_matched += 1
@@ -178,8 +177,8 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
                 indicator_unmatched += 1
             condition = {
                 "kind": "parameter", "key": key, "parameter_id": key,
-                "label": "%s %s %s" % (label, _operator_text(operator), expected),
-                "operator": operator, "actual": params.get(key),
+                "label": label, "operator": operator,
+                "target": value1, "target2": value2, "actual": params.get(key),
                 "matched": bool(ok), "status": "matched" if ok else "unmatched",
                 "gap": round(gap, 6), "group": mode, "group_matched": group_matched,
             }

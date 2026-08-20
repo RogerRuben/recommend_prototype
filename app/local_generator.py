@@ -34,7 +34,7 @@ from .constraint_projection import active_parameter_set, project_constraints
 from .coupling_pairs import build_coupling_pairs, exploration_pairs
 from .recommender import rank_agreements
 from .requirement_assessment import assess_requirements
-from .value_semantics import canonical_filter_value, canonicalize_parameter_value, mapping_target, nice_engineering_step, normalize_boolean, normalize_numeric, values_equal
+from .value_semantics import canonical_filter_value, canonicalize_parameter_value, nice_engineering_step, normalize_boolean, normalize_numeric, values_equal
 
 
 def _float(value, default=None):
@@ -155,30 +155,41 @@ def _mat_vec(lower, vector):
 
 
 def merge_bounds(base, extra):
-    """Merge direct demand bounds while retaining contradiction metadata."""
-    result = {}
-    for source in (base or {}, extra or {}):
-        for key, value in source.items():
-            current = result.setdefault(key, {})
-            if value.get("min") is not None:
-                current["min"] = max(float(value["min"]), float(current.get("min", value["min"])))
-            if value.get("max") is not None:
-                current["max"] = min(float(value["max"]), float(current.get("max", value["max"])))
-            if value.get("allowed") is not None:
-                values = list(value["allowed"])
-                current["allowed"] = values if "allowed" not in current else [x for x in current["allowed"] if x in values]
-    for item in result.values():
-        lower = item.get("min", -1e99)
-        upper = item.get("max", 1e99)
-        if lower > upper:
-            item["conflict"] = True
-            item["requested_min"] = lower
-            item["requested_max"] = upper
-            compromise = (float(lower) + float(upper)) / 2.0
-            item["min"] = compromise
-            item["max"] = compromise
-        if "allowed" in item and not item["allowed"]:
-            item["conflict"] = True
+    """Merge tag suggestions with authoritative direct-user anchors.
+
+    ``base`` contains tag-derived suggestions and ``extra`` contains explicit
+    user filters. A conflict never invents a midpoint: the direct constraint
+    survives unchanged and the tag conflict is retained as diagnostics.
+    """
+    result = dict((key, dict(value)) for key, value in (base or {}).items())
+    for key, direct in (extra or {}).items():
+        direct = dict(direct)
+        lower = direct.get("min", -1e99)
+        upper = direct.get("max", 1e99)
+        if lower > upper or ("allowed" in direct and not direct["allowed"]):
+            direct.update({"conflict": True, "conflict_reason": "explicit_filters_mutually_inconsistent",
+                           "requested_min": lower, "requested_max": upper})
+            result[key] = direct
+            continue
+        tag = result.get(key)
+        if not tag:
+            result[key] = direct
+            continue
+        merged = dict(tag)
+        if direct.get("min") is not None:
+            merged["min"] = max(float(direct["min"]), float(merged.get("min", direct["min"])))
+        if direct.get("max") is not None:
+            merged["max"] = min(float(direct["max"]), float(merged.get("max", direct["max"])))
+        if direct.get("allowed") is not None:
+            values = list(direct["allowed"])
+            merged["allowed"] = values if "allowed" not in merged else [x for x in merged["allowed"] if x in values]
+        merged_conflict = merged.get("min", -1e99) > merged.get("max", 1e99) or ("allowed" in merged and not merged["allowed"])
+        if merged_conflict:
+            direct.update({"conflict": True, "conflict_reason": "tag_direct_conflict",
+                           "tag_suggestion": dict(tag), "direct_user_wins": True})
+            result[key] = direct
+        else:
+            result[key] = merged
     return result
 
 
@@ -222,11 +233,7 @@ def filters_to_anchors(filters, definitions=None, mode="all"):
             if isinstance(canonical, bool):
                 item["min"] = item["max"] = 1.0 if canonical else 0.0
             else:
-                mapped = mapping_target(rule.get("value1"), definition)
-                if mapped is not None:
-                    item["allowed"] = [mapped]
-                else:
-                    item["allowed"] = [rule.get("value1")]
+                item["allowed"] = [rule.get("value1")]
         elif op == "text_equals":
             item["allowed"] = [rule.get("value1")]
         elif op == "range_inside" and v1 is not None and v2 is not None:

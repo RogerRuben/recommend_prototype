@@ -59,12 +59,12 @@ def main():
     )
     assert bounds.get("attr_003", {}).get("allowed") == ["不锈钢"], bounds
 
-    # Boolean third state survives as an allowed model value, not collapsed to 0/1.
+    # Boolean third state remains a canonical business value until model runtime.
     bounds3 = filters_to_anchors(
         [{"parameter_id": "attr_001", "operator": "boolean_is", "value1": "无该属性"}],
         PARAMETER_DEFINITIONS, "all",
     )
-    assert bounds3.get("attr_001", {}).get("allowed") == [-1.0], bounds3
+    assert bounds3.get("attr_001", {}).get("allowed") == ["无该属性"], bounds3
 
     gen = HistorySeededGenerator(_MockStore(), _MockRuntime(), None, None)
     params = {"attr_003": "钛合金", "attr_001": 0.0}
@@ -73,7 +73,7 @@ def main():
     assert not conflicts, conflicts
 
     locked3, conflicts3 = gen._anchor_demands({"attr_001": 1.0}, bounds3, PARAMETER_DEFINITIONS)
-    assert locked3["attr_001"] == -1.0, locked3
+    assert locked3["attr_001"] == "无该属性", locked3
     assert not conflicts3, conflicts3
 
     # Tag branch must reuse the same compiler: a passive tag's enum rule anchors too.
