@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Final micro patch: business errors block offline, model specs check both contracts."""
+"""Malformed explicit rules block; stale model ranges only diagnose both contracts."""
 from __future__ import print_function
 
 import json
@@ -100,12 +100,13 @@ def main():
         OnlineRuntime().model_feature_specs(),
     )
     assert compat["business_errors"] == [], compat["business_errors"]
-    assert compat["model_errors"], compat["model_errors"]
+    assert compat["model_errors"] == [], compat["model_errors"]
+    assert compat["warnings"], compat["warnings"]
     assert "effectiveness" in compat["model_compatibility"], compat["model_compatibility"]
     assert "price" in compat["model_compatibility"], compat["model_compatibility"]
     assert compat["model_compatibility"]["price"]["compatible"] is False, compat["model_compatibility"]
 
-    # Online Store save with model conflict must be rejected.
+    # Online Store save with a range mismatch is allowed and returns diagnostics.
     db_path2 = ROOT / "data" / "_final_conditional_micro_patch_online_test.db"
     for candidate in (db_path2, Path(str(db_path2) + "-wal"), Path(str(db_path2) + "-shm")):
         if candidate.exists():
@@ -123,17 +124,15 @@ def main():
             "parameter_groups": [], "tags": [], "tag_rules": [], "couplings": [],
             "constraints": [], "agreements": [],
         }, evaluate_agreements=False, sync_model_contract=False)
-        try:
-            store2.upsert_conditional_template(_v2_metadata("attr_001", "attr_004", -1, 0, 30))
-            raise AssertionError("online model conflict should block save")
-        except ValueError:
-            pass
+        saved = store2.upsert_conditional_template(_v2_metadata("attr_001", "attr_004", -1, 0, 30))
+        assert saved["saved"] is True
+        assert saved["compatibility"]["model_compatibility"]["price"]["compatible"] is False
     finally:
         for candidate in (db_path2, Path(str(db_path2) + "-wal"), Path(str(db_path2) + "-shm")):
             if candidate.exists():
                 candidate.unlink()
 
-    print(json.dumps({"status": "PASS", "message": "离线非法业务规则阻止保存，共享字段同时校验价格/效能模型契约"}, ensure_ascii=False))
+    print(json.dumps({"status": "PASS", "message": "非法显式规则阻止保存，双模型范围差异仅诊断"}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

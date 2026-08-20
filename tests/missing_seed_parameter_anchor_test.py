@@ -42,15 +42,15 @@ def main():
     assert params["attr_006"] == 2.2, params
     assert not conflicts, conflicts
 
-    # Missing enum field requested by the user is created as the canonical mapped value.
+    # Missing enum field is created as the canonical business value.
     enum_bounds = filters_to_anchors(
         [{"parameter_id": "attr_003", "operator": "text_equals", "value1": "不锈钢"}],
         PARAMETER_DEFINITIONS, "all",
     )
     params2 = {}
     locked2, conflicts2 = gen._anchor_demands(params2, enum_bounds, PARAMETER_DEFINITIONS)
-    assert locked2["attr_003"] == 1.0, locked2
-    assert params2["attr_003"] == 1.0, params2
+    assert locked2["attr_003"] == "不锈钢", locked2
+    assert params2["attr_003"] == "不锈钢", params2
     assert not conflicts2, conflicts2
 
     print(json.dumps({"status": "PASS", "message": "缺失Seed字段由用户明确条件自动创建并 canonicalize"}, ensure_ascii=False))

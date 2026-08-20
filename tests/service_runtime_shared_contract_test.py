@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""ServiceBackedRuntime must expose per-model specs and block shared-target model conflicts."""
+"""ServiceBackedRuntime exposes both model ranges without using them as save gates."""
 from __future__ import print_function
 
 import json
@@ -65,7 +65,7 @@ def main():
             "constraints": [], "agreements": [],
         }, evaluate_agreements=False, sync_model_contract=False)
 
-        # -1 is allowed by effectiveness but rejected by price -> must block online save.
+        # -1 is outside the price Schema range, but Schema metadata is advisory.
         bad = {
             "template": "conditional_applicability_v2",
             "controller": "attr_001",
@@ -74,11 +74,9 @@ def main():
             "then": {"mode": "not_applicable", "business_value": "无该属性", "model_value": -1},
             "otherwise": {"mode": "range", "min": 0, "max": 30},
         }
-        try:
-            store.upsert_conditional_template(bad)
-            raise AssertionError("online save with price-incompatible model value must be rejected")
-        except ValueError:
-            pass
+        result_bad = store.upsert_conditional_template(bad)
+        assert result_bad["saved"] is True
+        assert result_bad["compatibility"]["model_compatibility"]["price"]["compatible"] is False
 
         # 0 is compatible with both -> save succeeds.
         good = dict(bad)
@@ -91,7 +89,7 @@ def main():
             if candidate.exists():
                 candidate.unlink()
 
-    print(json.dumps({"status": "PASS", "message": "ServiceBackedRuntime 双契约生效，价格模型不接受的共享字段值被拒绝保存"}, ensure_ascii=False))
+    print(json.dumps({"status": "PASS", "message": "ServiceBackedRuntime 双契约仅用于来源化范围诊断"}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

@@ -39,8 +39,8 @@ PARAMETER_DEFINITIONS = {
 }
 
 SEEDS = [
-    {"agreement_id": "D-01", "params": {"attr_001": 1.0, "attr_003": 2.0, "attr_006": 4.2, "attr_other": 5.0}, "tags": []},
-    {"agreement_id": "D-02", "params": {"attr_001": 0.0, "attr_003": 0.0, "attr_006": 5.1, "attr_other": 3.0}, "tags": []},
+    {"agreement_id": "D-01", "params": {"attr_001": 1.0, "attr_003": "钛合金", "attr_006": 4.2, "attr_other": 5.0}, "tags": []},
+    {"agreement_id": "D-02", "params": {"attr_001": 0.0, "attr_003": "高强铝合金", "attr_006": 5.1, "attr_other": 3.0}, "tags": []},
 ]
 
 
@@ -100,7 +100,7 @@ class _MockStore(object):
         return []
 
     def derive_tags(self, params, evaluation=None, inherited_tags=None):
-        return ["passive"] if float(params.get("attr_003", -1)) == 1.0 else []
+        return ["passive"] if params.get("attr_003") == "不锈钢" else []
 
     def tag_evidence(self, params, evaluation=None, inherited_tags=None):
         return {}
@@ -129,7 +129,7 @@ def main():
 
     # 1. The generator anchor compiler understands the door-lock enum/boolean.
     direct_bounds = filters_to_anchors(request["indicator_filters"], PARAMETER_DEFINITIONS, "all")
-    assert direct_bounds["attr_003"]["allowed"] == [1.0], direct_bounds
+    assert direct_bounds["attr_003"]["allowed"] == ["不锈钢"], direct_bounds
     assert direct_bounds["attr_001"]["min"] == 0.0 and direct_bounds["attr_001"]["max"] == 0.0, direct_bounds
     assert direct_bounds["attr_006"]["max"] == 2.2, direct_bounds
 
@@ -137,7 +137,7 @@ def main():
 
     # 2. Tag branch must use the same compiler.
     branch_bounds, _branch_request, _info = gen._tag_branch_for_seed(request, 0)
-    assert branch_bounds["attr_003"]["allowed"] == [1.0], branch_bounds
+    assert branch_bounds["attr_003"]["allowed"] == ["不锈钢"], branch_bounds
 
     # 3. The extreme request must not silently come back empty without diagnostics.
     result = gen.generate(request, count=4, seed=7, budget=300, search_mode="fast")
@@ -145,7 +145,7 @@ def main():
         assert result.get("rejection_details") or result.get("stopping_reason"), "empty result must explain itself"
     else:
         for candidate in result["candidates"]:
-            assert candidate["params"]["attr_003"] == 1.0, candidate["params"]
+            assert candidate["params"]["attr_003"] == "不锈钢", candidate["params"]
             assert candidate["params"]["attr_001"] == 0.0, candidate["params"]
             assert candidate["params"]["attr_006"] <= 2.2 + 1e-9, candidate["params"]
         assert result.get("candidates"), "expected at least best-effort candidates"

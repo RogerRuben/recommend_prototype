@@ -31,8 +31,8 @@ def validate_conditional_relationship(metadata, definitions=None, model_specs=No
             if model_value is not None and target_min is not None and target_max is not None:
                 number = normalize_numeric(model_value)
                 if number is not None and (number < float(target_min) or number > float(target_max)):
-                    business_errors.append(
-                        "从属指标「%s」的%s模型值 %s 不在业务允许范围 %s~%s 内。"
+                    warnings.append(
+                        "从属指标「%s」的%s模型值 %s 位于DataMaster参考范围 %s~%s 外；仍允许保存。"
                         % (target, branch_name, model_value, target_min, target_max)
                     )
         elif mode == "range":
@@ -73,9 +73,9 @@ def validate_conditional_relationship(metadata, definitions=None, model_specs=No
             "compatible": not spec_errors,
             "errors": spec_errors,
         }
-        model_errors.extend(spec_errors)
+        warnings.extend("模型Schema参考范围提示：%s" % error for error in spec_errors)
 
-    errors = business_errors + model_errors
+    errors = list(business_errors)
     return {
         "compatible": not errors,
         "errors": errors,

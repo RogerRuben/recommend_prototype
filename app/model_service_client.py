@@ -21,7 +21,7 @@ class ModelServiceUnavailable(RuntimeError):
 
 
 def _json_request(url, payload=None, timeout=15.0):
-    data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    data = None if payload is None else json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
     request = Request(url, data=data, headers={"Content-Type": "application/json", "Accept": "application/json"})
     try:
         host = (urlparse(url).hostname or "").lower()
@@ -403,6 +403,15 @@ class ModelServiceGateway(object):
         feasibility = float(evaluation.get("feasibility_probability"))
         experience = list(effect.get("experience_extrapolations") or [])
         hard = list(effect.get("hard_violations") or [])
+        hard_details = []
+        for violation in hard:
+            if isinstance(violation, dict):
+                detail = dict(violation)
+            else:
+                detail = {"message": str(violation)}
+            detail["parameter_id"] = detail.get("parameter_id") or detail.get("attribute") or detail.get("attribute_key")
+            detail.setdefault("source", "effectiveness_service")
+            hard_details.append(detail)
         physical_gate = dict(effect.get("physical_gate") or {})
         if not physical_gate:
             physical_gate = {
@@ -472,6 +481,8 @@ class ModelServiceGateway(object):
             "price_imputed_features": price_imputed_features,
             "risk_contributors": effect.get("risk_contributors") or [],
             "hard_risk_reasons": [x.get("message", str(x)) if isinstance(x, dict) else str(x) for x in hard],
+            "hard_violation_details": hard_details,
+            "hard_violations": hard_details,
             "learned_boundary_violations": effect.get("learned_boundary_violations") or [],
             "coupling_assessments": coupling,
             "capability_contributors": contributors,
@@ -548,8 +559,8 @@ def _remote_field(field):
         "parser": parser,
         "min": lower,
         "max": upper,
-        "training_min": field.get("training_min", lower),
-        "training_max": field.get("training_max", upper),
+        "training_min": field.get("training_min"),
+        "training_max": field.get("training_max"),
         "training_mean": field.get("training_mean"),
         "default_value": field.get("default_value"),
         "required": bool(field.get("required", True)),

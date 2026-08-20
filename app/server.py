@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 import mimetypes
 import os
 import shutil
@@ -28,6 +29,7 @@ from .product_releases import ProductReleaseService
 from .local_generator import HistorySeededGenerator
 from .generation_tasks import GenerationTaskManager
 from .configuration import load_model_service_config
+from .range_diagnostics import build_range_diagnostics
 
 
 class GeneratedSessions(object):
@@ -768,6 +770,17 @@ class Application(object):
 
     def _evaluate_with_rules(self, params, base_params=None, target_protocol=None):
         business_params = dict(params or {})
+        definitions = self.store.parameter_map()
+        for key, value in business_params.items():
+            value_type = str((definitions.get(key) or {}).get("value_type") or "").lower()
+            if value_type not in ("number", "ip_grade", "boolean") or value in (None, ""):
+                continue
+            try:
+                number = float(str(value).upper().replace("IP", ""))
+            except (TypeError, ValueError):
+                raise ModelInputError("%s（%s）不是合法数值" % ((definitions.get(key) or {}).get("label") or key, key))
+            if not math.isfinite(number):
+                raise ModelInputError("%s（%s）不能是NaN或Infinity" % ((definitions.get(key) or {}).get("label") or key, key))
         prepared = self.store.runtime_parameters(business_params)
         evaluation = (
             self.runtime.evaluate(prepared, target_protocol=target_protocol)
@@ -805,10 +818,69 @@ class Application(object):
         return self._decorate_evaluation(evaluation, base_params=params)
 
     def _decorate_evaluation(self, evaluation, base_params=None):
+        hard_details = list(evaluation.get("hard_violation_details") or evaluation.get("hard_violations") or [])
+        advisory_range_violations = []
+        explicit_hard_details = []
+        for violation in hard_details:
+            code = str(violation.get("code") or "") if isinstance(violation, dict) else ""
+            if code.startswith("range_low_") or code.startswith("range_high_"):
+                advisory_range_violations.append(violation)
+            else:
+                explicit_hard_details.append(violation)
+        if advisory_range_violations:
+            evaluation["advisory_range_violations"] = advisory_range_violations
+            evaluation["hard_violation_details"] = explicit_hard_details
+            evaluation["hard_violations"] = explicit_hard_details
+            evaluation["hard_risk_reasons"] = [
+                item.get("message", str(item)) if isinstance(item, dict) else str(item)
+                for item in explicit_hard_details
+            ]
+            gate_update = dict(evaluation.get("physical_gate") or {})
+            if gate_update.get("decision") == "reject_hard_violation" and not explicit_hard_details:
+                if gate_update.get("mature_boundary_violations"):
+                    gate_update["decision"] = "reject_mature_expert_boundary"
+                elif gate_update.get("severe_coupling_mismatches"):
+                    gate_update["decision"] = "reject_severe_coupling"
+                elif float(gate_update.get("probability") or 0) < float(gate_update.get("probability_threshold") or 0.65):
+                    gate_update["decision"] = "reject_low_feasibility_probability"
+                else:
+                    gate_update["decision"] = "pass"
+                    gate_update["passed"] = True
+                evaluation["physical_gate"] = gate_update
+        definitions = self.store.parameter_map()
+        feature_specs = []
+        if hasattr(self.runtime, "model_feature_specs"):
+            feature_specs = self.runtime.model_feature_specs()
+        elif hasattr(self.runtime, "all_feature_specs"):
+            for spec in self.runtime.all_feature_specs():
+                item = dict(spec)
+                role = item.get("model_role")
+                item["model_kind"] = "price" if role == "price_only" else "effectiveness"
+                feature_specs.append(item)
+        evaluation["range_diagnostics"] = build_range_diagnostics(
+            evaluation.get("parameters") or {}, definitions, feature_specs,
+            evaluation.get("model_parameters") or evaluation.get("parameters") or {},
+        )
         rule_messages = self.store.assess_rules(evaluation["parameters"], base_params)
         messages = list(rule_messages)
-        for reason in evaluation.get("hard_risk_reasons", []):
-            messages.append({"source":"model", "severity":"error", "title":"模型硬风险", "message":reason, "detail":"该参数组合违反效能模型中的工程可行性规则。", "suggestion":"根据右侧耦合可行区间调整相关指标。", "parameters":[]})
+        for violation in evaluation.get("hard_violation_details") or []:
+            key = violation.get("parameter_id") or violation.get("attribute_key")
+            definition = definitions.get(key) or {}
+            label = definition.get("label") or violation.get("label") or key or "未指明指标"
+            actual = violation.get("actual")
+            bounds = ""
+            if violation.get("lower") is not None or violation.get("upper") is not None:
+                bounds = "；明确规则范围 %s～%s%s" % (violation.get("lower"), violation.get("upper"), (" " + (definition.get("unit") or "")) if definition.get("unit") else "")
+            messages.append({
+                "source": violation.get("source") or "effectiveness_service",
+                "severity": "error", "title": "模型服务返回的明确风险",
+                "message": "%s（%s）当前值：%s%s" % (label, key or "unknown", actual, bounds),
+                "detail": violation.get("message") or "模型服务返回了结构化硬约束违反。",
+                "suggestion": "核对明确工程规则或当前模型运行版本。", "parameters": [key] if key else [],
+            })
+        if not evaluation.get("hard_violation_details"):
+            for reason in evaluation.get("hard_risk_reasons", []):
+                messages.append({"source":"model", "severity":"error", "title":"模型硬风险", "message":reason, "detail":"模型服务返回硬风险，但未提供具体指标结构。", "suggestion":"检查模型服务版本并补充parameter_id。", "parameters":[]})
         gate = evaluation.get("physical_gate") or {}
         if gate.get("passed") is False and not evaluation.get("hard_risk_reasons"):
             labels = {

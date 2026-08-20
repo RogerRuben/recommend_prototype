@@ -33,7 +33,10 @@ class GenerationTaskManager(object):
         relevant["generation_budget"] = request.get("generation_budget")
         relevant["generation_rounds"] = request.get("generation_rounds")
         relevant["product_code"] = self.app.runtime.schema["product_code"]
-        relevant["master_data_version"] = self.app.store.master_data_version()
+        semantic_fingerprint = getattr(self.app.store, "generation_semantics_fingerprint", None)
+        relevant["master_data_semantics"] = (
+            semantic_fingerprint() if semantic_fingerprint else self.app.store.master_data_version()
+        )
         relevant["models"] = self.app.runtime.manifest().get("model_versions") or {
             "effectiveness": self.app.runtime.manifest()["effectiveness"]["model_version"],
             "price": self.app.runtime.manifest()["price"]["model_version"],

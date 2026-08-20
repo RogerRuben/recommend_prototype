@@ -59,7 +59,7 @@ def main():
     }
     (runtime / "running.json").write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
     print("=" * 72)
-    print("Industrial Protocol Demo V19.6.13 - Clean HTTP Model Pipeline")
+    print("Industrial Protocol Demo V20 - Business Value / Range Diagnostics / Display Mapping")
     print("Listen: %s" % info["listen"])
     print("Local URL: %s" % info["url"])
     print("Model mode: %s" % info["mode"])

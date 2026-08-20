@@ -12,7 +12,7 @@ from .xlsx_utils import read_workbook_bytes, write_workbook_bytes
 
 SHEETS = OrderedDict([
     ("成品信息", ["成品代号", "成品名称", "成品说明", "是否启用"]),
-    ("指标定义", ["指标编号", "指标名称", "指标分组", "单位", "取值类型", "搜索类型", "工程下限", "工程上限", "效能方向", "指标说明", "调整提示", "允许值", "是否必填", "允许自动调整", "显示小数位", "显示顺序", "是否启用", "模型取值映射(JSON)"]),
+    ("指标定义", ["指标编号", "指标名称", "指标分组", "单位", "取值类型", "搜索类型", "工程下限", "工程上限", "效能方向", "指标说明", "调整提示", "允许值", "是否必填", "允许自动调整", "显示小数位", "显示顺序", "是否启用", "模型取值映射(JSON)", "前端显示映射(JSON)"]),
     ("指标分组", ["分组名称", "显示顺序", "说明", "是否启用", "默认折叠"]),
     ("标签字典", ["标签编号", "标签名称", "标签分组", "匹配权重", "生成判定方式", "标签说明", "是否启用"]),
     ("标签规则", ["规则编号", "标签编号", "指标编号", "比较关系", "条件值1", "条件值2", "规则组", "是否启用"]),
@@ -27,7 +27,7 @@ OPTIONAL_SHEETS = {"指标分组"}
 
 
 def clean(value):
-    return str(value or "").strip()
+    return "" if value is None else str(value).strip()
 
 
 def num(value, allow_none=True):
@@ -328,6 +328,25 @@ def validate_business_data(data):
                     errors.append("指标%s的模型值映射必须是JSON对象。" % pid)
             except Exception:
                 errors.append("指标%s的模型值映射必须是JSON对象。" % pid)
+        raw_display_mapping = item.get("display_value_mapping_json")
+        if raw_display_mapping not in (None, ""):
+            try:
+                display_mapping = json.loads(raw_display_mapping) if isinstance(raw_display_mapping, str) else raw_display_mapping
+                if not isinstance(display_mapping, dict):
+                    errors.append("指标%s的前端显示映射必须是JSON对象。" % pid)
+                else:
+                    labels = [clean(value) for value in display_mapping.values()]
+                    if any(not value for value in labels):
+                        errors.append("指标%s的前端显示文本不能为空。" % pid)
+                    if len(labels) != len(set(labels)):
+                        errors.append("指标%s的前端显示文本不能重复。" % pid)
+                    allowed = {clean(value) for value in _json_allowed(item.get("allowed_values_json"))}
+                    if allowed:
+                        invalid = [clean(key) for key in display_mapping if clean(key) not in allowed]
+                        if invalid:
+                            errors.append("指标%s的前端显示映射包含非业务允许值：%s。" % (pid, "、".join(invalid)))
+            except Exception:
+                errors.append("指标%s的前端显示映射必须是JSON对象。" % pid)
 
     # Parameter-group existence is a business reference check.
     group_names = set(clean(g.get("group_name")) for g in (data.get("parameter_groups") or []) if clean(g.get("group_name")))
@@ -403,12 +422,13 @@ class DataMasterService(object):
             ["指标定义", "取值类型", "描述协议中这个字段保存的值是什么类型。", "数值、布尔、IP等级、枚举、文本", "自诊断→布尔", "把布尔取值“有/无”填进取值类型"],
             ["指标定义", "搜索类型", "描述智能生成时如何改变该属性。", "自动识别、连续数值、整数数值、有序离散、无序枚举、布尔开关", "防护等级→整数数值；材料→无序枚举", "把质量设置成枚举，或把材料设置成连续数值"],
             ["指标定义", "允许值", "仅离散/枚举字段填写，用顿号分隔合法取值；连续和布尔通常留空。", "值1、值2、值3", "材料：铝合金、钛合金、不锈钢", "布尔字段填写“布尔”；正确取值应在历史协议中填有/无"],
-            ["指标定义", "工程下限/上限", "连续、整数和IP等级的工程取值范围。", "数字；下限≤上限", "IP等级：54～68", "把历史最小值误当成绝对工程下限"],
+            ["指标定义", "工程下限/上限", "业务工程参考范围；用于默认搜索区间和风险提示，不会阻止、截断或改写用户显式输入。", "数字；下限≤上限", "IP等级：54～68", "把参考范围误当成绝对硬约束；真正硬规则应配置约束规则"],
+            ["指标定义", "前端显示映射(JSON)", "仅把canonical业务值显示为操作员文本，不参与存储、筛选、生成或模型编码。", "JSON对象", "{\"0\":\"无\",\"1\":\"有\"}", "复用模型取值映射做界面显示"],
             ["指标定义", "效能方向", "仅表达效能偏好，不代表硬约束。", "越大越好、越小越好、中性", "响应时间→越小越好", "用方向代替约束规则"],
             ["指标定义", "是否必填", "模型或协议计算缺少该值时是否允许继续。", "是、否", "额定载荷→是", "把模型必填字段设为否"],
             ["指标定义", "允许自动调整", "智能生成器是否可以改变这个值。", "是、否", "材料牌号由专家指定→否", "把不可修改的法规字段设为是"],
             ["历史协议", "布尔属性取值", "请填中文业务值。系统导入后自动转换为1/0。", "有、无", "自诊断=有", "填写“布尔”或“boolean”"],
-            ["历史协议", "IP等级取值", "可以填写IP前缀或数字，必须位于工程范围。", "IP54 或 54", "IP64", "只允许填写历史出现过的等级"],
+            ["历史协议", "IP等级取值", "可以填写IP前缀或数字；超出DataMaster参考范围仍可保存并在计算时提示。", "IP54 或 54", "IP64", "只允许填写历史出现过的等级"],
             ["标签字典", "生成判定方式", "规则判定表示由标签规则计算；继承表示从参考方案继承；人工维护表示需要专家确认。", "规则判定、从种子继承、人工维护", "高推力→规则判定", "没有规则却选择规则判定"],
             ["标签规则", "同组/多组逻辑", "同一规则组内为AND，不同规则组之间为OR。", "规则组可填default、A、B等", "A组：推力≥12000且质量≤10", "把每条规则都填成不同组，导致全部变成OR"],
             ["标签规则", "条件值", "数值填数字；布尔填有/无；范围条件分别填值1和值2。", "取决于指标类型", "自诊断 为 有", "布尔填1/0，造成维护人员难以理解"],
@@ -534,7 +554,7 @@ class DataMasterService(object):
         rows.append(("成品信息", [SHEETS["成品信息"], [product.get("product_code"), product.get("product_name"), product.get("product_description"), display_bool(product.get("enabled", 1))]]))
         params = []
         for p in snap["parameters"]:
-            params.append([p.get("parameter_id"), p.get("label"), p.get("parameter_group", "其他"), p.get("unit"), display_value_type(p.get("value_type")), display_search_type(p.get("search_type", "auto")), p.get("min_value"), p.get("max_value"), display_preference(p.get("preference")), p.get("description"), p.get("adjustment_hint"), "、".join(str(x) for x in _json_allowed(p.get("allowed_values_json"))), display_bool(p.get("required", 1)), display_bool(p.get("auto_adjustable", 1)), p.get("decimal_places", 3), p.get("display_order"), display_bool(p.get("enabled", 1)), p.get("model_value_mapping_json") or ""])
+            params.append([p.get("parameter_id"), p.get("label"), p.get("parameter_group", "其他"), p.get("unit"), display_value_type(p.get("value_type")), display_search_type(p.get("search_type", "auto")), p.get("min_value"), p.get("max_value"), display_preference(p.get("preference")), p.get("description"), p.get("adjustment_hint"), "、".join(str(x) for x in _json_allowed(p.get("allowed_values_json"))), display_bool(p.get("required", 1)), display_bool(p.get("auto_adjustable", 1)), p.get("decimal_places", 3), p.get("display_order"), display_bool(p.get("enabled", 1)), p.get("model_value_mapping_json") or "", p.get("display_value_mapping_json") or ""])
         rows.append(("指标定义", [SHEETS["指标定义"]] + params))
         groups = []
         for g in snap.get("parameter_groups", []):
@@ -644,12 +664,23 @@ class DataMasterService(object):
                     if not isinstance(parsed_mapping, dict):
                         raise ValueError("指标%s的模型取值映射必须是JSON对象。" % clean(r.get("指标编号")))
                     mapping = json.dumps(parsed_mapping, ensure_ascii=False)
+                display_mapping_text = clean(r.get("前端显示映射(JSON)"))
+                display_mapping = None
+                if display_mapping_text:
+                    parsed_display_mapping = json.loads(display_mapping_text)
+                    if not isinstance(parsed_display_mapping, dict):
+                        raise ValueError("指标%s的前端显示映射必须是JSON对象。" % clean(r.get("指标编号")))
+                    labels = [clean(value) for value in parsed_display_mapping.values()]
+                    if any(not value for value in labels) or len(labels) != len(set(labels)):
+                        raise ValueError("指标%s的前端显示文本不能为空或重复。" % clean(r.get("指标编号")))
+                    display_mapping = json.dumps(parsed_display_mapping, ensure_ascii=False)
                 parameters.append({
                     "parameter_id": clean(r.get("指标编号")), "label": clean(r.get("指标名称")),
                     "parameter_group": clean(r.get("指标分组")) or "其他", "unit": clean(r.get("单位")),
                     "value_type": value_type, "search_type": search_type, "min_value": num(r.get("工程下限")), "max_value": num(r.get("工程上限")),
                     "preference": normalize_preference(r.get("效能方向")), "description": clean(r.get("指标说明")), "adjustment_hint": clean(r.get("调整提示")),
                     "allowed_values_json": allowed or None, "model_value_mapping_json": mapping,
+                    "display_value_mapping_json": display_mapping,
                     "required": parse_bool(r.get("是否必填", 1)), "auto_adjustable": parse_bool(r.get("允许自动调整", 1)),
                     "decimal_places": integer(r.get("显示小数位"), 3), "display_order": integer(r.get("显示顺序"), len(parameters)+1), "enabled": parse_bool(r.get("是否启用", 1)), "model_bound": 1,
                 })

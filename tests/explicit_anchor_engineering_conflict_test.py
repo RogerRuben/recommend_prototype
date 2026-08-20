@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Infeasible explicit anchor: weight<=4 vs 4.2..10 must report boundary projection."""
+"""Explicit anchor overrides stale DataMaster reference ranges."""
 from __future__ import print_function
 
 import json
@@ -98,7 +98,8 @@ def main():
     ], "indicator_filter_mode": "all", "min_capability": 50, "count": 1, "target_protocol": None}
     result = gen.generate(request, count=1, seed=5, budget=100, search_mode="fast")
     feas = result["explicit_filter_feasibility"]
-    assert feas["strictly_feasible"] is False, feas
+    assert feas["strictly_feasible"] is True, feas
+    assert feas["advisory_only"] is True, feas
     assert len(feas["conflicts"]) == 1, feas
     conflict = feas["conflicts"][0]
     assert conflict["parameter_id"] == "weight"
@@ -108,14 +109,14 @@ def main():
     candidates = result.get("candidates") or []
     assert candidates, "expected best-effort candidates"
     for candidate in candidates:
-        assert candidate["params"]["weight"] == 4.2, candidate["params"]
+        assert candidate["params"]["weight"] <= 4, candidate["params"]
         trace = candidate.get("generation_trace") or {}
         resolutions = trace.get("anchor_resolutions") or []
-        assert any(r["parameter_id"] == "weight" and r["resolution"] == "nearest_engineering_boundary" for r in resolutions), trace
+        assert not resolutions, trace
         sources = trace.get("locked_sources") or {}
-        assert sources.get("weight") == "engineering_boundary_fallback", sources
+        assert sources.get("weight") == "user_anchor", sources
 
-    print(json.dumps({"status": "PASS", "message": "工程不可实现条件投影到最近边界并记录诊断"}, ensure_ascii=False))
+    print(json.dumps({"status": "PASS", "message": "显式用户条件不被DataMaster参考范围截断"}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

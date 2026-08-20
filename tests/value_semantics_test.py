@@ -45,11 +45,13 @@ def main():
     assert normalize_numeric(65) == 65.0
     assert values_equal("IP65", 65) is True
 
-    # Business display honours the mapping and IP.
+    # Business display uses its independent presentation mapping, never the
+    # business-to-model encoding mapping.
     mapping_def = {"value_type": "boolean",
-                   "model_value_mapping_json": json.dumps({"有": 1, "无": 0, "无该属性": -1})}
-    assert business_display_value(1, mapping_def) == "有"
-    assert business_display_value(0, mapping_def) == "无"
+                   "model_value_mapping_json": json.dumps({"有": 1, "无": 0, "无该属性": -1}),
+                   "display_value_mapping_json": json.dumps({"0": "未配置", "1": "已配置", "-1": "无该属性"})}
+    assert business_display_value(1, mapping_def) == "已配置"
+    assert business_display_value(0, mapping_def) == "未配置"
     assert business_display_value(-1, mapping_def) == "无该属性"
     assert business_display_value(65, {"value_type": "ip_grade"}) == "IP65"
 

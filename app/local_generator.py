@@ -186,9 +186,9 @@ def filters_to_anchors(filters, definitions=None, mode="all"):
     """Compile explicit user filters into generator demand anchors.
 
     This is the generation-side counterpart of ``RequirementAssessment``:
-    numeric rules become min/max boxes, while mapped enums and boolean third
-    states become ``allowed`` model-value sets so the seed projection locks the
-    exact encoded value the user asked for.
+    numeric rules become min/max boxes, while enums remain canonical business
+    values.  Business-to-model encoding happens only in Store.runtime_parameters
+    immediately before a model call.
     """
     # OR filters cannot safely be reduced to one joint generation box.
     if mode != "all":
@@ -211,14 +211,12 @@ def filters_to_anchors(filters, definitions=None, mode="all"):
         elif op == "lt" and v1 is not None:
             item["max"] = min(v1 - 1e-7, float(item.get("max", v1 - 1e-7)))
         elif op == "eq":
-            canonical = canonical_filter_value(rule.get("value1"), definition)
-            numeric = _float(canonical)
+            business = rule.get("value1")
+            numeric = _float(business)
             if numeric is not None:
                 item["min"] = item["max"] = numeric
             else:
-                mapped = mapping_target(rule.get("value1"), definition)
-                if mapped is not None:
-                    item["allowed"] = [mapped]
+                item["allowed"] = [business]
         elif op == "boolean_is":
             canonical = canonical_filter_value(rule.get("value1"), definition)
             if isinstance(canonical, bool):
@@ -228,16 +226,9 @@ def filters_to_anchors(filters, definitions=None, mode="all"):
                 if mapped is not None:
                     item["allowed"] = [mapped]
                 else:
-                    item["min"] = item["max"] = 1.0 if _truth(rule.get("value1")) else 0.0
+                    item["allowed"] = [rule.get("value1")]
         elif op == "text_equals":
-            canonical = canonical_filter_value(rule.get("value1"), definition)
-            numeric = _float(canonical)
-            if numeric is not None:
-                item["allowed"] = [numeric]
-            else:
-                mapped = mapping_target(rule.get("value1"), definition)
-                if mapped is not None:
-                    item["allowed"] = [mapped]
+            item["allowed"] = [rule.get("value1")]
         elif op == "range_inside" and v1 is not None and v2 is not None:
             item["min"], item["max"] = min(v1, v2), max(v1, v2)
         elif not item:
@@ -465,10 +456,9 @@ class HistorySeededGenerator(object):
     def _anchor_demands(self, params, bounds, definitions):
         """Project user requirements first and return immutable anchor values.
 
-        Engineering min/max remain hard bounds. If a request has no intersection
-        with those bounds, the nearest engineering-bound value is used and the
-        conflict is recorded; it will be shown as an unmet demand rather than
-        silently failing generation.
+        DataMaster min/max are only a default search envelope.  Explicit user
+        requirements remain authoritative and are never clamped to that
+        potentially stale reference metadata.
         """
         locked = {}
         conflicts = []
@@ -479,18 +469,10 @@ class HistorySeededGenerator(object):
             if not definition.get("auto_adjustable", 1):
                 conflicts.append({"parameter_id": key, "reason": "该属性被设置为不允许自动调整"})
                 continue
-            engineering_min = float(definition.get("min_value") if definition.get("min_value") is not None else -1e99)
-            engineering_max = float(definition.get("max_value") if definition.get("max_value") is not None else 1e99)
             allowed = rule.get("allowed")
             if allowed:
-                numeric_allowed = []
-                string_allowed = []
-                for candidate in allowed:
-                    candidate_num = _float(candidate)
-                    if candidate_num is not None and engineering_min <= candidate_num <= engineering_max:
-                        numeric_allowed.append(candidate_num)
-                    else:
-                        string_allowed.append(candidate)
+                numeric_allowed = [candidate for candidate in allowed if _float(candidate) is not None]
+                string_allowed = [candidate for candidate in allowed if _float(candidate) is None]
                 current = params.get(key)
                 current_num = _float(current)
                 if numeric_allowed and current_num is not None:
@@ -502,13 +484,12 @@ class HistorySeededGenerator(object):
                 elif numeric_allowed:
                     value = numeric_allowed[0]
                 else:
-                    value = _clamp(current_num if current_num is not None else 0, engineering_min, engineering_max)
-                    conflicts.append({"parameter_id": key, "reason": "筛选允许值与工程范围没有交集"})
+                    value = current if current is not None else allowed[0]
             else:
                 requested_lo = float(rule.get("min", -1e99))
                 requested_hi = float(rule.get("max", 1e99))
-                lower = max(engineering_min, requested_lo)
-                upper = min(engineering_max, requested_hi)
+                lower = requested_lo
+                upper = requested_hi
                 current = params.get(key)
                 current_num = _float(current)
                 has_min = "min" in rule
@@ -526,18 +507,14 @@ class HistorySeededGenerator(object):
                             value = float(rule["max"])
                         else:
                             value = 0.0
-                        value = _clamp(value, lower, upper)
                     else:
-                        target = requested_lo if requested_lo > engineering_max else requested_hi
-                        value = _clamp(target, engineering_min, engineering_max)
+                        value = requested_lo
                         conflicts.append({
                             "parameter_id": key,
-                            "reason": "用户筛选范围与工程范围没有交集",
+                            "reason": "用户显式筛选条件自身互相矛盾",
                             "requested_min": requested_lo,
                             "requested_max": requested_hi,
-                            "resolution": "nearest_engineering_boundary",
-                            "resolved_value": value,
-                            "closest_feasible_value": value,
+                            "resolution": "explicit_filter_conflict",
                         })
                 elif lower <= upper:
                     # Minimal-change projection: retain a satisfying seed value;
@@ -549,16 +526,13 @@ class HistorySeededGenerator(object):
                     else:
                         value = current_num
                 else:
-                    target = requested_lo if requested_lo > engineering_max else requested_hi
-                    value = _clamp(target, engineering_min, engineering_max)
+                    value = requested_lo
                     conflicts.append({
                         "parameter_id": key,
-                        "reason": "用户筛选范围与工程范围没有交集",
+                        "reason": "用户显式筛选条件自身互相矛盾",
                         "requested_min": requested_lo,
                         "requested_max": requested_hi,
-                        "resolution": "nearest_engineering_boundary",
-                        "resolved_value": value,
-                        "closest_feasible_value": value,
+                        "resolution": "explicit_filter_conflict",
                     })
             kind = self._search_type(definition)
             if kind == "boolean":
@@ -1045,7 +1019,7 @@ class HistorySeededGenerator(object):
         gate = evaluation.get("physical_gate") or {}
         if gate.get("passed") is False:
             labels = {
-                "reject_hard_violation": "超出硬生成范围",
+                "reject_hard_violation": "模型服务返回明确硬约束违反",
                 "reject_mature_expert_boundary": "命中成熟专家不可行边界",
                 "reject_severe_coupling": "存在严重耦合不匹配",
                 "reject_low_feasibility_probability": "可行概率低于工程准入阈值",

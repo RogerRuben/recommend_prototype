@@ -689,6 +689,37 @@ class EffectivenessService(ServiceApplication):
             request.get("parameters") or request.get("params") or {},
             target_protocol=request.get("target_protocol"),
         )
+        # Legacy effectiveness runtimes called generation_min/max violations
+        # "hard".  Those fields are now advisory range metadata: a successful
+        # model calculation must not be turned into a hard rejection merely for
+        # crossing them.  Explicit learned/conditional/physical rules remain.
+        hard = []
+        advisory = list(result.get("experience_extrapolations") or [])
+        for violation in result.get("hard_violations") or []:
+            code = str(violation.get("code") or "") if isinstance(violation, dict) else ""
+            if code.startswith("range_low_") or code.startswith("range_high_"):
+                item = dict(violation)
+                item["parameter_id"] = item.get("parameter_id") or item.get("attribute")
+                item["source"] = "effectiveness_schema_range"
+                item["advisory"] = True
+                advisory.append(item)
+            else:
+                hard.append(violation)
+        result["hard_violations"] = hard
+        result["experience_extrapolations"] = advisory
+        gate = dict(result.get("physical_gate") or {})
+        gate["hard_violations"] = hard
+        if gate.get("decision") == "reject_hard_violation" and not hard:
+            if gate.get("mature_boundary_violations"):
+                gate["decision"] = "reject_mature_expert_boundary"
+            elif gate.get("severe_coupling_mismatches"):
+                gate["decision"] = "reject_severe_coupling"
+            elif float(gate.get("probability") or 0) < float(gate.get("probability_threshold") or 0.65):
+                gate["decision"] = "reject_low_feasibility_probability"
+            else:
+                gate["decision"] = "pass"
+                gate["passed"] = True
+        result["physical_gate"] = gate
         return {
             "request_id": request.get("request_id"), "candidate_id": request.get("candidate_id"), "success": True,
             "evaluation": {

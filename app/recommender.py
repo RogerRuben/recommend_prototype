@@ -46,7 +46,7 @@ def filter_match(params, rule, definition=None):
         truth = normalize_boolean(value1)
         actual_truth = normalize_boolean(actual)
         if truth is None or actual_truth is None:
-            return False
+            return values_equal(actual, value1, definition)
         return actual_truth == truth
     if operator in ("text_equals", "text_contains"):
         # Mapped enums compare through the DataMaster mapping so "常规型" matches a

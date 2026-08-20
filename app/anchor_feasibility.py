@@ -3,6 +3,7 @@
 from __future__ import print_function
 
 from .value_semantics import normalize_numeric
+from .recommender import filter_match
 
 _POS_INF = float("inf")
 _NEG_INF = float("-inf")
@@ -114,7 +115,7 @@ def _merge_requested_interval(rules, definitions):
 
 
 def assess_explicit_filter_feasibility(indicator_filters, definitions, mode="all"):
-    """Check explicit indicator filters against engineering min/max domains.
+    """Describe explicit filters against advisory DataMaster min/max metadata.
 
     AND conditions on the same parameter are merged before comparing with the
     engineering domain, so ``weight>=6 AND weight<=4`` is detected as mutually
@@ -157,8 +158,13 @@ def assess_explicit_filter_feasibility(indicator_filters, definitions, mode="all
                 single_results.append(False)
             else:
                 single_results.append(True)
-        strictly_feasible = any(single_results) if single_results else True
-        return {"strictly_feasible": strictly_feasible, "conflicts": conflicts}
+        return {
+            "strictly_feasible": True,
+            "conflicts": conflicts,
+            "blocking_conflicts": [],
+            "advisory_only": True,
+            "range_role": "data_master_reference",
+        }
 
     groups = {}
     for rule in filters:
@@ -201,44 +207,26 @@ def assess_explicit_filter_feasibility(indicator_filters, definitions, mode="all
                 "requested_lower_above_engineering_max",
             ))
 
-    return {"strictly_feasible": not conflicts, "conflicts": conflicts}
+    blocking = [item for item in conflicts if item.get("reason") == "explicit_filters_mutually_inconsistent"]
+    return {
+        "strictly_feasible": not blocking,
+        "conflicts": conflicts,
+        "blocking_conflicts": blocking,
+        "advisory_only": not blocking,
+        "range_role": "data_master_reference",
+    }
 
 
 def validate_anchor_integrity(params, indicator_filters, definitions, mode="all"):
-    """Return anchor-invariant violations for explicitly feasible filters.
+    """Return violations using the same canonical matcher as recommendation.
 
-    Infeasible conditions are excluded because they are expected to project to
-    the nearest engineering boundary.  Feasible conditions that are violated by
-    the final candidate are treated as generator bugs.
+    DataMaster ranges are advisory, so no explicit condition is exempted merely
+    because it lies outside those ranges.
     """
-    feasibility = assess_explicit_filter_feasibility(indicator_filters, definitions, mode=mode)
-    infeasible_keys = {c["parameter_id"] for c in feasibility["conflicts"]}
     checks = []
     for rule in indicator_filters or []:
         key = rule.get("parameter_id")
-        if key in infeasible_keys:
-            continue
-        op = rule.get("operator")
-        value = _num(params.get(key))
-        if value is None:
-            continue
-        v1 = _num(rule.get("value1"))
-        v2 = _num(rule.get("value2"))
-        ok = True
-        if op == "lte":
-            ok = v1 is not None and value <= v1
-        elif op == "lt":
-            ok = v1 is not None and value < v1
-        elif op == "gte":
-            ok = v1 is not None and value >= v1
-        elif op == "gt":
-            ok = v1 is not None and value > v1
-        elif op == "eq":
-            ok = v1 is not None and abs(value - v1) < 1e-9
-        elif op == "range_inside":
-            ok = v1 is not None and v2 is not None and min(v1, v2) <= value <= max(v1, v2)
-        else:
-            continue
+        ok = filter_match(params, rule, definitions.get(key))
         checks.append((key, ok))
 
     if mode == "any":

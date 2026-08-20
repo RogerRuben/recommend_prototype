@@ -52,12 +52,12 @@ class _MockRuntime(object):
 
 
 def main():
-    # Direct anchor compilation: mapped enum label -> encoded 1.0.
+    # Direct anchor compilation keeps the canonical business value.
     bounds = filters_to_anchors(
         [{"parameter_id": "attr_003", "operator": "text_equals", "value1": "不锈钢"}],
         PARAMETER_DEFINITIONS, "all",
     )
-    assert bounds.get("attr_003", {}).get("allowed") == [1.0], bounds
+    assert bounds.get("attr_003", {}).get("allowed") == ["不锈钢"], bounds
 
     # Boolean third state survives as an allowed model value, not collapsed to 0/1.
     bounds3 = filters_to_anchors(
@@ -67,9 +67,9 @@ def main():
     assert bounds3.get("attr_001", {}).get("allowed") == [-1.0], bounds3
 
     gen = HistorySeededGenerator(_MockStore(), _MockRuntime(), None, None)
-    params = {"attr_003": 2.0, "attr_001": 0.0}
+    params = {"attr_003": "钛合金", "attr_001": 0.0}
     locked, conflicts = gen._anchor_demands(params, bounds, PARAMETER_DEFINITIONS)
-    assert locked["attr_003"] == 1.0, locked
+    assert locked["attr_003"] == "不锈钢", locked
     assert not conflicts, conflicts
 
     locked3, conflicts3 = gen._anchor_demands({"attr_001": 1.0}, bounds3, PARAMETER_DEFINITIONS)
@@ -78,7 +78,7 @@ def main():
 
     # Tag branch must reuse the same compiler: a passive tag's enum rule anchors too.
     branch_bounds, _branch_request, _info = gen._tag_branch_for_seed({"selected_tags": ["passive"], "indicator_filters": [], "indicator_filter_mode": "all"}, 0)
-    assert branch_bounds.get("attr_003", {}).get("allowed") == [1.0], branch_bounds
+    assert branch_bounds.get("attr_003", {}).get("allowed") == ["不锈钢"], branch_bounds
 
     print(json.dumps({"status": "PASS", "message": "枚举/布尔第三态/标签规则统一编译为生成锚定"}, ensure_ascii=False))
 

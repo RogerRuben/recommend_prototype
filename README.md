@@ -1,4 +1,6 @@
-# 工业技术协议智能推荐系统 V19.6.14
+# 工业技术协议智能推荐系统 V20
+
+当前 V20 release closure 已将 DataMaster、模型 Schema 与训练范围统一定义为非阻断诊断元数据，并新增独立的前端显示映射。用户显式业务值不会被参考范围静默截断；显示文本变化不会改变数据库、生成或模型输入。详细规则见 `docs/V20_RECOMMENDATION_REFACTOR.md`。
 
 当前 clean 运行主线：双独立 HTTP 模型服务、原 Notebook 任意模型子集一键导出、独立价格/效能工作台、数据中心可视化指标约束，以及仅以实算 JSON 为准的宽松服务准入。Win7 安装和最终测试见 `docs/CLEAN_WIN7_DEPLOYMENT_V19_6_13.md`。
 

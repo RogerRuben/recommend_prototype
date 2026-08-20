@@ -465,6 +465,33 @@ Phase 5 前补的三个 P1 + 一个 `-1` 阻断项 + UI 收尾。
 ### 测试（累计 91 个，全部通过）
 新增 `anchor_feasibility_json_contract_test.py`、`generation_task_json_contract_test.py`、`interval_merge_order_independence_test.py`。
 
+---
+
+## V20 Business Value / Range Diagnostics / Display Mapping Release Closure
+
+本轮确立两条最高优先级不变量：
+
+1. DataMaster、模型 Schema 与 Training Range 都是诊断范围，不是隐式硬约束。它们可用于默认搜索区间、外推风险说明和操作提示，但不得阻止、截断或改写用户显式输入。只有明确 `constraint_rules` / conditional rules、非法数据类型、NaN/Infinity 或模型服务实际拒绝才可阻止计算。
+2. `display_value_mapping_json` 只负责 `canonical business value → frontend label`。修改 `0 → 无 / 1 → 有` 只能改变操作员看到的文本，不得改变数据库值、历史协议、生成参数、筛选请求、保存方案、参数哈希、生成语义指纹、模型输入或预测。
+
+### 数据链闭环
+
+- `parameter_definitions.display_value_mapping_json` 是唯一来源。
+- DataMaster「指标定义」新增「前端显示映射(JSON)」，支持导入、校验、提交、导出和再次导入。
+- 数据管理中心和 Product Release 读写同一字段，维护工作簿与离线发布包 round-trip 不丢失。
+- 前端 option 的 `value` 始终是 canonical business value，label 才应用显示映射；模型编码仍只由 `model_value_mapping_json` 在模型调用边界执行。
+
+### 范围与风险
+
+- 数值编辑器不再写浏览器 `min/max`；DataMaster 范围保存在 `data-business-min/max` 诊断元数据中。
+- Generator 对用户显式 anchor 不再按 DataMaster min/max 投影；未指定字段仍可使用参考范围作为默认搜索 envelope。
+- 评价结果新增 source-aware `range_diagnostics`，分别报告 DataMaster、price Schema、effectiveness Schema 和各模型 Training Range。
+- 旧效能运行时的 `range_low_* / range_high_*` 成功计算结果从 hard violation 重分类为 advisory extrapolation；真实结构化硬风险保留 `hard_violation_details` 与具体 `parameter_id`。
+- 条件关系自身非法（如 min > max）仍阻止保存；与 DataMaster/模型 Schema 范围不一致只提示，不作为保存门禁。
+
+### 回归
+
+新增范围非阻断、来源化诊断、结构化 violation、统一等值语义、显示映射后端/模型恒等、DataMaster/Admin/Product Release round-trip、自定义布尔标签和 Frozen 分组完整性测试。既有旧边界投影测试已改为断言“显式用户条件优先于参考范围”。
 
 
 

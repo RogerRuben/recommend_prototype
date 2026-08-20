@@ -5,7 +5,7 @@ One source of truth for the questions that keep recurring across the codebase:
 
 * is ``1`` / ``1.0`` / ``"1"`` / ``"1.0"`` the same value?  (yes, numerically)
 * is ``1.0`` the same boolean as ``"有"``?                 (yes, both truthy)
-* how do we render a stored ``1`` back to the operator?    (``有``, or the mapped label)
+* how do we render a stored ``1`` back to the operator?    (the independent display label)
 
 The model encoding stays untouched: ``Store.runtime_parameters()`` continues to
 own the business-value -> model-value mapping.  This module only normalises
@@ -85,6 +85,27 @@ def definition_mapping(definition):
     return {str(k): v for k, v in parsed.items()} if isinstance(parsed, dict) else {}
 
 
+def display_definition_mapping(definition):
+    """Return canonical-business-value -> presentation-label mapping.
+
+    This mapping is deliberately independent from ``model_value_mapping_json``.
+    It must never participate in matching, persistence, hashing, generation or
+    model requests.
+    """
+    if not definition:
+        return {}
+    raw = definition.get("display_value_mapping_json")
+    if raw in (None, ""):
+        return {}
+    if isinstance(raw, dict):
+        return {str(k): str(v) for k, v in raw.items()}
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return {str(k): str(v) for k, v in parsed.items()} if isinstance(parsed, dict) else {}
+
+
 def mapping_target(value, definition=None):
     """Return the model value a business label/encoding maps to, else ``None``.
 
@@ -153,13 +174,20 @@ def canonical_filter_value(value, definition=None):
 
 
 def business_display_value(value, definition=None):
-    """Render a stored model/DB value back in business language.
-
-    ``-1`` is only shown as ``无该属性`` when the DataMaster mapping explicitly
-    declares it; it is never a global convention.
-    """
+    """Render a canonical business value without changing that value."""
     if value is None:
         return ""
+    display_mapping = display_definition_mapping(definition)
+    if display_mapping:
+        text = str(value).strip()
+        if text in display_mapping:
+            return display_mapping[text]
+        number = normalize_numeric(value)
+        if number is not None:
+            for business, label in display_mapping.items():
+                business_number = normalize_numeric(business)
+                if business_number is not None and math.isclose(business_number, number, rel_tol=1e-9, abs_tol=1e-9):
+                    return label
     value_type = definition_value_type(definition)
     if value_type in ("boolean", "bool"):
         boolean = normalize_boolean(value)
@@ -167,13 +195,6 @@ def business_display_value(value, definition=None):
             return "有"
         if boolean is False:
             return "无"
-    mapping = definition_mapping(definition)
-    if mapping:
-        reverse = {}
-        for business, model in mapping.items():
-            reverse.setdefault(str(model), business)
-        if str(value) in reverse:
-            return reverse[str(value)]
     if value_type == "ip_grade":
         number = normalize_numeric(value)
         if number is not None:

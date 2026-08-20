@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Price unreachable + weight infeasible: report must distinguish both causes."""
+"""Price may be unreachable while an out-of-reference explicit weight remains valid."""
 from __future__ import print_function
 
 import json
@@ -100,18 +100,18 @@ def main():
     }
     result = gen.generate(request, count=1, seed=5, budget=100, search_mode="fast")
     feas = result["explicit_filter_feasibility"]
-    assert feas["strictly_feasible"] is False, feas
+    assert feas["strictly_feasible"] is True, feas
     assert any(c["parameter_id"] == "weight" and c["closest_feasible_value"] == 4.2 for c in feas["conflicts"]), feas
 
     candidates = result.get("candidates") or []
     assert candidates, "expected best-effort candidates"
     for candidate in candidates:
-        assert candidate["params"]["weight"] == 4.2, candidate["params"]
+        assert candidate["params"]["weight"] <= 4, candidate["params"]
         unmet = candidate.get("unmet_conditions") or []
         assert any("价格" in str(u) for u in unmet), unmet
-        assert any("重量" in str(u) for u in unmet), unmet
+        assert not any("重量" in str(u) for u in unmet), unmet
 
-    print(json.dumps({"status": "PASS", "message": "价格输出不可达与工程不可实现被区分报告"}, ensure_ascii=False))
+    print(json.dumps({"status": "PASS", "message": "价格输出不可达不把参考范围越界误报为需求失败"}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

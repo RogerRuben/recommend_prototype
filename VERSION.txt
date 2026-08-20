@@ -1,2 +1,2 @@
-V19.6.14-complete-parameter-payload-admin-save
-Built from V19.6 cumulative hotfix baseline on 2026-08-12
+V20-business-value-range-display-mapping-release-closure
+Built from V20 anchor JSON contract hotfix baseline on 2026-08-20

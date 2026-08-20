@@ -199,6 +199,7 @@ def _infer_parameter(header, parameter_id, values, missing_tokens, order):
         "adjustment_hint": "请结合工程含义确认自动推断结果。" if confidence != "high" else "",
         "allowed_values_json": json.dumps(allowed, ensure_ascii=False) if allowed else None,
         "model_value_mapping_json": None,
+        "display_value_mapping_json": None,
         "required": required,
         "auto_adjustable": 0 if value_type == "text" else 1,
         "decimal_places": decimals,

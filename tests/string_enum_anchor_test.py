@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Mapped enum anchors support string model encodings, not only numeric ones."""
+"""Mapped enum anchors remain business values until the model-call boundary."""
 from __future__ import print_function
 
 import json
@@ -28,21 +28,21 @@ def main():
         [{"parameter_id": "attr_mat", "operator": "text_equals", "value1": "不锈钢"}],
         PARAMETER_DEFINITIONS, "all",
     )
-    assert bounds["attr_mat"]["allowed"] == ["SS"], bounds
+    assert bounds["attr_mat"]["allowed"] == ["不锈钢"], bounds
 
     gen = HistorySeededGenerator(None, None, None, None)
     locked, conflicts = gen._anchor_demands(
-        {"attr_mat": "TI"}, bounds, PARAMETER_DEFINITIONS,
+        {"attr_mat": "钛合金"}, bounds, PARAMETER_DEFINITIONS,
     )
-    assert locked["attr_mat"] == "SS", locked
+    assert locked["attr_mat"] == "不锈钢", locked
     assert not conflicts, conflicts
 
     locked2, _conflicts2 = gen._anchor_demands(
-        {"attr_mat": "SS"}, bounds, PARAMETER_DEFINITIONS,
+        {"attr_mat": "不锈钢"}, bounds, PARAMETER_DEFINITIONS,
     )
-    assert locked2["attr_mat"] == "SS", locked2
+    assert locked2["attr_mat"] == "不锈钢", locked2
 
-    print(json.dumps({"status": "PASS", "message": "字符串模型编码的枚举也能正确锚定"}, ensure_ascii=False))
+    print(json.dumps({"status": "PASS", "message": "字符串模型编码不会污染生成业务值"}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

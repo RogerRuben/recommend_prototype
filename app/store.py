@@ -2,6 +2,7 @@
 from __future__ import print_function
 
 import csv
+import hashlib
 import json
 import os
 import re
@@ -158,7 +159,8 @@ class Store(object):
                 CREATE TABLE IF NOT EXISTS parameter_definitions(
                     parameter_id TEXT PRIMARY KEY, label TEXT NOT NULL, unit TEXT, value_type TEXT NOT NULL,
                     min_value REAL, max_value REAL, observed_min REAL, observed_max REAL, preference TEXT, description TEXT, adjustment_hint TEXT,
-                    allowed_values_json TEXT, model_value_mapping_json TEXT, search_type TEXT NOT NULL DEFAULT 'auto', required INTEGER NOT NULL DEFAULT 1,
+                    allowed_values_json TEXT, model_value_mapping_json TEXT, display_value_mapping_json TEXT,
+                    search_type TEXT NOT NULL DEFAULT 'auto', required INTEGER NOT NULL DEFAULT 1,
                     auto_adjustable INTEGER NOT NULL DEFAULT 1, decimal_places INTEGER NOT NULL DEFAULT 3,
                     parameter_group TEXT NOT NULL DEFAULT '其他',
                     display_order INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, model_bound INTEGER NOT NULL DEFAULT 1
@@ -230,6 +232,7 @@ class Store(object):
                     ("parameter_definitions", "model_bound INTEGER NOT NULL DEFAULT 1"),
                     ("parameter_definitions", "allowed_values_json TEXT"),
                     ("parameter_definitions", "model_value_mapping_json TEXT"),
+                    ("parameter_definitions", "display_value_mapping_json TEXT"),
                     ("parameter_definitions", "search_type TEXT NOT NULL DEFAULT 'auto'"),
                     ("parameter_definitions", "required INTEGER NOT NULL DEFAULT 1"),
                     ("parameter_definitions", "auto_adjustable INTEGER NOT NULL DEFAULT 1"),
@@ -595,6 +598,22 @@ class Store(object):
         finally:
             conn.close()
 
+    def generation_semantics_fingerprint(self):
+        """Hash generation-relevant business data, excluding presentation-only fields."""
+        conn = self.connect()
+        try:
+            payload = {}
+            for table in ("parameter_definitions", "parameter_groups", "tags", "tag_rules", "indicator_couplings", "constraint_rules", "agreements"):
+                rows = [dict(row) for row in conn.execute("SELECT * FROM %s ORDER BY 1" % table)]
+                if table == "parameter_definitions":
+                    for row in rows:
+                        row.pop("display_value_mapping_json", None)
+                payload[table] = rows
+            raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+            return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        finally:
+            conn.close()
+
     def _audit(self, conn, action, object_type, object_id, detail=None):
         conn.execute("INSERT INTO audit_log(action,object_type,object_id,detail_json,created_at) VALUES(?,?,?,?,?)", (
             action, object_type, object_id, json.dumps(detail or {}, ensure_ascii=False), now_iso()
@@ -934,9 +953,9 @@ class Store(object):
                 for item in data.get("parameters", []):
                     conn.execute("""INSERT INTO parameter_definitions
                         (parameter_id,label,parameter_group,unit,value_type,min_value,max_value,observed_min,observed_max,preference,description,adjustment_hint,
-                         allowed_values_json,model_value_mapping_json,search_type,required,auto_adjustable,decimal_places,display_order,enabled,model_bound)
-                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
-                        item["parameter_id"],item["label"],item.get("parameter_group") or "其他",item.get("unit"),item["value_type"],item.get("min_value"),item.get("max_value"),item.get("observed_min"),item.get("observed_max"),item.get("preference"),item.get("description"),item.get("adjustment_hint"),item.get("allowed_values_json"),item.get("model_value_mapping_json"),item.get("search_type") or "auto",int(item.get("required",1)),int(item.get("auto_adjustable",1)),int(item.get("decimal_places",3)),int(item.get("display_order",1)),int(item.get("enabled",1)),int(item.get("model_bound",1))))
+                         allowed_values_json,model_value_mapping_json,display_value_mapping_json,search_type,required,auto_adjustable,decimal_places,display_order,enabled,model_bound)
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                        item["parameter_id"],item["label"],item.get("parameter_group") or "其他",item.get("unit"),item["value_type"],item.get("min_value"),item.get("max_value"),item.get("observed_min"),item.get("observed_max"),item.get("preference"),item.get("description"),item.get("adjustment_hint"),item.get("allowed_values_json"),item.get("model_value_mapping_json"),item.get("display_value_mapping_json"),item.get("search_type") or "auto",int(item.get("required",1)),int(item.get("auto_adjustable",1)),int(item.get("decimal_places",3)),int(item.get("display_order",1)),int(item.get("enabled",1)),int(item.get("model_bound",1))))
                 group_items = data.get("parameter_groups")
                 if not group_items:
                     seen = []
@@ -1084,10 +1103,6 @@ class Store(object):
         compatibility = validate_conditional_relationship(compiled["template_metadata"], self.parameter_map(), model_specs)
         if compatibility["business_errors"]:
             raise ValueError("；".join(compatibility["business_errors"]))
-        if compatibility["model_errors"]:
-            manifest = self.runtime.manifest()
-            if manifest.get("calculation_available") is not False:
-                raise ValueError("；".join(compatibility["model_errors"]))
         group = compiled["constraint_group"]
         original_group = str(payload.get("original_constraint_group") or "").strip() or None
         severity = payload.get("severity") or "warning"
@@ -1426,6 +1441,8 @@ class Store(object):
                 data["allowed_values_json"] = json.dumps(data["allowed_values_json"], ensure_ascii=False)
             if isinstance(data.get("model_value_mapping_json"), dict):
                 data["model_value_mapping_json"] = json.dumps(data["model_value_mapping_json"], ensure_ascii=False)
+            if isinstance(data.get("display_value_mapping_json"), dict):
+                data["display_value_mapping_json"] = json.dumps(data["display_value_mapping_json"], ensure_ascii=False)
             try:
                 allowed = json.loads(data.get("allowed_values_json") or "[]")
             except (TypeError, ValueError):
@@ -1440,6 +1457,23 @@ class Store(object):
                 raise ValueError("业务值到模型值的映射必须是JSON对象。")
             data["allowed_values_json"] = json.dumps(allowed, ensure_ascii=False) if allowed else None
             data["model_value_mapping_json"] = json.dumps(mapping, ensure_ascii=False) if mapping else None
+            try:
+                display_mapping = json.loads(data.get("display_value_mapping_json") or "{}")
+            except (TypeError, ValueError):
+                raise ValueError("前端显示映射必须是JSON对象，例如：{\"0\":\"无\",\"1\":\"有\"}")
+            if not isinstance(display_mapping, dict):
+                raise ValueError("前端显示映射必须是JSON对象。")
+            labels = [str(value).strip() for value in display_mapping.values()]
+            if any(not label for label in labels):
+                raise ValueError("前端显示映射的显示文本不能为空。")
+            if len(labels) != len(set(labels)):
+                raise ValueError("同一指标的前端显示文本不能重复。")
+            allowed_text = {str(value).strip() for value in allowed}
+            if allowed_text:
+                invalid_keys = [str(key) for key in display_mapping if str(key).strip() not in allowed_text]
+                if invalid_keys:
+                    raise ValueError("前端显示映射包含不在业务允许值中的键：%s" % "、".join(invalid_keys))
+            data["display_value_mapping_json"] = json.dumps(display_mapping, ensure_ascii=False) if display_mapping else None
 
         defaults = {
             "products": {"enabled": 1},

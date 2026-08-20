@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Anchor resolution diagnostics must be inherited by search descendants."""
+"""Search descendants preserve explicit user anchors outside reference ranges."""
 from __future__ import print_function
 
 import json
@@ -103,11 +103,11 @@ def main():
     assert descendants, "expected at least one descendant candidate"
     for candidate in descendants:
         trace = candidate.get("generation_trace") or {}
-        assert candidate["params"]["weight"] == 4.2, candidate["params"]
-        assert any(r["parameter_id"] == "weight" and r["resolution"] == "nearest_engineering_boundary" for r in (trace.get("anchor_resolutions") or [])), trace
-        assert (trace.get("locked_sources") or {}).get("weight") == "engineering_boundary_fallback", trace
+        assert candidate["params"]["weight"] <= 4, candidate["params"]
+        assert not (trace.get("anchor_resolutions") or []), trace
+        assert (trace.get("locked_sources") or {}).get("weight") == "user_anchor", trace
 
-    print(json.dumps({"status": "PASS", "message": "搜索子节点继承 anchor_resolutions 与 engineering_boundary_fallback"}, ensure_ascii=False))
+    print(json.dumps({"status": "PASS", "message": "搜索子节点继承不受参考范围截断的用户anchor"}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

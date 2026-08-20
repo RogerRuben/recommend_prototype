@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Strict < and > at engineering boundaries must be treated as infeasible."""
+"""Strict conditions outside DataMaster boundaries remain advisory and executable."""
 from __future__ import print_function
 
 import json
@@ -17,7 +17,8 @@ def main():
     strict_below = assess_explicit_filter_feasibility([
         {"parameter_id": "weight", "operator": "lt", "value1": 4.2},
     ], defs_min, mode="all")
-    assert strict_below["strictly_feasible"] is False, strict_below
+    assert strict_below["strictly_feasible"] is True, strict_below
+    assert strict_below["advisory_only"] is True, strict_below
     assert strict_below["conflicts"][0]["reason"] == "requested_upper_below_engineering_min", strict_below
 
     inclusive_below = assess_explicit_filter_feasibility([
@@ -29,7 +30,8 @@ def main():
     strict_above = assess_explicit_filter_feasibility([
         {"parameter_id": "weight", "operator": "gt", "value1": 10},
     ], defs_max, mode="all")
-    assert strict_above["strictly_feasible"] is False, strict_above
+    assert strict_above["strictly_feasible"] is True, strict_above
+    assert strict_above["advisory_only"] is True, strict_above
     assert strict_above["conflicts"][0]["reason"] == "requested_lower_above_engineering_max", strict_above
 
     inclusive_above = assess_explicit_filter_feasibility([
@@ -37,7 +39,7 @@ def main():
     ], defs_max, mode="all")
     assert inclusive_above["strictly_feasible"] is True, inclusive_above
 
-    print(json.dumps({"status": "PASS", "message": "严格边界 < > 与工程边界无交集时正确判定不可行"}, ensure_ascii=False))
+    print(json.dumps({"status": "PASS", "message": "严格显式条件不被DataMaster参考边界阻断"}, ensure_ascii=False))
 
 
 if __name__ == "__main__":
