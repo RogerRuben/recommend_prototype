@@ -29,6 +29,7 @@ from .data_master import (
     num,
     validate_business_data,
 )
+from .display_mapping import dump_display_mapping
 from .model_field_types import model_types_compatible
 from .store import safe_id
 from .historical_onboarding import HistoricalProductOnboarding
@@ -605,13 +606,7 @@ class ProductReleaseService(object):
                     raise ValueError("模型取值映射必须是JSON对象")
                 mapping = json.dumps(parsed_mapping, ensure_ascii=False)
             if display_mapping:
-                parsed_display_mapping = json.loads(display_mapping)
-                if not isinstance(parsed_display_mapping, dict):
-                    raise ValueError("前端显示映射必须是JSON对象")
-                labels = [clean(value) for value in parsed_display_mapping.values()]
-                if any(not value for value in labels) or len(labels) != len(set(labels)):
-                    raise ValueError("前端显示文本不能为空或重复")
-                display_mapping = json.dumps(parsed_display_mapping, ensure_ascii=False)
+                display_mapping = dump_display_mapping(display_mapping, allowed)
             return {
                 "parameter_id": clean(row.get("parameter_id")), "label": clean(row.get("label")),
                 "parameter_group": clean(row.get("parameter_group")) or "其他",

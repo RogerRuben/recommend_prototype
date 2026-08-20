@@ -16,14 +16,14 @@ for p in paths:
     if p.exists(): p.unlink()
 s=Store(db,ROOT/"data"/"virtual_protocol_dataset.csv",Runtime())
 try:
-    s.replace_from_datamaster({"products":[{"product_code":"P","product_name":"P"}],"parameters":[{"parameter_id":"xx","label":"XX","value_type":"boolean","allowed_values_json":"[0,1]","display_value_mapping_json":json.dumps({"0":"无","1":"有"},ensure_ascii=False)}],"parameter_groups":[{"group_name":"其他"}],"tags":[],"tag_rules":[],"couplings":[],"constraints":[],"agreements":[]},evaluate_agreements=False,sync_model_contract=False)
+    s.replace_from_datamaster({"products":[{"product_code":"P","product_name":"P"}],"parameters":[{"parameter_id":"xx","label":"XX","value_type":"boolean","allowed_values_json":"[0,1]","display_value_mapping_json":json.dumps({"0":123,"1":456},ensure_ascii=False)}],"parameter_groups":[{"group_name":"其他"}],"tags":[],"tag_rules":[],"couplings":[],"constraints":[],"agreements":[]},evaluate_agreements=False,sync_model_contract=False)
     svc=ProductReleaseService(s,Runtime()); draft=svc.clone_current(); raw=svc.export_package(draft["release_id"]); imported=svc.import_package(raw)
     mapping=json.loads(imported["data"]["parameters"][0]["display_value_mapping_json"])
-    assert mapping=={"0":"无","1":"有"},mapping
+    assert mapping=={"0":"123","1":"456"},mapping
     validation=svc.validate(imported["release_id"])
     assert validation["valid"],validation
     svc.activate(imported["release_id"])
-    assert json.loads(s.parameter_map()["xx"]["display_value_mapping_json"])["1"]=="有"
+    assert json.loads(s.parameter_map()["xx"]["display_value_mapping_json"])["1"]=="456"
 finally:
     for p in paths:
         if p.exists(): p.unlink()

@@ -8,6 +8,7 @@ from collections import OrderedDict
 
 from .wide_import import parse_bool, split_tags
 from .xlsx_utils import read_workbook_bytes, write_workbook_bytes
+from .display_mapping import dump_display_mapping, normalize_display_mapping
 
 
 SHEETS = OrderedDict([
@@ -331,22 +332,9 @@ def validate_business_data(data):
         raw_display_mapping = item.get("display_value_mapping_json")
         if raw_display_mapping not in (None, ""):
             try:
-                display_mapping = json.loads(raw_display_mapping) if isinstance(raw_display_mapping, str) else raw_display_mapping
-                if not isinstance(display_mapping, dict):
-                    errors.append("指标%s的前端显示映射必须是JSON对象。" % pid)
-                else:
-                    labels = [clean(value) for value in display_mapping.values()]
-                    if any(not value for value in labels):
-                        errors.append("指标%s的前端显示文本不能为空。" % pid)
-                    if len(labels) != len(set(labels)):
-                        errors.append("指标%s的前端显示文本不能重复。" % pid)
-                    allowed = {clean(value) for value in _json_allowed(item.get("allowed_values_json"))}
-                    if allowed:
-                        invalid = [clean(key) for key in display_mapping if clean(key) not in allowed]
-                        if invalid:
-                            errors.append("指标%s的前端显示映射包含非业务允许值：%s。" % (pid, "、".join(invalid)))
-            except Exception:
-                errors.append("指标%s的前端显示映射必须是JSON对象。" % pid)
+                normalize_display_mapping(raw_display_mapping, _json_allowed(item.get("allowed_values_json")))
+            except ValueError as exc:
+                errors.append("指标%s：%s" % (pid, exc))
 
     # Parameter-group existence is a business reference check.
     group_names = set(clean(g.get("group_name")) for g in (data.get("parameter_groups") or []) if clean(g.get("group_name")))
@@ -502,6 +490,9 @@ class DataMasterService(object):
                 v("M2:M1000", "DM_YES_NO", "是否必填", "请直接选择是或否。"),
                 v("N2:N1000", "DM_YES_NO", "允许自动调整", "请直接选择是或否。"),
                 v("Q2:Q1000", "DM_YES_NO", "是否启用", "停用后该业务属性不再参与数据中心运行；与当前模型是否使用无关。"),
+                {"sqref":"S2:S1000", "type":"custom", "formula1":"TRUE",
+                 "prompt_title":"前端显示映射(JSON)",
+                 "prompt":"格式：JSON对象；示例：{\"0\":\"无\",\"1\":\"有\"}。左边是数据库/业务原值，右边只修改界面显示，不改变历史数据、生成值或模型输入。"},
             ],
             "标签字典": [v("E2:E1000", "DM_TAG_DERIVATIONS", "标签判定方式", "规则判定、从种子继承或人工维护。"), v("G2:G1000", "DM_YES_NO", "是否启用", "停用后不参与推荐，但记录仍保留。")],
             "标签规则": [v("B2:B3000", "DM_TAG_IDS", "标签编号", "从标签字典选择。"), v("C2:C3000", "DM_RULE_FIELDS", "指标编号", "从指标定义或三个模型输出字段中选择。"), v("D2:D3000", "DM_OPERATORS", "比较关系", "布尔字段通常选择“为”，条件值填写有/无。"), v("H2:H3000", "DM_YES_NO", "是否启用", "上级标签停用时规则暂不执行，但仍可保存编辑。")],
@@ -667,13 +658,10 @@ class DataMasterService(object):
                 display_mapping_text = clean(r.get("前端显示映射(JSON)"))
                 display_mapping = None
                 if display_mapping_text:
-                    parsed_display_mapping = json.loads(display_mapping_text)
-                    if not isinstance(parsed_display_mapping, dict):
-                        raise ValueError("指标%s的前端显示映射必须是JSON对象。" % clean(r.get("指标编号")))
-                    labels = [clean(value) for value in parsed_display_mapping.values()]
-                    if any(not value for value in labels) or len(labels) != len(set(labels)):
-                        raise ValueError("指标%s的前端显示文本不能为空或重复。" % clean(r.get("指标编号")))
-                    display_mapping = json.dumps(parsed_display_mapping, ensure_ascii=False)
+                    try:
+                        display_mapping = dump_display_mapping(display_mapping_text, _json_allowed(allowed))
+                    except ValueError as exc:
+                        raise ValueError("指标%s：%s" % (clean(r.get("指标编号")), exc))
                 parameters.append({
                     "parameter_id": clean(r.get("指标编号")), "label": clean(r.get("指标名称")),
                     "parameter_group": clean(r.get("指标分组")) or "其他", "unit": clean(r.get("单位")),

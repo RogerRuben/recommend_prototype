@@ -154,6 +154,16 @@ def _mat_vec(lower, vector):
     return [sum(lower[i][j] * vector[j] for j in range(i + 1)) for i in range(len(vector))]
 
 
+def _nearest_numeric_business_value(candidates, current):
+    """Compare through floats while returning the original business value."""
+    current_num = _float(current)
+    if current_num is None:
+        return None
+    projected = [(candidate, _float(candidate)) for candidate in candidates]
+    projected = [item for item in projected if item[1] is not None]
+    return min(projected, key=lambda item: abs(item[1] - current_num))[0] if projected else None
+
+
 def merge_bounds(base, extra):
     """Merge tag suggestions with authoritative direct-user anchors.
 
@@ -377,9 +387,15 @@ class HistorySeededGenerator(object):
         values = self._allowed_values(definition)
         kind = self._search_type(definition)
         if kind == "ordered_discrete":
-            numeric = [_float(value) for value in values]
-            if values and all(value is not None for value in numeric):
-                return sorted(set(numeric))
+            projected = [(value, _float(value)) for value in values]
+            if values and all(number is not None for _value, number in projected):
+                result = []
+                seen = set()
+                for value, number in sorted(projected, key=lambda item: item[1]):
+                    if number not in seen:
+                        result.append(value)
+                        seen.add(number)
+                return result
         return list(values)
 
     def _value_equal(self, left, right, definition):
@@ -483,7 +499,7 @@ class HistorySeededGenerator(object):
                 current = params.get(key)
                 current_num = _float(current)
                 if numeric_allowed and current_num is not None:
-                    value = min(numeric_allowed, key=lambda x: abs(x - current_num))
+                    value = _nearest_numeric_business_value(numeric_allowed, current)
                 elif any(self._value_equal(current, candidate, definition) for candidate in allowed):
                     value = current
                 elif string_allowed:
@@ -553,7 +569,7 @@ class HistorySeededGenerator(object):
             elif kind == "ordered_discrete":
                 allowed_values = self._normalized_allowed_values(definition)
                 if allowed_values:
-                    value = min(allowed_values, key=lambda candidate: abs(float(candidate) - float(value)))
+                    value = _nearest_numeric_business_value(allowed_values, value)
             locked[key] = value
             params[key] = value
         return locked, conflicts
@@ -831,7 +847,7 @@ class HistorySeededGenerator(object):
                 if kind == "ordered_discrete":
                     current = _float(params[key])
                     if current is not None:
-                        params[key] = min(allowed, key=lambda value: abs(float(value) - current))
+                        params[key] = _nearest_numeric_business_value(allowed, current)
                 elif params[key] not in allowed:
                     params[key] = allowed[0]
             elif kind == "boolean":
