@@ -7,6 +7,7 @@ import sqlite3
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -14,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 from app.configuration import load_model_service_config, load_service_portal_config
 from app.server import Application, Handler
 from app.store import Store
+from run_app import available_port
 
 
 def static_contracts():
@@ -40,7 +42,8 @@ def portal_and_login_contracts():
     portal = load_service_portal_config(ROOT)
     models = load_model_service_config(ROOT)
     assert list(portal["services"]) == ["recommendation", "quick_price", "advanced_price", "effectiveness", "admin"]
-    assert portal["services"]["advanced_price"]["url"] == "http://192.168.10.88:8080/"
+    assert portal["services"]["advanced_price"]["url"] == ""
+    assert portal["services"]["advanced_price"]["enabled"] is False
     assert "advanced_price" not in models
     assert models["price_service_url"].endswith(":18101")
     assert models["effectiveness_service_url"].endswith(":18102")
@@ -49,6 +52,55 @@ def portal_and_login_contracts():
         assert Handler._safe_next(unsafe) is None
     run_app = (ROOT / "run_app.py").read_text(encoding="utf-8")
     assert '"url": "http://%s:%d/portal"' in run_app
+
+    with tempfile.TemporaryDirectory(prefix="ipdemo_portal_") as folder:
+        config = Path(folder) / "config"
+        config.mkdir()
+        path = config / "service_portal.json"
+        allowed = {
+            "internal": {"label": "内部", "url": "/price", "enabled": True},
+            "external_http": {"label": "HTTP", "url": "http://127.0.0.1:8080/", "enabled": True},
+            "external_https": {"label": "HTTPS", "url": "https://example.test/tool", "enabled": True},
+            "pending": {"label": "待配置", "url": "", "enabled": False},
+        }
+        path.write_text(json.dumps({"services": allowed}), encoding="utf-8")
+        assert set(load_service_portal_config(folder)["services"]) == set(allowed)
+        for unsafe in ("javascript:alert(1)", "data:text/html,x", "file:///tmp/x", "vbscript:x", "//evil.test/x", "\\\\evil.test\\x", ""):
+            path.write_text(json.dumps({"services": {"bad": {"url": unsafe, "enabled": True}}}), encoding="utf-8")
+            try:
+                load_service_portal_config(folder)
+                raise AssertionError("unsafe enabled Portal URL must fail: %s" % unsafe)
+            except ValueError:
+                pass
+        path.write_text(json.dumps({"services": {"bad": {"url": "javascript:alert(1)", "enabled": False}}}), encoding="utf-8")
+        try:
+            load_service_portal_config(folder)
+            raise AssertionError("dangerous disabled Portal URL must also fail")
+        except ValueError:
+            pass
+
+
+def standard_startup_contract():
+    standard = (ROOT / "START_ALL_SERVICES_WIN7.bat").read_text(encoding="utf-8")
+    no_browser = (ROOT / "START_ALL_NO_BROWSER.bat").read_text(encoding="utf-8")
+    assert 'start "Recommendation System"' in standard
+    assert 'runtime\\last_port.txt' in standard
+    assert '/api/health' in standard
+    assert '!MAIN_PORT!/portal' in standard
+    assert 'start "" "!PORTAL_URL!"' in standard
+    assert "--no-browser" in no_browser
+    assert "17891/portal" not in standard
+
+    class FakeSocket(object):
+        def bind(self, address):
+            if address[1] == 17891:
+                raise OSError("occupied")
+
+        def close(self):
+            pass
+
+    with patch("run_app.socket.socket", side_effect=lambda *args, **kwargs: FakeSocket()):
+        assert available_port("127.0.0.1", 17891, 1) == 17892
 
 
 def deterministic_history_contract():
@@ -121,6 +173,7 @@ def workbench_enrichment_contract():
 if __name__ == "__main__":
     static_contracts()
     portal_and_login_contracts()
+    standard_startup_contract()
     deterministic_history_contract()
     workbench_enrichment_contract()
     print("PASS V21 workflow, portal, deterministic Workbench and value boundaries")

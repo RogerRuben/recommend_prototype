@@ -8,6 +8,7 @@ from __future__ import print_function
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 DEFAULT_MODEL_SERVICE_CONFIG = {
@@ -24,7 +25,7 @@ DEFAULT_SERVICE_PORTAL_CONFIG = {
     "services": {
         "recommendation": {"label": "智能方案推荐", "url": "/", "enabled": True},
         "quick_price": {"label": "简易价格预测", "url": "/price", "enabled": True},
-        "advanced_price": {"label": "价格深度分析", "url": "http://192.168.10.88:8080/", "enabled": True},
+        "advanced_price": {"label": "价格深度分析", "url": "", "enabled": False},
         "effectiveness": {"label": "简易效能评价", "url": "/effectiveness", "enabled": True},
         "admin": {"label": "数据管理中心", "url": "/admin", "enabled": True},
     },
@@ -92,9 +93,24 @@ def load_service_portal_config(root):
     services = result.get("services")
     if not isinstance(services, dict):
         raise ValueError("config/service_portal.json的services必须是JSON对象")
-    result["services"] = dict(
-        (str(key), value) for key, value in services.items() if isinstance(value, dict)
-    )
+    validated = {}
+    for key, value in services.items():
+        if not isinstance(value, dict):
+            continue
+        key, item = str(key), dict(value)
+        enabled = _boolean(item.get("enabled"), True)
+        url = str(item.get("url") or "").strip()
+        if url:
+            parsed = urlparse(url)
+            local = url.startswith("/") and not url.startswith("//") and not parsed.scheme and not parsed.netloc
+            external = parsed.scheme in ("http", "https") and bool(parsed.netloc)
+            if ("\\" in url or any(ord(char) < 32 for char in url) or not (local or external)):
+                raise ValueError("config/service_portal.json服务%s的url不安全或无效" % key)
+        elif enabled:
+            raise ValueError("config/service_portal.json服务%s启用时必须配置url" % key)
+        item["url"], item["enabled"] = url, enabled
+        validated[key] = item
+    result["services"] = validated
     return result
 
 

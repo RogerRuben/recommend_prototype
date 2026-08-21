@@ -60,7 +60,81 @@
 
   function addVisibleFilter(){var term=String(q("parameterSearch").value||"").toLowerCase(),covered=coveredParameterIds(),hideCovered=q("hideCoveredParams").checked;var def=(state.bootstrap.parameters||[]).find(function(p){var hit=!term||String(p.label||"").toLowerCase().indexOf(term)>=0||String(p.parameter_id).toLowerCase().indexOf(term)>=0;return hit&&(!hideCovered||!covered[p.parameter_id])});if(def)addFilter({parameter_id:def.parameter_id});else toast("当前没有符合搜索和标签隐藏条件的指标；可清空搜索或关闭“隐藏标签已覆盖指标”。")}
 
-   function addFilter(initial){var def=initial&&parameter(initial.parameter_id)||state.bootstrap.parameters[0];if(!def)return;var wrap=document.createElement("div");wrap.className="filter-row";wrap.innerHTML='<div class="filter-line"><select class="filter-group-select"></select><input class="filter-parameter-search" type="search" placeholder="在分组内搜索名称或编号"><select class="f-param"></select><select class="f-op"></select><span class="f-values"></span><button class="remove-filter">×</button><div class="filter-overlap-note hidden"></div></div>';q("indicatorFilters").appendChild(wrap);var group=wrap.querySelector(".filter-group-select"),search=wrap.querySelector(".filter-parameter-search"),psel=wrap.querySelector(".f-param"),osel=wrap.querySelector(".f-op"),groups=parameterGroups();group.innerHTML=groups.map(function(g){return'<option value="'+esc(g.group_name)+'">'+esc(g.group_name)+'</option>'}).join("");group.value=def.parameter_group||"其他";function refreshParameters(){var previous=psel.value||def.parameter_id,term=String(search.value||q("parameterSearch").value||"").toLowerCase(),covered=coveredParameterIds(),hideCovered=q("hideCoveredParams").checked;var list=(state.bootstrap.parameters||[]).filter(function(p){var hit=!term||String(p.label||"").toLowerCase().indexOf(term)>=0||String(p.parameter_id).toLowerCase().indexOf(term)>=0;return(p.parameter_group||"其他")===group.value&&hit&&(!hideCovered||!covered[p.parameter_id]||p.parameter_id===previous)});if(!list.length&&parameter(previous))list=[parameter(previous)];psel.innerHTML=list.map(function(p){return'<option value="'+esc(p.parameter_id)+'">'+esc(p.label)+' ['+esc(p.parameter_id)+']'+(p.unit?' · '+esc(p.unit):'')+'</option>'}).join("");if(list.some(function(p){return p.parameter_id===previous}))psel.value=previous;var chosen=parameter(psel.value),note=wrap.querySelector(".filter-overlap-note");if(chosen&&covered[chosen.parameter_id]){note.textContent='ⓘ “'+chosen.label+'”也受到已选标签约束，当前显式条件仍按用户输入优先。';show(note)}else hide(note);refresh()}wrap._refreshParameters=refreshParameters;function refresh(){var d=parameter(psel.value);if(!d)return;osel.innerHTML=operatorOptions(d).map(function(o){return'<option value="'+o[0]+'">'+o[1]+'</option>'}).join("");if(initial&&initial.parameter_id===d.parameter_id)osel.value=initial.operator||osel.value;renderValues()}function renderValues(){var d=parameter(psel.value),op=osel.value,holder=wrap.querySelector(".f-values"),t=searchType(d),allowed=allowedValues(d);wrap.classList.toggle("range",op.indexOf("range_")===0);if(t==="boolean")holder.innerHTML='<select class="f-v1">'+booleanFilterOptions(d)+'</select>';else if(op.indexOf("range_")===0)holder.innerHTML='<span><label>下限<input class="f-v1" type="number" placeholder="下限"></label><label>上限<input class="f-v2" type="number" placeholder="上限"></label></span>';else if(allowed.length&&(t==="ordered_discrete"||t==="unordered_enum"))holder.innerHTML='<select class="f-v1">'+allowed.map(function(v){return'<option value="'+esc(optionValue(d,v))+'">'+esc(optionLabel(d,v))+'</option>'}).join('')+'</select>';else holder.innerHTML='<input class="f-v1" '+(numericSearchType(d)?'type="number"':'type="text"')+' '+(t==="integer"?'step="1"':'')+' placeholder="条件值">';if(initial&&initial.parameter_id===d.parameter_id){var v1=holder.querySelector(".f-v1"),v2=holder.querySelector(".f-v2");if(v1&&initial.value1!=null)v1.value=optionValue(d,initial.value1);if(v2&&initial.value2!=null)v2.value=optionValue(d,initial.value2)}Array.prototype.forEach.call(holder.querySelectorAll(".f-v1,.f-v2"),function(el){el.onchange=markGenerationCriteriaDirty;el.oninput=markGenerationCriteriaDirty})}group.onchange=function(){initial=null;refreshParameters();markGenerationCriteriaDirty()};search.oninput=refreshParameters;psel.onchange=function(){initial=null;refreshParameters();markGenerationCriteriaDirty()};osel.onchange=function(){initial=null;renderValues();markGenerationCriteriaDirty()};wrap.querySelector(".remove-filter").onclick=function(){wrap.remove();markGenerationCriteriaDirty()};refreshParameters()}
+  function filterParametersForRow(parameters,groupValue,term,covered,hideCovered,previous){
+    term=String(term||"").toLowerCase();
+    var list=(parameters||[]).filter(function(p){var hit=!term||String(p.label||"").toLowerCase().indexOf(term)>=0||String(p.parameter_id).toLowerCase().indexOf(term)>=0;return(p.parameter_group||"其他")===groupValue&&hit&&(!hideCovered||!covered[p.parameter_id]||p.parameter_id===previous)});
+    var previousDef=(parameters||[]).find(function(p){return p.parameter_id===previous});
+    if(!list.length&&previousDef&&(previousDef.parameter_group||"其他")===groupValue)list=[previousDef];
+    return list;
+  }
+
+  function shouldRefreshFilterControls(previous,current,hasOperator,hasValue){return current!==previous||!hasOperator||!hasValue}
+
+  function addFilter(initial){
+    var def=initial&&parameter(initial.parameter_id)||state.bootstrap.parameters[0];
+    if(!def)return;
+    var wrap=document.createElement("div");
+    wrap.className="filter-row";
+    wrap.innerHTML='<div class="filter-line"><select class="filter-group-select"></select><input class="filter-parameter-search" type="search" placeholder="在分组内搜索名称或编号"><select class="f-param"></select><select class="f-op"></select><span class="f-values"></span><button class="remove-filter">×</button><div class="filter-overlap-note hidden"></div></div>';
+    q("indicatorFilters").appendChild(wrap);
+    var group=wrap.querySelector(".filter-group-select"),search=wrap.querySelector(".filter-parameter-search"),psel=wrap.querySelector(".f-param"),osel=wrap.querySelector(".f-op"),groups=parameterGroups();
+    group.innerHTML=groups.map(function(g){return'<option value="'+esc(g.group_name)+'">'+esc(g.group_name)+'</option>'}).join("");
+    group.value=def.parameter_group||"其他";
+
+    function refreshParameters(){
+      var previous=psel.value||def.parameter_id;
+      var term=String(search.value||"").toLowerCase(),covered=coveredParameterIds(),hideCovered=q("hideCoveredParams").checked;
+      var list=filterParametersForRow(state.bootstrap.parameters||[],group.value,term,covered,hideCovered,previous);
+      var note=wrap.querySelector(".filter-overlap-note");
+      if(!list.length){
+        psel.innerHTML='<option value="">该分组当前没有可选指标</option>';
+        psel.disabled=true;
+        osel.innerHTML="";
+        wrap.querySelector(".f-values").innerHTML="";
+        note.textContent=term?"该分组当前没有符合行内搜索的指标。":hideCovered?"该组指标均已被当前标签覆盖，可关闭“隐藏标签已覆盖指标”后查看。":"该分组当前没有可选指标。";
+        show(note);
+        return;
+      }
+      psel.disabled=false;
+      psel.innerHTML=list.map(function(p){return'<option value="'+esc(p.parameter_id)+'">'+esc(p.label)+' ['+esc(p.parameter_id)+']'+(p.unit?' · '+esc(p.unit):'')+'</option>'}).join("");
+      if(list.some(function(p){return p.parameter_id===previous}))psel.value=previous;
+      var chosen=parameter(psel.value);
+      if(chosen&&covered[chosen.parameter_id]){
+        note.textContent='ⓘ “'+chosen.label+'”也受到已选标签约束，当前显式条件仍按用户输入优先。';
+        show(note);
+      }else hide(note);
+      if(shouldRefreshFilterControls(previous,psel.value,!!osel.options.length,!!wrap.querySelector(".f-v1")))refresh();
+    }
+    wrap._refreshParameters=refreshParameters;
+
+    function refresh(){
+      var d=parameter(psel.value);
+      if(!d)return;
+      osel.innerHTML=operatorOptions(d).map(function(o){return'<option value="'+o[0]+'">'+o[1]+'</option>'}).join("");
+      if(initial&&initial.parameter_id===d.parameter_id)osel.value=initial.operator||osel.value;
+      renderValues();
+    }
+    function renderValues(){
+      var d=parameter(psel.value),op=osel.value,holder=wrap.querySelector(".f-values"),t=searchType(d),allowed=allowedValues(d);
+      wrap.classList.toggle("range",op.indexOf("range_")===0);
+      if(t==="boolean")holder.innerHTML='<select class="f-v1">'+booleanFilterOptions(d)+'</select>';
+      else if(op.indexOf("range_")===0)holder.innerHTML='<span><label>下限<input class="f-v1" type="number" placeholder="下限"></label><label>上限<input class="f-v2" type="number" placeholder="上限"></label></span>';
+      else if(allowed.length&&(t==="ordered_discrete"||t==="unordered_enum"))holder.innerHTML='<select class="f-v1">'+allowed.map(function(v){return'<option value="'+esc(optionValue(d,v))+'">'+esc(optionLabel(d,v))+'</option>'}).join('')+'</select>';
+      else holder.innerHTML='<input class="f-v1" '+(numericSearchType(d)?'type="number"':'type="text"')+' '+(t==="integer"?'step="1"':'')+' placeholder="条件值">';
+      if(initial&&initial.parameter_id===d.parameter_id){
+        var v1=holder.querySelector(".f-v1"),v2=holder.querySelector(".f-v2");
+        if(v1&&initial.value1!=null)v1.value=optionValue(d,initial.value1);
+        if(v2&&initial.value2!=null)v2.value=optionValue(d,initial.value2);
+      }
+      Array.prototype.forEach.call(holder.querySelectorAll(".f-v1,.f-v2"),function(el){el.onchange=markGenerationCriteriaDirty;el.oninput=markGenerationCriteriaDirty});
+    }
+    group.onchange=function(){initial=null;refreshParameters();markGenerationCriteriaDirty()};
+    search.oninput=refreshParameters;
+    psel.onchange=function(){initial=null;refreshParameters();markGenerationCriteriaDirty()};
+    osel.onchange=function(){initial=null;renderValues();markGenerationCriteriaDirty()};
+    wrap.querySelector(".remove-filter").onclick=function(){wrap.remove();markGenerationCriteriaDirty()};
+    refreshParameters();
+  }
   function collectFilters(){return Array.prototype.map.call(q("indicatorFilters").querySelectorAll(".filter-row"),function(row){var id=row.querySelector(".f-param").value,d=parameter(id),v1=row.querySelector(".f-v1"),v2=row.querySelector(".f-v2");return{parameter_id:id,operator:row.querySelector(".f-op").value,value1:v1?canonicalInputValue(d,v1.value):null,value2:v2?canonicalInputValue(d,v2.value):null}}).filter(function(x){return x.value1!==""&&x.value1!=null})}
   function sourceBadge(item){if(item.agreement_source==="expert_saved")return'<span class="source-badge expert">专家方案</span>';if(item.is_generated)return'';return'<span class="source-badge">参考方案</span>'}
   function tagName(id){var t=state.bootstrap.tags.find(function(x){return x.tag_id===id});return t?t.tag_name:id}
@@ -125,7 +199,7 @@ function generationPathHtml(item){var trace=item.generation_trace||{},path=trace
   function setFont(v){v=Math.max(90,Math.min(170,Number(v)||115));document.documentElement.style.setProperty("--font-scale",v/100);localStorage.setItem("ipdemo-font-scale",v);q("fontRange").value=v;q("fontValue").textContent=v+"%"}
   async function init(){initRailResize();initSourceTabs();state.bootstrap=await api("/api/bootstrap");q("productName").textContent=state.bootstrap.product.product_name||"未配置成品";q("productDescription").textContent=state.bootstrap.product.product_description||"";q("historyCount").textContent=state.bootstrap.counts.historical;q("savedCount").textContent=state.bootstrap.counts.saved;var protocols=state.bootstrap.protocols||[],active=state.bootstrap.active_protocol||{},protocolSelect=q("targetProtocol"),integration=state.bootstrap.integration||{},calculationAvailable=integration.calculation_available!==false;state.dynamicTargetProtocol=!!integration.dynamic_target_protocol_enabled&&calculationAvailable;protocolSelect.innerHTML=protocols.length?protocols.map(function(p){return'<option value="'+esc(p.profile_id)+'" '+(p.profile_id===active.profile_id?'selected':'')+'>'+esc(p.profile_name||p.profile_id)+'</option>'}).join(''):'<option value="">模型未配置评价协议</option>';protocolSelect.disabled=!protocols.length||!state.dynamicTargetProtocol;q("targetProtocolHint").textContent=!calculationAvailable?"模型服务不可用；当前仅按历史价格、属性和标签推荐。":protocols.length?(state.dynamicTargetProtocol?"所选协议固定为100分参考；切换协议不会重训练偏好或可行性模型。":"当前效能包使用内置固定协议；推荐计算将自动使用该协议。") :"当前模型只能进行通用评价。";var manifest=state.bootstrap.model_manifest,serviceMode=manifest.execution_mode==="independent_http_services";var priceBackend=(manifest.price&&manifest.price.backend)||(serviceMode?"未知":"in_process_json"),effectBackend=(manifest.effectiveness&&manifest.effectiveness.backend)||(serviceMode?"未知":"in_process_json");q("modelStatus").innerHTML='<i></i>'+(!calculationAvailable?"服务异常 · 历史推荐可用":serviceMode?(priceBackend+" / "+effectBackend):(manifest.contract_valid?"本地双模型契约有效":"模型契约异常"));q("modelModeStatus").textContent=!calculationAvailable?"纯历史推荐":serviceMode?"独立HTTP服务":"本地兼容模式";q("priceBackendStatus").textContent=priceBackend;q("effectBackendStatus").textContent=effectBackend;if(integration.local_fallback_enabled)q("modelStatus").innerHTML+='<span> · 允许本地回退</span>';if(!calculationAvailable){q("generateBtn").disabled=true;q("sourceMode").value="historical";Array.prototype.forEach.call(document.querySelectorAll('.source-tabs button[data-source="generated"],.source-tabs button[data-source="both"]'),function(x){x.disabled=true});toast("价格或效能服务不可用：仍可筛选已有历史成品；预测、效能计算和新方案生成已暂停。",9000)}var demo=integration.demo_read_only;if(integration.auth_enabled)show(q("logoutBtn"));if(demo){show(q("demoModeBadge"));q("demoModeBadge").innerHTML='<i></i>登录只读演示';q("saveSchemeBtn").disabled=true;q("saveSchemeBtn").classList.add("readonly-control");q("saveSchemeBtn").title="演示模式禁止写入专家方案库";toast("已登录Cloudflare只读演示：全部页面可以查看，生成和显式计算可用，但不会写入服务器文件或数据库。",8000)}renderTags();setFont(localStorage.getItem("ipdemo-font-scale")||115);if(!localStorage.getItem("ipdemo-tour-v21-complete"))playTour();await recommend(false)}
   q("addFilterBtn").onclick=addVisibleFilter;
-  q("hideCoveredParams").onchange=refreshCoverageUi;q("parameterSearch").oninput=function(){Array.prototype.forEach.call(q("indicatorFilters").querySelectorAll(".filter-row"),function(row){if(row._refreshParameters)row._refreshParameters()})};q("helpBtn").onclick=playTour;
+  q("hideCoveredParams").onchange=refreshCoverageUi;q("helpBtn").onclick=playTour;
   ["maxPrice","minCapability","filterMode","generationCount","generationBudget","generationRounds"].forEach(function(id){var el=q(id);if(!el)return;["change","input"].forEach(function(ev){el.addEventListener(ev,markGenerationCriteriaDirty)})});
   q("showPriceAttributes").onchange=function(){var params=currentParams();state.showPriceAttributes=!!this.checked;renderEditor(params)};
   q("recommendBtn").onclick=function(){state.page=1;q("sourceMode").value="historical";recommend(false)};
