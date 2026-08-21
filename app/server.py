@@ -28,7 +28,7 @@ from .data_master import DataMasterService
 from .product_releases import ProductReleaseService
 from .local_generator import HistorySeededGenerator
 from .generation_tasks import GenerationTaskManager
-from .configuration import load_model_service_config
+from .configuration import load_model_service_config, load_service_portal_config, load_workbench_defaults
 from .range_diagnostics import build_range_diagnostics
 
 
@@ -119,6 +119,8 @@ class Application(object):
         self.login_lock = threading.RLock()
         self.login_attempts = {}
         self.model_config = load_model_service_config(self.root)
+        self.portal_config = load_service_portal_config(self.root)
+        self.workbench_defaults = load_workbench_defaults(self.root)
         self.model_execution_mode = self.model_config["execution_mode"]
         self.local_runtime = None
         self.model_gateway = None
@@ -444,6 +446,14 @@ class Application(object):
         effect_manifest = self.runtime.manifest().get("effectiveness") or {}
         payload["protocols"] = effect_manifest.get("protocol_profiles") or []
         payload["active_protocol"] = effect_manifest.get("active_protocol")
+        coverage = {}
+        for rule in self.store.tag_rule_rows():
+            key = str(rule.get("parameter_id") or "")
+            if key and not key.startswith("__"):
+                coverage.setdefault(str(rule.get("tag_id")), []).append(key)
+        payload["tag_parameter_coverage"] = dict(
+            (key, sorted(set(values))) for key, values in coverage.items()
+        )
         return payload
 
     def admin_snapshot(self):
@@ -658,7 +668,7 @@ class Application(object):
         if self.model_gateway is None:
             manifest = self.runtime.manifest().get("effectiveness") or {}
             fields = manifest.get("fields") or self.runtime.schema.get("features") or []
-            return {
+            schema = {
                 "product_code": self.runtime.schema.get("product_code"),
                 "product_name": self.runtime.schema.get("product_name"),
                 "backend": manifest.get("backend", "local_compatibility"),
@@ -667,19 +677,111 @@ class Application(object):
                 "active_protocol": manifest.get("active_protocol"),
                 "capabilities": manifest.get("capabilities") or {},
             }
-        return self.model_gateway.effectiveness_schema()
+        else:
+            schema = self.model_gateway.effectiveness_schema()
+        return self._enrich_workbench_schema(schema, "effectiveness")
 
     def price_workbench_schema(self):
         if self.model_gateway is None:
             manifest = self.runtime.manifest().get("price") or {}
-            return {
+            schema = {
                 "product_code": self.runtime.schema.get("product_code"),
                 "product_name": self.runtime.schema.get("product_name"),
                 "backend": manifest.get("backend", "local_compatibility"),
                 "model_version": manifest.get("model_version"),
                 "fields": manifest.get("fields") or self.runtime.price.raw_contract,
             }
-        return self.model_gateway.price_schema()
+        else:
+            schema = self.model_gateway.price_schema()
+        return self._enrich_workbench_schema(schema, "price")
+
+    @staticmethod
+    def _json_array(raw):
+        if isinstance(raw, list):
+            return list(raw)
+        try:
+            parsed = json.loads(raw or "[]")
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+
+    @staticmethod
+    def _workbench_fallback(field):
+        allowed = field.get("allowed_values") or field.get("categories") or []
+        if field.get("default_value") is not None:
+            return field.get("default_value"), "model_default"
+        if field.get("training_mean") is not None:
+            return field.get("training_mean"), "training_mean"
+        if allowed:
+            return allowed[0], "allowed_value"
+        lower = field.get("generation_min", field.get("training_min"))
+        upper = field.get("generation_max", field.get("training_max"))
+        if lower is not None and upper is not None:
+            return (float(lower) + float(upper)) / 2.0, "reference_midpoint"
+        if lower is not None:
+            return lower, "reference_lower"
+        dtype = str(field.get("business_value_type") or field.get("dtype") or field.get("type") or "").lower()
+        return (0, "boolean_fallback") if dtype == "boolean" else ("", "empty")
+
+    def _enrich_workbench_schema(self, raw_schema, model_kind):
+        schema = dict(raw_schema or {})
+        definitions = self.store.parameter_map()
+        preferred = self.workbench_defaults.get("historical_example_agreement_id")
+        example = self.store.workbench_example(preferred)
+        historical = dict((example or {}).get("parameters") or {})
+        fields, values, sources = [], {}, {}
+        for raw in schema.get("fields") or []:
+            field = dict(raw)
+            key = str(field.get("field_name") or field.get("key") or "")
+            if not key:
+                continue
+            definition = definitions.get(key) or {}
+            field["field_name"] = key
+            field["field_label"] = definition.get("label") or field.get("field_label") or field.get("label") or key
+            field["unit"] = definition.get("unit") or field.get("unit") or ""
+            field["parameter_id"] = key
+            field["display_value_mapping_json"] = definition.get("display_value_mapping_json")
+            field["business_value_type"] = definition.get("value_type")
+            business_allowed = self._json_array(definition.get("allowed_values_json"))
+            if business_allowed:
+                field["allowed_values"] = business_allowed
+            if key in historical and historical[key] not in (None, ""):
+                value, source = historical[key], "historical"
+            else:
+                value, source = self._workbench_fallback(field)
+                # Model schemas may expose encoded defaults.  Workbench controls
+                # always stay in DataMaster business-value space; encoding happens
+                # only at the model-service boundary.
+                value = self.store.business_parameters({key: value}).get(key, value)
+            for candidate in business_allowed:
+                if str(candidate) == str(value):
+                    value = candidate
+                    break
+            field["example_value"] = value
+            field["example_source"] = source
+            values[key], sources[key] = value, source
+            fields.append(field)
+        schema["fields"] = fields
+        schema["example"] = {
+            "agreement_id": (example or {}).get("agreement_id"),
+            "agreement_name": (example or {}).get("agreement_name"),
+            "source_year": (example or {}).get("source_year"),
+            "parameters": values, "value_sources": sources, "model_kind": model_kind,
+        }
+        schema["example_parameters"] = values
+        return schema
+
+    def portal(self):
+        services = []
+        for key, raw in (self.portal_config.get("services") or {}).items():
+            item = dict(raw)
+            if not item.get("enabled", True) or (key == "admin" and self.disable_admin):
+                continue
+            item["key"] = key
+            item["external"] = bool(urlparse(str(item.get("url") or "")).scheme in ("http", "https"))
+            services.append(item)
+        return {"title": self.portal_config.get("title") or "工业技术协议智能系统",
+                "services": services, "config_path": self.portal_config.get("config_path")}
 
     def price_workbench_predict(self, request):
         schema = self.price_workbench_schema()
@@ -688,7 +790,7 @@ class Application(object):
             str(item.get("field_name") or item.get("key")) for item in fields
             if item.get("field_name") or item.get("key")
         )
-        business = dict(request.get("parameters") or request.get("params") or {})
+        business = self.store.canonical_business_parameters(request.get("parameters") or request.get("params") or {})
         encoded = self.store.runtime_parameters(business)
         model_params = dict((key, encoded[key]) for key in field_names if key in encoded)
         if self.model_gateway is not None:
@@ -723,7 +825,7 @@ class Application(object):
             str(item.get("field_name") or item.get("key")) for item in fields
             if item.get("field_name") or item.get("key")
         )
-        business = dict(request.get("parameters") or request.get("params") or {})
+        business = self.store.canonical_business_parameters(request.get("parameters") or request.get("params") or {})
         encoded = self.store.runtime_parameters(business)
         model_params = dict((key, encoded[key]) for key in field_names if key in encoded)
         target = request.get("target_protocol")
@@ -1654,15 +1756,24 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
 
+    @staticmethod
+    def _safe_next(value):
+        value = unquote(str(value or "")).strip()
+        parsed = urlparse(value)
+        if (not value.startswith("/") or value.startswith("//") or "\\" in value or
+                any(ord(char) < 32 for char in value) or parsed.scheme or parsed.netloc):
+            return None
+        return value
+
     def _auth_required(self, path):
         if not self.app.auth_enabled or path in self.PUBLIC_PATHS:
             return False
         if self._is_authenticated():
             return False
         if path.startswith("/api/"):
-            self._json({"error":"authentication_required","message":"请先登录后访问演示系统。","login_path":"/login"}, 401)
+            self._json({"error":"authentication_required","message":"请先登录后访问演示系统。","login_path":"/login?next=" + quote(self.path, safe="")}, 401)
         else:
-            self._redirect("/login")
+            self._redirect("/login?next=" + quote(self.path, safe=""))
         return True
 
     def _demo_forbidden(self, message="当前为登录只读演示，页面和数据可以查看，但服务器端写入操作已禁用。"):
@@ -1707,6 +1818,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/admin","/admin/") and self.app.disable_admin:
             self._admin_forbidden(); return
         if path in ("/login", "/login.html"): rel = "login.html"
+        elif path in ("/portal", "/portal/"): rel = "portal.html"
         elif path in ("/admin","/admin/"): rel = "admin.html"
         elif path in ("/effectiveness", "/effectiveness/"): rel = "effectiveness.html"
         elif path in ("/price", "/price/"): rel = "price.html"
@@ -1720,7 +1832,7 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path); path, query = parsed.path, parse_qs(parsed.query)
         try:
             if path in ("/login", "/login.html") and self.app.auth_enabled and self._is_authenticated():
-                self._redirect("/"); return
+                self._redirect(self._safe_next((query.get("next") or [""])[0]) or "/portal"); return
             if self._auth_required(path):
                 return
             if path == "/api/auth/status":
@@ -1732,10 +1844,11 @@ class Handler(BaseHTTPRequestHandler):
                     "persistent_writes_enabled": not self.app.demo_read_only,
                 })
             elif path == "/api/health":
-                payload = {"status":"ok","version":"V19.6.14","mode":self.app.model_execution_mode if hasattr(self.app,"model_execution_mode") else "local","auth_required":self.app.auth_enabled,"demo_read_only":self.app.demo_read_only}
+                payload = {"status":"ok","version":"V21","mode":self.app.model_execution_mode if hasattr(self.app,"model_execution_mode") else "local","auth_required":self.app.auth_enabled,"demo_read_only":self.app.demo_read_only}
                 if self._is_authenticated() or not self.app.auth_enabled:
                     payload.update({"admin_enabled":not self.app.disable_admin,"manifest":self.app.runtime.manifest(),"database":self.app.store.integrity_check()})
                 self._json(payload)
+            elif path == "/api/portal": self._json(self.app.portal())
             elif path == "/api/bootstrap": self._json(self.app.bootstrap())
             elif path == "/api/effectiveness-workbench/schema": self._json(self.app.effectiveness_workbench_schema())
             elif path == "/api/price-workbench/schema": self._json(self.app.price_workbench_schema())
@@ -1797,7 +1910,8 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error":"invalid_credentials","message":"账号或密码不正确。"}, 401); return
                 self.app.clear_login_failures(client_id)
                 token = self.app.make_auth_token(username)
-                data = json.dumps({"authenticated":True,"username":username,"redirect":"/"}, ensure_ascii=False).encode("utf-8")
+                redirect = self._safe_next(request.get("next")) or "/portal"
+                data = json.dumps({"authenticated":True,"username":username,"redirect":redirect}, ensure_ascii=False).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type","application/json; charset=utf-8")
                 self.send_header("Content-Length",str(len(data)))

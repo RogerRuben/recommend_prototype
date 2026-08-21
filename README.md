@@ -1,6 +1,8 @@
-# 工业技术协议智能推荐系统 V20
+# 工业技术协议智能推荐系统 V21
 
-当前 V20 release closure 已将 DataMaster、模型 Schema 与训练范围统一定义为非阻断诊断元数据，并新增独立的前端显示映射。用户显式业务值不会被参考范围静默截断；显示文本变化不会改变数据库、生成或模型输入。详细规则见 `docs/V20_RECOMMENDATION_REFACTOR.md`。
+V21 聚焦推荐工作流体验、统一服务导航与简易 Workbench：推荐条件栏支持调整宽度，技术指标按分组检索并提示标签覆盖关系；登录默认进入可配置的五入口 Portal；价格和效能 Workbench 使用同一个确定性历史协议作为示例，并由 DataMaster 补充中文字段、单位与显示映射。实现和运维边界见 `docs/V21_WORKFLOW_PORTAL_WORKBENCH.md`。
+
+V20 确立的业务语义继续保持：DataMaster、模型 Schema 与训练范围是非阻断诊断元数据；用户显式业务值不会被参考范围静默截断；显示文本变化不会改变数据库、生成或模型输入。详细规则见 `docs/V20_RECOMMENDATION_REFACTOR.md`。
 
 当前 clean 运行主线：双独立 HTTP 模型服务、原 Notebook 任意模型子集一键导出、独立价格/效能工作台、数据中心可视化指标约束，以及仅以实算 JSON 为准的宽松服务准入。Win7 安装和最终测试见 `docs/CLEAN_WIN7_DEPLOYMENT_V19_6_13.md`。
 

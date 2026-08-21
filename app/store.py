@@ -414,6 +414,24 @@ class Store(object):
             result[key] = reverse.get(str(value).strip().lower(), value)
         return result
 
+    def canonical_business_parameters(self, params):
+        """Restore JSON form/select strings to DataMaster business scalar types."""
+        result = dict(params or {})
+        definitions = self.parameter_map()
+        numeric_types = {"number", "float", "integer", "boolean", "bool", "ip_grade"}
+        for key, value in list(result.items()):
+            definition = definitions.get(key) or {}
+            allowed = _json_list(definition.get("allowed_values_json"))
+            matched = next((candidate for candidate in allowed if str(candidate) == str(value)), None)
+            if matched is not None:
+                result[key] = matched
+                continue
+            if str(definition.get("value_type") or "").lower() in numeric_types:
+                number = _number(str(value).replace("IP", "").replace("ip", ""))
+                if number is not None:
+                    result[key] = int(number) if number.is_integer() else number
+        return result
+
     def tag_map(self, include_disabled=False):
         conn = self.connect()
         try:
@@ -734,6 +752,38 @@ class Store(object):
                     preserved["batch_evaluation_error"] = str(batch_error)
                     result.append(preserved)
             return result
+
+    def workbench_example(self, preferred_agreement_id=None):
+        """Return one deterministic historical business-value example."""
+        conn = self.connect()
+        try:
+            product_code = self.current_product_code()
+            row = None
+            if preferred_agreement_id:
+                row = conn.execute(
+                    """SELECT * FROM agreements WHERE product_code=? AND agreement_id=?
+                       AND enabled=1 AND agreement_source IN ('historical','imported') LIMIT 1""",
+                    (product_code, str(preferred_agreement_id)),
+                ).fetchone()
+            if row is None:
+                row = conn.execute(
+                    """SELECT * FROM agreements WHERE product_code=? AND enabled=1
+                       AND agreement_source IN ('historical','imported')
+                       ORDER BY CASE WHEN source_year IS NULL THEN 1 ELSE 0 END,
+                                source_year DESC, updated_at DESC, agreement_id ASC LIMIT 1""",
+                    (product_code,),
+                ).fetchone()
+            if row is None:
+                return None
+            item = self._agreement_row(row, recalculate=False)
+            return {
+                "agreement_id": item.get("agreement_id"),
+                "agreement_name": item.get("agreement_name"),
+                "source_year": item.get("source_year"),
+                "parameters": dict(item.get("params") or {}),
+            }
+        finally:
+            conn.close()
 
     def _evaluate_historical_one(self, params, target_protocol=None, historical_price_wan=None):
         """Evaluate one unchanged historical sample (effectiveness-only when available)."""

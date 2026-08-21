@@ -1,0 +1,10 @@
+{
+  "title": "工业技术协议智能系统",
+  "services": {
+    "recommendation": {"label": "智能方案推荐", "url": "/", "enabled": true},
+    "quick_price": {"label": "简易价格预测", "url": "/price", "enabled": true},
+    "advanced_price": {"label": "价格深度分析", "url": "http://192.168.10.88:8080/", "enabled": true},
+    "effectiveness": {"label": "简易效能评价", "url": "/effectiveness", "enabled": true},
+    "admin": {"label": "数据管理中心", "url": "/admin", "enabled": true}
+  }
+}

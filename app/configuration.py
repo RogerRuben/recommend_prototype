@@ -19,6 +19,17 @@ DEFAULT_MODEL_SERVICE_CONFIG = {
     "batch_size": 100,
 }
 
+DEFAULT_SERVICE_PORTAL_CONFIG = {
+    "title": "工业技术协议智能系统",
+    "services": {
+        "recommendation": {"label": "智能方案推荐", "url": "/", "enabled": True},
+        "quick_price": {"label": "简易价格预测", "url": "/price", "enabled": True},
+        "advanced_price": {"label": "价格深度分析", "url": "http://192.168.10.88:8080/", "enabled": True},
+        "effectiveness": {"label": "简易效能评价", "url": "/effectiveness", "enabled": True},
+        "admin": {"label": "数据管理中心", "url": "/admin", "enabled": True},
+    },
+}
+
 
 def _boolean(value, default=False):
     if value is None:
@@ -61,3 +72,32 @@ def load_model_service_config(root):
     result["config_path"] = str(path)
     result["config_loaded"] = path.is_file()
     return result
+
+
+def _load_json_object(path, default, label):
+    result = json.loads(json.dumps(default, ensure_ascii=False))
+    if path.is_file():
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("%s必须是JSON对象" % label)
+        result.update(raw)
+    result["config_path"] = str(path)
+    result["config_loaded"] = path.is_file()
+    return result
+
+
+def load_service_portal_config(root):
+    path = Path(root) / "config" / "service_portal.json"
+    result = _load_json_object(path, DEFAULT_SERVICE_PORTAL_CONFIG, "config/service_portal.json")
+    services = result.get("services")
+    if not isinstance(services, dict):
+        raise ValueError("config/service_portal.json的services必须是JSON对象")
+    result["services"] = dict(
+        (str(key), value) for key, value in services.items() if isinstance(value, dict)
+    )
+    return result
+
+
+def load_workbench_defaults(root):
+    path = Path(root) / "config" / "workbench_defaults.json"
+    return _load_json_object(path, {"historical_example_agreement_id": ""}, "config/workbench_defaults.json")
