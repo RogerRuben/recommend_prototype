@@ -49,7 +49,7 @@ class GenerationTaskManager(object):
         req = dict(request or {})
         session_id = str(req.get("session_id") or "default")
         req["session_id"] = session_id
-        req["count"] = max(1, min(int(req.get("count") or 10), 30))
+        req["count"] = max(1, min(int(req.get("count") or 5), 30))
         # Canonicalize user-tunable limits before fingerprinting so raw values
         # like rounds=100 and rounds=1000 map to the same clamped task.
         if req.get("generation_budget") not in (None, ""):

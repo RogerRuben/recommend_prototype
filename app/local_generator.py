@@ -368,19 +368,15 @@ class HistorySeededGenerator(object):
         value_type = str(definition.get("value_type") or "number").strip().lower()
         if value_type == "boolean":
             return "boolean"
-        # IP grades are ordered integers even when a legacy DataMaster carried
-        # only a few observed values. Treating that old list as the complete legal
-        # domain prevents exploration of valid intermediate grades such as IP64.
-        if value_type == "ip_grade":
-            return "integer"
-        allowed = self._allowed_values(definition)
-        if allowed:
-            numeric = [_float(value) for value in allowed]
-            return "ordered_discrete" if all(value is not None for value in numeric) else "unordered_enum"
         if value_type in ("enum", "text"):
             return "unordered_enum"
-        if int(definition.get("decimal_places") or 0) == 0:
+        # Numeric allowed values are observations/advice unless DataMaster
+        # explicitly declares ordered_discrete. They must never snap an explicit
+        # user anchor back into an old historical range.
+        if value_type in ("integer", "ip_grade"):
             return "integer"
+        if value_type in ("number", "float", "continuous"):
+            return "continuous"
         return "continuous"
 
     def _normalized_allowed_values(self, definition):
@@ -1246,6 +1242,52 @@ class HistorySeededGenerator(object):
             round(-objective, 8),
             round(seed_distance, 8),
         )
+        item["generation_level"] = "strict" if item["strict_filter_satisfied"] else "best_effort"
+        return item
+
+    def _exploratory_record(self, params, base, request, definitions, locked, iteration, attempt, search_move, error):
+        """Keep a parameter proposal when every model service rejects evaluation."""
+        constraint_rules = getattr(self.store, "constraint_rows", lambda: [])()
+        active_set = active_parameter_set(params, definitions, constraint_rules, locked=locked)
+        item = {
+            "agreement_id": "", "product_code": self.runtime.schema.get("product_code"),
+            "agreement_name": "", "positioning": self.store._positioning(base.get("tags") or []),
+            "agreement_source": "live_generated", "source_year": time.localtime().tm_year,
+            "supplier_type": "智能探索参数方案", "historical_price_wan": None,
+            "predicted_price_wan": None, "price_interval_wan": [], "capability_score": None,
+            "conservative_capability_score": None, "protocol_score_interval": [],
+            "feasibility_probability": None, "physical_gate": {"passed": None, "decision": "model_unavailable"},
+            "cost_effectiveness": None, "params": dict(params), "tags": list(base.get("tags") or []),
+            "tag_evidence": {}, "is_generated": True, "evaluation": None,
+            "model_evaluation_available": False, "model_evaluation_error": str(error),
+            "active_parameters": active_set["active_parameters"],
+            "inactive_parameters": active_set["inactive_parameters"],
+            "engineering_conflicts": [], "constraint_conflicts": [],
+            "extrapolation_warnings": ["模型服务拒绝该外推输入；当前仅保留参数探索方案。"],
+        }
+        unmet, demand_penalty, assessment = self._demand_assessment(item, request, definitions, {})
+        item.update({
+            "unmet_conditions": unmet, "demand_unmet_conditions": unmet,
+            "requirement_assessment": assessment, "strict_filter_satisfied": False,
+            "best_effort": True, "generation_level": "exploratory",
+            "fit_penalty": round(demand_penalty, 6), "recommendation_confidence": "low",
+            "recommendation_warning": "模型评价不可用；该结果仅作为参数探索方案。",
+            "generation_trace": {
+                "method": "exploratory_parameter_fallback", "seed_agreement_id": base.get("agreement_id"),
+                "locked_parameters": sorted(locked), "search_move": search_move,
+                "iteration": iteration, "attempt": attempt,
+                "node_id": "X%03d-%03d" % (int(iteration), int(attempt)), "parent_node_id": None,
+                "request_context": {
+                    "selected_tags": list(request.get("selected_tags") or []),
+                    "indicator_filter_mode": request.get("indicator_filter_mode", "all"),
+                    "indicator_filters": list(request.get("indicator_filters") or []),
+                },
+                "model_evaluation_error": str(error),
+            },
+        })
+        distance = self._normalized_distance(params, base.get("params") or {}, definitions)
+        item["_search_key"] = (9.0, round(demand_penalty, 8), 0.0, 9.0, 9.0, 0.0, round(distance, 8))
+        item["_risk_signature"] = ("model_evaluation_unavailable",)
         return item
 
     def _compensation_keys(self, locked, definitions, numeric):
@@ -1525,14 +1567,20 @@ class HistorySeededGenerator(object):
         item["generation_trace"] = trace
         item["agreement_id"] = "LIVE-%06d-%03d" % (rng.randint(0, 999999), index)
         item["agreement_name"] = "基于%s生成的候选协议-%02d" % (base["agreement_id"], index)
-        item["generation_note"] = "根据用户条件、标签规则和模型输出目标进行迭代优化，并完成价格与效能联合评价。"
-        if item.get("best_effort"):
-            item["solution_fit_label"] = "探索方案"
+        if item.get("generation_level") == "exploratory":
+            item["generation_note"] = "已按用户条件生成参数组合，但模型服务拒绝评价；当前结果仅供参数探索。"
+            item["solution_fit_label"] = "探索参数方案"
+            item["solution_fit_summary"] = "模型评价不可用，参数组合仍予保留，请人工复核后继续探索"
+        elif item.get("best_effort"):
+            item["generation_note"] = "根据用户条件、标签规则和模型输出目标进行迭代优化，并完成价格与效能联合评价。"
+            item["solution_fit_label"] = "尽力方案"
             item["solution_fit_summary"] = "仍有需求或工程硬规则未满足，请结合风险提示继续调整"
         elif item.get("extrapolation_warnings"):
+            item["generation_note"] = "根据用户条件、标签规则和模型输出目标进行迭代优化，并完成价格与效能联合评价。"
             item["solution_fit_label"] = "需求满足·外推评估"
             item["solution_fit_summary"] = "已满足筛选条件，但部分组合超出历史经验范围，预测可信度下降"
         else:
+            item["generation_note"] = "根据用户条件、标签规则和模型输出目标进行迭代优化，并完成价格与效能联合评价。"
             item["solution_fit_label"] = "满足条件"
             item["solution_fit_summary"] = "已满足当前筛选条件且位于主要模型经验范围内"
         return item
@@ -1581,12 +1629,42 @@ class HistorySeededGenerator(object):
             return record, base
         return None, None
 
-    def _generation_input_preflight(self, pending_items, definitions):
-        """Check model-required fields before spending any evaluation budget.
+    def _completion_value(self, key, item, history, definition, spec):
+        """Complete an unspecified model field without touching user locks."""
+        sources = []
+        base_params = dict((item.get("base") or {}).get("params") or {})
+        sources.append(("seed", base_params.get(key)))
+        for historical in history or []:
+            sources.append(("other_history", (historical.get("params") or {}).get(key)))
+        sources.extend([
+            ("business_default", definition.get("business_default")),
+            ("business_default", definition.get("default_value")),
+        ])
+        allowed = self._normalized_allowed_values(definition)
+        if allowed:
+            sources.append(("business_allowed", allowed[0]))
+        sources.extend([
+            ("model_default", spec.get("default_value")),
+            ("training_mean", spec.get("training_mean")),
+        ])
+        lower = spec.get("generation_min", spec.get("training_min", definition.get("min_value")))
+        upper = spec.get("generation_max", spec.get("training_max", definition.get("max_value")))
+        if lower is not None and upper is not None:
+            try:
+                sources.append(("reference_midpoint", (float(lower) + float(upper)) / 2.0))
+            except (TypeError, ValueError):
+                pass
+        for source, value in sources:
+            if value not in (None, ""):
+                return value, source
+        return None, None
+
+    def _generation_input_preflight(self, pending_items, definitions, history=None):
+        """Repair model-required fields and report remaining input risks.
 
         Returns ``None`` when the runtime/store does not expose schema metadata
-        (e.g. unit tests with mocks); otherwise returns per-seed eligibility and
-        aggregated missing/unmapped diagnostics.
+        (e.g. unit tests with mocks). Preflight is diagnostic and repairable; it
+        is never a generation-wide termination gate.
         """
         if not hasattr(self.runtime, "all_feature_specs") or not hasattr(self.store, "runtime_parameters"):
             return None
@@ -1605,7 +1683,16 @@ class HistorySeededGenerator(object):
         missing_agg = {}
         unmapped_agg = {}
         for item in pending_items:
-            business = dict(item.get("params") or {})
+            business = item.setdefault("params", {})
+            locked = set(item.get("locked") or {})
+            repairs = []
+            for key, spec in required.items():
+                if business.get(key) not in (None, "") or key in locked:
+                    continue
+                value, source = self._completion_value(key, item, history, definitions.get(key) or {}, spec)
+                if value not in (None, ""):
+                    business[key] = value
+                    repairs.append({"parameter_id": key, "source": source})
             model_params = self.store.runtime_parameters(business)
             missing = [key for key, spec in required.items() if model_params.get(key) in (None, "")]
             unmapped = []
@@ -1636,6 +1723,25 @@ class HistorySeededGenerator(object):
                                 break
                     if not known:
                         unmapped.append(key)
+            for key in list(unmapped):
+                if key in locked:
+                    continue
+                definition = definitions.get(key) or {}
+                allowed = self._normalized_allowed_values(definition)
+                mapping = definition.get("model_value_mapping_json")
+                try:
+                    mapping = json.loads(mapping) if isinstance(mapping, str) else (mapping or {})
+                except Exception:
+                    mapping = {}
+                replacement = allowed[0] if allowed else (next(iter(mapping), None) if isinstance(mapping, dict) else None)
+                if replacement not in (None, ""):
+                    business[key] = replacement
+                    repairs.append({"parameter_id": key, "source": "business_mapping"})
+            if repairs:
+                model_params = self.store.runtime_parameters(business)
+                missing = [key for key, spec in required.items() if model_params.get(key) in (None, "")]
+                unmapped = [key for key in unmapped if key in locked]
+                item.setdefault("completion_repairs", []).extend(repairs)
             for key in missing:
                 missing_agg[key] = missing_agg.get(key, 0) + 1
             for key in set(unmapped):
@@ -1645,6 +1751,7 @@ class HistorySeededGenerator(object):
                 "eligible": not missing and not unmapped,
                 "missing_required_fields": missing,
                 "unmapped_values": sorted(set(unmapped)),
+                "completion_repairs": repairs,
             })
         return {
             "seed_count": len(pending_items),
@@ -1654,7 +1761,7 @@ class HistorySeededGenerator(object):
             "seeds": seed_results,
         }
 
-    def generate(self, request, count=10, seed=None, budget=1200, search_mode="fast", progress_callback=None):
+    def generate(self, request, count=5, seed=None, budget=1200, search_mode="fast", progress_callback=None):
         rng = random.Random(seed if seed is not None else int(time.time() * 1000) % 2147483647)
         deep_search = str(search_mode or "fast") == "deep_extrapolation"
         definitions = self._parameter_definitions()
@@ -1757,29 +1864,7 @@ class HistorySeededGenerator(object):
 
         # Model-input preflight: reject seeds that would fail at evaluation time
         # before spending any generation budget.
-        preflight = self._generation_input_preflight(initial_pending, definitions)
-        if preflight is not None:
-            initial_pending = [
-                item for item, result in zip(initial_pending, preflight["seeds"]) if result["eligible"]
-            ]
-            if not initial_pending:
-                early_rounds = int(request.get("generation_rounds") or (7 if deep_search else 6))
-                return {
-                    "candidates": [], "requested_count": count, "evaluated_count": 0,
-                    "all_records_count": 0, "usable_count": 0, "best_effort_candidate_count": 0,
-                    "final_selected_count": 0, "fallback_used": False, "seed_agreements": [],
-                    "rejection_statistics": rejection, "rejection_details": [],
-                    "generation_budget": max_evaluations, "actual_budget_used": 0,
-                    "max_rounds": early_rounds, "actual_rounds": 0,
-                    "stopping_reason": "generation_input_preflight_failed",
-                    "strict_filter_satisfied": False, "strict_candidate_count": 0,
-                    "best_effort_used": False, "bounds": branch_bounds,
-                    "relaxation_suggestions": ["历史参考方案缺少当前模型所需输入，请完善属性或模型值映射后再生成。"],
-                    "generation_method": "preflight", "search_iterations": 0,
-                    "search_mode": "deep_extrapolation" if deep_search else "fast",
-                    "empty_result": True, "preflight": preflight,
-                    "explicit_filter_feasibility": explicit_feasibility,
-                }
+        preflight = self._generation_input_preflight(initial_pending, definitions, history=history)
 
         initial_evaluations = None
         if initial_pending and self.evaluate_batch_callback:
@@ -1814,8 +1899,12 @@ class HistorySeededGenerator(object):
             except Exception as exc:
                 rejection["model_input"] += 1
                 record_rejection("model_evaluation", "SEED-%04d" % initial_index, exc)
-                continue
-            evaluations += 1
+                record = self._exploratory_record(
+                    item["params"], item["base"], item["request"], definitions,
+                    item["locked"], 0, item["attempt"], "需求与标签条件投影", exc,
+                )
+            else:
+                evaluations += 1
             record["_base"] = item["base"]
             record["_locked"] = item["locked"]
             record["_locked_sources"] = item["locked_sources"]
@@ -1824,6 +1913,7 @@ class HistorySeededGenerator(object):
             record["generation_trace"]["tag_branch"] = item["branch_info"]
             record["generation_trace"]["locked_sources"] = item["locked_sources"]
             record["generation_trace"]["anchor_resolutions"] = item.get("anchor_resolutions") or []
+            record["generation_trace"]["completion_repairs"] = item.get("completion_repairs") or []
             all_records.append(record)
             beam.append(record)
         beam_width = 14 if deep_search else 10
@@ -2017,8 +2107,12 @@ class HistorySeededGenerator(object):
                 except Exception as exc:
                     rejection["model_input"] += 1
                     record_rejection("model_evaluation", "SEARCH-%02d-%04d" % (iteration, pending_index), exc)
-                    continue
-                evaluations += 1
+                    record = self._exploratory_record(
+                        item["params"], item["base"], item["request"], definitions,
+                        item["locked"], iteration, pending_index + 1, item["move_label"], exc,
+                    )
+                else:
+                    evaluations += 1
                 record["_base"] = item["base"]
                 record["_locked"] = item["locked"]
                 record["_locked_sources"] = item.get("locked_sources") or {}
@@ -2105,6 +2199,7 @@ class HistorySeededGenerator(object):
             usable.append(closest)
 
         strict_candidates = [item for item in usable if item.get("strict_filter_satisfied")]
+        exploratory_candidates = [item for item in usable if item.get("generation_level") == "exploratory"]
         strict_available = bool(strict_candidates)
         if strict_available:
             ranking_pool = []
@@ -2191,6 +2286,7 @@ class HistorySeededGenerator(object):
             "all_records_count": len(all_records),
             "usable_count": len(usable),
             "best_effort_candidate_count": len(usable) - len(strict_candidates),
+            "exploratory_candidate_count": len(exploratory_candidates),
             "final_selected_count": len(public_selected),
             "fallback_used": any(item.get("fallback_kind") == "closest_evaluated_result" for item in public_selected),
             "seed_agreements": [item["agreement_id"] for item in seeds],

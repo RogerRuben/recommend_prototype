@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Generation preflight rejects model-incomplete seeds before spending budget."""
+"""Generation preflight repairs unspecified model fields and never terminates search."""
 from __future__ import print_function
 
 import json
@@ -17,7 +17,8 @@ PARAMETER_DEFINITIONS = {
                  "search_type": "continuous", "min_value": 0, "max_value": 10,
                  "decimal_places": 2, "enabled": 1, "auto_adjustable": 1},
     "attr_006": {"parameter_id": "attr_006", "label": "重量", "value_type": "number",
-                 "search_type": "continuous", "min_value": 0, "max_value": 10,
+                 "search_type": "auto", "min_value": 4.2, "max_value": 6,
+                 "allowed_values_json": "[4.2,4.5,5.0,5.5,6.0]",
                  "decimal_places": 1, "enabled": 1, "auto_adjustable": 1},
 }
 
@@ -100,33 +101,51 @@ class _MockStore(object):
 
 
 def main():
-    # All seeds miss attr_004 -> preflight must stop before any evaluation.
+    # All seeds miss attr_004 -> preflight completes the unspecified field and
+    # generation still spends budget. The explicit attr_006 anchor is untouched.
     bad_seeds = [
         {"agreement_id": "H-01", "params": {"attr_006": 4.2}, "tags": []},
         {"agreement_id": "H-02", "params": {"attr_006": 5.0}, "tags": []},
     ]
     gen_bad = HistorySeededGenerator(_MockStore(bad_seeds), _MockRuntime(), mock_evaluate, None)
     request = {"min_capability": 50, "frozen_parameters": [], "selected_tags": [],
-               "indicator_filters": [{"parameter_id": "attr_006", "operator": "lte", "value1": 2.2}],
+               "indicator_filters": [{"parameter_id": "attr_006", "operator": "lte", "value1": 3}],
                "indicator_filter_mode": "all", "sort_by": "comprehensive", "count": 2, "target_protocol": None}
     result_bad = gen_bad.generate(request, count=2, seed=5, budget=100, search_mode="fast")
-    assert result_bad.get("empty_result") is True, result_bad
-    assert result_bad["stopping_reason"] == "generation_input_preflight_failed", result_bad
-    assert result_bad["actual_budget_used"] == 0, result_bad
-    assert result_bad["preflight"]["eligible_seed_count"] == 0
-    assert result_bad["preflight"]["missing_required_fields"].get("attr_004") == 1
+    assert result_bad["stopping_reason"] != "generation_input_preflight_failed", result_bad
+    assert result_bad["actual_budget_used"] > 0, result_bad
+    assert result_bad["preflight"]["eligible_seed_count"] == 1
+    assert result_bad["preflight"]["seeds"][0]["completion_repairs"] == [
+        {"parameter_id": "attr_004", "source": "reference_midpoint"}
+    ]
+    assert result_bad["final_selected_count"] >= 1, result_bad
+    assert result_bad["actual_rounds"] > 0, result_bad
+    assert all(item["params"]["attr_006"] <= 3 for item in result_bad["candidates"]), result_bad
 
-    # One complete seed -> preflight filters to it and search actually runs.
+    # Complete and repairable seeds both remain searchable.
     good_seeds = [
         {"agreement_id": "H-01", "params": {"attr_004": 5.0, "attr_006": 4.2}, "tags": []},
         {"agreement_id": "H-02", "params": {"attr_006": 5.0}, "tags": []},
     ]
     gen_good = HistorySeededGenerator(_MockStore(good_seeds), _MockRuntime(), mock_evaluate, None)
     result_good = gen_good.generate(request, count=1, seed=5, budget=100, search_mode="fast")
-    assert result_good.get("preflight", {}).get("eligible_seed_count") == 1, result_good.get("preflight")
+    assert result_good.get("preflight", {}).get("eligible_seed_count") == 2, result_good.get("preflight")
     assert result_good["actual_budget_used"] > 0, result_good
 
-    print(json.dumps({"status": "PASS", "message": "生成前模型输入预检已生效且不消耗评价额度"}, ensure_ascii=False))
+    # Total model rejection still returns parameter-only Exploratory results.
+    def reject_all(*args, **kwargs):
+        raise ValueError("model service rejected out-of-domain input")
+
+    exploratory = HistorySeededGenerator(_MockStore(good_seeds), _MockRuntime(), reject_all, None).generate(
+        request, count=1, seed=5, budget=20, search_mode="fast"
+    )
+    assert exploratory["actual_budget_used"] > 0, exploratory
+    assert exploratory["final_selected_count"] >= 1, exploratory
+    assert exploratory["exploratory_candidate_count"] >= 1, exploratory
+    assert exploratory["candidates"][0]["generation_level"] == "exploratory", exploratory
+    assert exploratory["candidates"][0]["model_evaluation_available"] is False, exploratory
+
+    print(json.dumps({"status": "PASS", "message": "生成前模型输入预检可修复且不再终止搜索"}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

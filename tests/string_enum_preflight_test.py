@@ -67,12 +67,16 @@ def main():
     # Numeric mappings must not let arbitrary numbers pass; only known key/value
     # (or numeric equivalents) are eligible.
     gen_num = HistorySeededGenerator(_Store(), _NumRuntime(), None, None)
+    repairable = [{"params": {"attr_code": 999}, "base": {"agreement_id": "H-01"}}]
     bad = gen_num._generation_input_preflight(
-        [{"params": {"attr_code": 999}, "base": {"agreement_id": "H-01"}}],
+        repairable,
         NUM_DEFINITIONS,
     )
-    assert bad["eligible_seed_count"] == 0, bad
-    assert bad["unmapped_values"].get("attr_code") == ["999"], bad
+    assert bad["eligible_seed_count"] == 1, bad
+    assert repairable[0]["params"]["attr_code"] == "A", repairable
+    assert bad["seeds"][0]["completion_repairs"] == [
+        {"parameter_id": "attr_code", "source": "business_mapping"}
+    ]
 
     good = gen_num._generation_input_preflight(
         [{"params": {"attr_code": 0}, "base": {"agreement_id": "H-01"}}],
@@ -80,7 +84,7 @@ def main():
     )
     assert good["eligible_seed_count"] == 1, good
 
-    print(json.dumps({"status": "PASS", "message": "字符串模型编码不会误判，任意数字编码会被 preflight 拦截"}, ensure_ascii=False))
+    print(json.dumps({"status": "PASS", "message": "字符串模型编码不会误判，未锁定的未知编码可由 preflight 修复"}, ensure_ascii=False))
 
 
 if __name__ == "__main__":
