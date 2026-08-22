@@ -1682,6 +1682,41 @@ class HistorySeededGenerator(object):
         seed_results = []
         missing_agg = {}
         unmapped_agg = {}
+
+        def equivalent(left, right):
+            if str(left).strip() == str(right).strip():
+                return True
+            left_num, right_num = normalize_numeric(left), normalize_numeric(right)
+            return left_num is not None and right_num is not None and abs(left_num - right_num) < 1e-9
+
+        def validate_business_input(business):
+            """Rebuild model input and validate the complete contract after repair."""
+            model_params = self.store.runtime_parameters(business)
+            missing = [key for key in required if model_params.get(key) in (None, "")]
+            invalid = []
+            for key, spec in required.items():
+                business_value = business.get(key)
+                model_value = model_params.get(key)
+                definition = definitions.get(key) or {}
+                raw_mapping = definition.get("model_value_mapping_json")
+                try:
+                    mapping = json.loads(raw_mapping) if isinstance(raw_mapping, str) else (raw_mapping or {})
+                except Exception:
+                    mapping = {}
+                if not isinstance(mapping, dict):
+                    mapping = {}
+                if mapping and business_value not in (None, ""):
+                    known_business = any(equivalent(business_value, candidate) for candidate in mapping)
+                    known_model = any(equivalent(business_value, candidate) for candidate in mapping.values())
+                    if not known_business and not known_model:
+                        invalid.append(key)
+                        continue
+                allowed = spec.get("allowed_values") or spec.get("categories") or []
+                if allowed and model_value not in (None, ""):
+                    if not any(equivalent(model_value, candidate) for candidate in allowed):
+                        invalid.append(key)
+            return model_params, missing, sorted(set(invalid))
+
         for item in pending_items:
             business = item.setdefault("params", {})
             locked = set(item.get("locked") or {})
@@ -1693,36 +1728,7 @@ class HistorySeededGenerator(object):
                 if value not in (None, ""):
                     business[key] = value
                     repairs.append({"parameter_id": key, "source": source})
-            model_params = self.store.runtime_parameters(business)
-            missing = [key for key, spec in required.items() if model_params.get(key) in (None, "")]
-            unmapped = []
-            for key, value in business.items():
-                definition = definitions.get(key) or {}
-                if str(definition.get("value_type") or "").lower() != "enum":
-                    continue
-                raw_mapping = definition.get("model_value_mapping_json")
-                if not raw_mapping:
-                    continue
-                try:
-                    mapping = json.loads(raw_mapping) if isinstance(raw_mapping, str) else raw_mapping
-                except Exception:
-                    mapping = {}
-                if not isinstance(mapping, dict):
-                    mapping = {}
-                text = str(value).strip() if value is not None else ""
-                if text:
-                    business_keys = {str(k).strip() for k in mapping}
-                    model_values = {str(v).strip() for v in mapping.values()}
-                    text_num = normalize_numeric(text)
-                    known = text in business_keys or text in model_values
-                    if not known and text_num is not None:
-                        for candidate in list(business_keys) + list(model_values):
-                            candidate_num = normalize_numeric(candidate)
-                            if candidate_num is not None and abs(text_num - candidate_num) < 1e-9:
-                                known = True
-                                break
-                    if not known:
-                        unmapped.append(key)
+            model_params, missing, unmapped = validate_business_input(business)
             for key in list(unmapped):
                 if key in locked:
                     continue
@@ -1738,10 +1744,10 @@ class HistorySeededGenerator(object):
                     business[key] = replacement
                     repairs.append({"parameter_id": key, "source": "business_mapping"})
             if repairs:
-                model_params = self.store.runtime_parameters(business)
-                missing = [key for key, spec in required.items() if model_params.get(key) in (None, "")]
-                unmapped = [key for key in unmapped if key in locked]
                 item.setdefault("completion_repairs", []).extend(repairs)
+            # Never infer that an unlocked value was repaired. Re-run conversion,
+            # required-field, mapping and model-domain validation from scratch.
+            model_params, missing, unmapped = validate_business_input(business)
             for key in missing:
                 missing_agg[key] = missing_agg.get(key, 0) + 1
             for key in set(unmapped):
