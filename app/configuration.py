@@ -23,11 +23,11 @@ DEFAULT_MODEL_SERVICE_CONFIG = {
 DEFAULT_SERVICE_PORTAL_CONFIG = {
     "title": "工业技术协议智能系统",
     "services": {
-        "recommendation": {"label": "智能方案推荐", "url": "/", "enabled": True},
-        "quick_price": {"label": "简易价格预测", "url": "/price", "enabled": True},
-        "advanced_price": {"label": "价格深度分析", "url": "", "enabled": False},
-        "effectiveness": {"label": "简易效能评价", "url": "/effectiveness", "enabled": True},
-        "admin": {"label": "数据管理中心", "url": "/admin", "enabled": True},
+        "recommendation": {"label": "智能方案推荐", "url": "/", "visible": True, "enabled": True},
+        "quick_price": {"label": "简易价格预测", "url": "/price", "visible": True, "enabled": True},
+        "advanced_price": {"label": "价格深度分析", "url": "", "visible": True, "enabled": False},
+        "effectiveness": {"label": "简易效能评价", "url": "/effectiveness", "visible": True, "enabled": True},
+        "admin": {"label": "数据管理中心", "url": "/admin", "visible": True, "enabled": True},
     },
 }
 
@@ -89,16 +89,29 @@ def _load_json_object(path, default, label):
 
 def load_service_portal_config(root):
     path = Path(root) / "config" / "service_portal.json"
-    result = _load_json_object(path, DEFAULT_SERVICE_PORTAL_CONFIG, "config/service_portal.json")
-    services = result.get("services")
-    if not isinstance(services, dict):
+    raw = {}
+    if path.is_file():
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("config/service_portal.json必须是JSON对象")
+    raw_services = raw.get("services", {})
+    if not isinstance(raw_services, dict):
         raise ValueError("config/service_portal.json的services必须是JSON对象")
+    result = json.loads(json.dumps(DEFAULT_SERVICE_PORTAL_CONFIG, ensure_ascii=False))
+    for key, value in raw.items():
+        if key != "services":
+            result[key] = value
+    services = dict(result["services"])
+    for key, value in raw_services.items():
+        if isinstance(value, dict):
+            services[key] = dict(services.get(key) or {}, **value)
     validated = {}
     for key, value in services.items():
         if not isinstance(value, dict):
             continue
         key, item = str(key), dict(value)
         enabled = _boolean(item.get("enabled"), True)
+        visible = _boolean(item.get("visible"), True)
         url = str(item.get("url") or "").strip()
         if url:
             parsed = urlparse(url)
@@ -108,9 +121,11 @@ def load_service_portal_config(root):
                 raise ValueError("config/service_portal.json服务%s的url不安全或无效" % key)
         elif enabled:
             raise ValueError("config/service_portal.json服务%s启用时必须配置url" % key)
-        item["url"], item["enabled"] = url, enabled
+        item["url"], item["enabled"], item["visible"] = url, enabled, visible
         validated[key] = item
     result["services"] = validated
+    result["config_path"] = str(path)
+    result["config_loaded"] = path.is_file()
     return result
 
 

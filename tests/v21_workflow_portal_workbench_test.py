@@ -22,8 +22,26 @@ def static_contracts():
     html = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
     js = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
     css = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
-    for token in ("railResizeHandle", "hideCoveredParams", "parameterSearch", "workflowStatus", "helpBtn"):
+    effectiveness_js = (ROOT / "app/static/effectiveness.js").read_text(encoding="utf-8")
+    price_js = (ROOT / "app/static/price.js").read_text(encoding="utf-8")
+    generation_tasks = (ROOT / "app/generation_tasks.py").read_text(encoding="utf-8")
+    server = (ROOT / "app/server.py").read_text(encoding="utf-8")
+    for token in ("railResizeHandle", "hideCoveredParams", "workflowStatus", "helpBtn"):
         assert token in html
+    assert "parameterSearch" not in html
+    assert "filter-search-results" in js and "selectParameter(" in js
+    home_tour = js[js.index("function playTour(){"):js.index("function playDetailTour(){")]
+    assert "saveSchemeBtn" not in home_tour
+    assert "function tourScrollContainer(" in js and "scrollIntoView" in js and "container.scrollTo" in js
+    assert "ipdemo-detail-tour-v21-complete" in js and "#saveSchemeBtn" in js
+    assert 'id="generationCount" type="number" min="1" max="30" value="5"' in html
+    assert 'generation_count:Number(q("generationCount").value||5)' in js
+    assert 'req.get("count") or 5' in generation_tasks
+    assert 'req.get("generation_count") or req.get("count") or 5' in server
+    assert 'required=field.required===false?"":" required"' in effectiveness_js
+    assert 'required=f.required===false?"":" required"' in price_js
+    assert "historical_incompatible_fallback" in effectiveness_js and "historical_incompatible_fallback" in price_js
+    assert "清空筛选条件" in html and "评价协议已恢复默认" in js
     assert 'localStorage.setItem(key,String(Math.round(value)))' in js
     assert 'key="ipdemo-search-rail-width"' in js
     assert "tag_parameter_coverage" in js
@@ -44,6 +62,7 @@ def portal_and_login_contracts():
     assert list(portal["services"]) == ["recommendation", "quick_price", "advanced_price", "effectiveness", "admin"]
     assert portal["services"]["advanced_price"]["url"] == ""
     assert portal["services"]["advanced_price"]["enabled"] is False
+    assert portal["services"]["advanced_price"]["visible"] is True
     assert "advanced_price" not in models
     assert models["price_service_url"].endswith(":18101")
     assert models["effectiveness_service_url"].endswith(":18102")
@@ -64,7 +83,9 @@ def portal_and_login_contracts():
             "pending": {"label": "待配置", "url": "", "enabled": False},
         }
         path.write_text(json.dumps({"services": allowed}), encoding="utf-8")
-        assert set(load_service_portal_config(folder)["services"]) == set(allowed)
+        loaded = load_service_portal_config(folder)["services"]
+        assert set(loaded) == set(allowed) | {"recommendation", "quick_price", "advanced_price", "effectiveness", "admin"}
+        assert loaded["recommendation"]["url"] == "/"
         for unsafe in ("javascript:alert(1)", "data:text/html,x", "file:///tmp/x", "vbscript:x", "//evil.test/x", "\\\\evil.test\\x", ""):
             path.write_text(json.dumps({"services": {"bad": {"url": unsafe, "enabled": True}}}), encoding="utf-8")
             try:
@@ -79,6 +100,24 @@ def portal_and_login_contracts():
         except ValueError:
             pass
 
+    with tempfile.TemporaryDirectory(prefix="ipdemo_portal_save_", dir=str(ROOT)) as folder:
+        config = Path(folder) / "config"
+        config.mkdir()
+        portal_path = config / "service_portal.json"
+        model_path = config / "model_services.json"
+        portal_path.write_text(json.dumps({"services": {"advanced_price": {"url": "", "enabled": False}}}), encoding="utf-8")
+        model_path.write_text('{"sentinel":"unchanged"}', encoding="utf-8")
+        app = Application.__new__(Application)
+        app.root = Path(folder)
+        app.portal_config = load_service_portal_config(folder)
+        saved = app.save_portal_config({"services": {
+            "advanced_price": {"url": "http://10.10.1.5:9000", "visible": True, "enabled": True}
+        }})
+        assert saved["saved"] is True and Path(saved["backup"]).is_file()
+        assert app.portal_config["services"]["advanced_price"]["url"] == "http://10.10.1.5:9000"
+        assert app.portal_config["services"]["recommendation"]["url"] == "/"
+        assert model_path.read_text(encoding="utf-8") == '{"sentinel":"unchanged"}'
+
 
 def standard_startup_contract():
     standard = (ROOT / "START_ALL_SERVICES_WIN7.bat").read_text(encoding="utf-8")
@@ -88,6 +127,7 @@ def standard_startup_contract():
     assert '/api/health' in standard
     assert '!MAIN_PORT!/portal' in standard
     assert 'start "" "!PORTAL_URL!"' in standard
+    assert 'set "IPDEMO_AUTH_ENABLED=1"' in standard
     assert "--no-browser" in no_browser
     assert "17891/portal" not in standard
 
@@ -141,7 +181,7 @@ class FakeStore(object):
 
     def workbench_example(self, preferred=None):
         return {"agreement_id": "AGR-ONE", "agreement_name": "统一历史方案", "source_year": 2024,
-                "parameters": {"weight": 4.2}}
+                "parameters": {"weight": 4.2, "flag": 99}}
 
     def business_parameters(self, model_params, source_params=None):
         result = dict(source_params or {})
@@ -165,6 +205,8 @@ def workbench_enrichment_contract():
     assert fields["weight"]["field_label"] == "重量" and fields["weight"]["example_value"] == 4.2
     assert fields["flag"]["example_value"] == 0
     assert fields["flag"]["allowed_values"] == [0, 1]
+    assert fields["flag"]["example_source"] == "historical_incompatible_fallback"
+    assert "历史值" in fields["flag"]["example_warning"]
     assert fields["external_only"]["field_label"] == "External Label"
     assert fields["external_only"]["example_value"] == 9
     assert json.loads(fields["flag"]["display_value_mapping_json"])["1"] == "有"

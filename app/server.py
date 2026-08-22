@@ -745,18 +745,40 @@ class Application(object):
             business_allowed = self._json_array(definition.get("allowed_values_json"))
             if business_allowed:
                 field["allowed_values"] = business_allowed
+            def compatible_allowed(candidate):
+                for allowed_value in business_allowed:
+                    if str(allowed_value) == str(candidate):
+                        return allowed_value
+                    try:
+                        if float(allowed_value) == float(candidate):
+                            return allowed_value
+                    except (TypeError, ValueError):
+                        pass
+                return None
             if key in historical and historical[key] not in (None, ""):
-                value, source = historical[key], "historical"
+                historical_value = historical[key]
+                compatible = compatible_allowed(historical_value) if business_allowed else historical_value
+                if business_allowed and compatible is None:
+                    fallback, _fallback_source = self._workbench_fallback(field)
+                    fallback = self.store.business_parameters({key: fallback}).get(key, fallback)
+                    value = compatible_allowed(fallback)
+                    if value is None:
+                        value = compatible_allowed(definition.get("business_default"))
+                    if value is None:
+                        value = business_allowed[0]
+                    source = "historical_incompatible_fallback"
+                    field["example_warning"] = "该字段历史值已不在当前业务枚举中，已使用当前业务默认值。"
+                else:
+                    value, source = compatible, "historical"
             else:
                 value, source = self._workbench_fallback(field)
                 # Model schemas may expose encoded defaults.  Workbench controls
                 # always stay in DataMaster business-value space; encoding happens
                 # only at the model-service boundary.
                 value = self.store.business_parameters({key: value}).get(key, value)
-            for candidate in business_allowed:
-                if str(candidate) == str(value):
-                    value = candidate
-                    break
+            compatible = compatible_allowed(value) if business_allowed else None
+            if compatible is not None:
+                value = compatible
             field["example_value"] = value
             field["example_source"] = source
             values[key], sources[key] = value, source
@@ -775,13 +797,50 @@ class Application(object):
         services = []
         for key, raw in (self.portal_config.get("services") or {}).items():
             item = dict(raw)
-            if not item.get("enabled", True) or (key == "admin" and self.disable_admin):
+            if not item.get("visible", True) or (key == "admin" and self.disable_admin):
                 continue
             item["key"] = key
-            item["external"] = bool(urlparse(str(item.get("url") or "")).scheme in ("http", "https"))
+            item["external"] = bool(item.get("enabled") and urlparse(str(item.get("url") or "")).scheme in ("http", "https"))
             services.append(item)
         return {"title": self.portal_config.get("title") or "工业技术协议智能系统",
                 "services": services, "config_path": self.portal_config.get("config_path")}
+
+    def save_portal_config(self, request):
+        """Validate and atomically replace navigation config without touching model config."""
+        if not isinstance(request, dict) or not isinstance(request.get("services"), dict):
+            raise ValueError("服务导航配置必须包含services JSON对象")
+        current = self.portal_config.get("services") or {}
+        services = {}
+        for key in list(current) + [key for key in request["services"] if key not in current]:
+            raw = request["services"].get(key, {})
+            if not isinstance(raw, dict):
+                raise ValueError("服务%s的配置必须是JSON对象" % key)
+            item = dict(current.get(key) or {})
+            item.update(raw)
+            item["label"] = str(item.get("label") or key).strip()
+            item["url"] = str(item.get("url") or "").strip()
+            item["visible"] = bool(item.get("visible", True))
+            item["enabled"] = bool(item.get("enabled", True))
+            if item["url"]:
+                parsed = urlparse(item["url"])
+                local = item["url"].startswith("/") and not item["url"].startswith("//") and not parsed.scheme and not parsed.netloc
+                external = parsed.scheme in ("http", "https") and bool(parsed.netloc)
+                if "\\" in item["url"] or any(ord(char) < 32 for char in item["url"]) or not (local or external):
+                    raise ValueError("服务%s的url不安全或无效" % key)
+            elif item["enabled"]:
+                raise ValueError("服务%s启用时必须配置url" % key)
+            services[str(key)] = item
+        path = self.root / "config" / "service_portal.json"
+        payload = {"title": str(request.get("title") or self.portal_config.get("title") or "工业技术协议智能系统"), "services": services}
+        backup = None
+        if path.is_file():
+            backup = path.with_name("service_portal.%s.bak.json" % datetime.now().strftime("%Y%m%d_%H%M%S_%f"))
+            shutil.copy2(str(path), str(backup))
+        temporary = path.with_name("service_portal.json.tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(str(temporary), str(path))
+        self.portal_config = load_service_portal_config(self.root)
+        return {"saved": True, "config": self.portal_config, "backup": str(backup) if backup else None}
 
     def price_workbench_predict(self, request):
         schema = self.price_workbench_schema()
@@ -1167,7 +1226,7 @@ class Application(object):
         self._require_product_ready()
         req = dict(request or {})
         session_id = str(req.get("session_id") or "default")
-        count = max(1, min(int(req.get("count") or 10), 30))
+        count = max(1, min(int(req.get("count") or 5), 30))
         req["count"] = count
         search_profile = dict(req.get("search_profile") or self.generation_search_profile(req))
         req["search_profile"] = search_profile
@@ -1236,13 +1295,16 @@ class Application(object):
     def request_generation(self, request):
         self._require_product_ready()
         req = dict(request or {})
-        req["count"] = max(1, min(int(req.get("generation_count") or req.get("count") or 10), 30))
+        req["count"] = max(1, min(int(req.get("generation_count") or req.get("count") or 5), 30))
         req["search_profile"] = self.generation_search_profile(req)
         return self.generation_tasks.start(req, force=bool(req.get("force_regenerate")))
 
     def _refresh_candidates_for_protocol(self, candidates, request):
         target_protocol = request.get("target_protocol")
         if not candidates or target_protocol in (None, ""):
+            return candidates
+        evaluatable = [item for item in candidates if item.get("model_evaluation_available") is not False]
+        if not evaluatable:
             return candidates
         prepared = [
             {
@@ -1251,13 +1313,13 @@ class Application(object):
                 "base_parameters": item.get("params") or {},
                 "target_protocol": target_protocol,
             }
-            for index, item in enumerate(candidates)
+            for index, item in enumerate(evaluatable)
         ]
         evaluations = self._evaluate_batch_with_rules(prepared)
         definitions = self.store.parameter_map()
         tag_map = self.store.tag_map()
         refreshed = []
-        for source, evaluation in zip(candidates, evaluations):
+        for source, evaluation in zip(evaluatable, evaluations):
             item = dict(source)
             params = dict(evaluation.get("parameters") or item.get("params") or {})
             tags = self.store.derive_tags(params, evaluation, item.get("tags") or [])
@@ -1287,7 +1349,8 @@ class Application(object):
             item["best_effort"] = bool(demand_unmet or hard_conflicts)
             item["fit_penalty"] = round(demand_penalty + 2.5 * hard_penalty, 6)
             refreshed.append(item)
-        return refreshed
+        refreshed_by_id = dict((item.get("agreement_id"), item) for item in refreshed)
+        return [refreshed_by_id.get(item.get("agreement_id"), item) for item in candidates]
 
     def recommend(self, request):
         request = dict(request or {})
@@ -1300,7 +1363,7 @@ class Application(object):
         task_info = None
         if request.get("start_generation") and calculation_available:
             generation_request = dict(request)
-            generation_request["count"] = max(1, min(int(request.get("generation_count") or request.get("count") or 10), 30))
+            generation_request["count"] = max(1, min(int(request.get("generation_count") or request.get("count") or 5), 30))
             generation_request["search_profile"] = self.generation_search_profile(generation_request)
             task_info = self.generation_tasks.start(generation_request, force=False)
 
@@ -1350,7 +1413,7 @@ class Application(object):
             "recommendation_mode": "model_evaluated" if calculation_available else "historical_only_degraded",
             "warning": None if calculation_available else "价格和效能服务当前不可用；结果仅按历史价格、成品属性和标签筛选，未执行模型计算。",
             "protocol": (
-                ranked[0].get("evaluation", {}).get("protocol")
+                (ranked[0].get("evaluation") or {}).get("protocol")
                 if ranked
                 else target_protocol
             ),
@@ -1363,6 +1426,20 @@ class Application(object):
             target_protocol=target_protocol,
         )
         if item is None: return None
+        if item.get("model_evaluation_available") is False:
+            item["current_model_evaluation"] = item.get("evaluation") or {
+                "model_evaluation_available": False,
+                "parameters": item.get("params") or {}, "predicted_price_wan": None,
+                "capability_score": None, "conservative_capability_score": None,
+                "cost_effectiveness": None, "feasibility_probability": None,
+                "prediction_confidence": "unavailable", "coupling_assessments": [],
+                "range_diagnostics": [], "tag_evidence": item.get("tag_evidence") or {},
+                "rule_messages": [{"severity":"warning", "title":"模型评价不可用",
+                                   "message":"模型服务拒绝该参数组合；当前仅保留参数探索方案。",
+                                   "detail":"可调整参数后重新尝试计算。"}],
+                "adjustment_guidance": {"tips": []},
+            }
+            return item
         if not calculation_available:
             item["model_evaluation_available"] = False
             item["current_model_evaluation"] = {
@@ -1719,6 +1796,7 @@ class Handler(BaseHTTPRequestHandler):
         "/api/admin/product-releases/module/stage", "/api/admin/product-releases/section/save",
         "/api/admin/product-releases/history/create", "/api/admin/product-releases/maintenance/import",
         "/api/admin/product-releases/validate", "/api/admin/product-releases/activate",
+        "/api/admin/portal-config",
     }
 
     def log_message(self, fmt, *args): print("[%s] %s" % (self.log_date_time_string(), fmt % args))
@@ -1861,6 +1939,7 @@ class Handler(BaseHTTPRequestHandler):
                 scheme_id = unquote(path.split("/api/saved/",1)[1]); item = self.app.saved_detail(scheme_id); self._json(item if item else {"error":"not_found"},200 if item else 404)
             elif path.startswith("/api/admin/") and self.app.disable_admin: self._admin_forbidden()
             elif path == "/api/admin/snapshot": self._json(self.app.admin_snapshot())
+            elif path == "/api/admin/portal-config": self._json(self.app.portal_config)
             elif path == "/api/admin/backups": self._json({"items":self.app.store.list_backups()})
             elif path == "/api/admin/database/download": self._file(self.app.store.db_path, "protocol_demo.db")
             elif path == "/api/admin/export-json": self._json(self.app.store.export_json())
@@ -1948,6 +2027,7 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.app.store.admin_upsert(request.get("section"), request.get("item") or {})
                 self.app.on_business_data_changed()
                 self._json(result)
+            elif path == "/api/admin/portal-config": self._json(self.app.save_portal_config(request))
             elif path == "/api/admin/conditional-constraint/upsert":
                 result = self.app.store.upsert_conditional_template(request.get("template") or {})
                 self.app.on_business_data_changed()

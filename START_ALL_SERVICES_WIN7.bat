@@ -37,6 +37,7 @@ echo.
 echo [OK] Both model services are available.
 type "logs\model_service_check.log"
 echo [INFO] Starting recommendation system...
+set "IPDEMO_AUTH_ENABLED=1"
 set "PYEXE="
 if exist "runtime\venvs\model_runtime38\Scripts\python.exe" set "PYEXE=%CD%\runtime\venvs\model_runtime38\Scripts\python.exe"
 if not defined PYEXE if exist "runtime\python.exe" set "PYEXE=%CD%\runtime\python.exe"
