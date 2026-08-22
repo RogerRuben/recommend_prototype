@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Global indicator search must never rewrite an established explicit row."""
+"""Grouped indicator search must never choose or rewrite a parameter implicitly."""
 from __future__ import print_function
 
 import json
@@ -29,11 +29,17 @@ def main():
     source = APP_JS.read_text(encoding="utf-8")
     add_filter = source[source.index("function addFilter("):source.index("function collectFilters(")]
     assert 'q("parameterSearch")' not in add_filter
-    assert 'q("parameterSearch").oninput' not in source
+    assert "addVisibleFilter" not in source
+    assert "function refreshParameterOptions(" in add_filter
+    assert "function selectParameter(" in add_filter
+    assert "function refreshCoverageNote(" in add_filter
+    assert "search.oninput=refreshParameterOptions" in add_filter
+    assert "group.onchange=function(){saved=null" in add_filter
+    assert "button.onclick=function(){selectParameter" in add_filter
+    assert "psel.onchange" not in add_filter
 
     helper = extract_function(source, "filterParametersForRow")
-    refresh_helper = extract_function(source, "shouldRefreshFilterControls")
-    harness = helper + "\n" + refresh_helper + r"""
+    harness = helper + r"""
 const parameters = [
   {parameter_id:'weight', label:'重量', parameter_group:'结构'},
   {parameter_id:'material', label:'材料', parameter_group:'结构'},
@@ -43,9 +49,7 @@ const preserved = filterParametersForRow(parameters, '结构', '', {weight:true}
 const crossGroup = filterParametersForRow(parameters, '环境', '', {sealed:true}, true, 'weight');
 console.log(JSON.stringify({
   preserved:preserved.map(x=>x.parameter_id),
-  crossGroup:crossGroup.map(x=>x.parameter_id),
-  tagRefreshRebuildsValue:shouldRefreshFilterControls('weight','weight',true,true),
-  changedParameterRebuildsValue:shouldRefreshFilterControls('weight','material',true,true)
+  crossGroup:crossGroup.map(x=>x.parameter_id)
 }));
 """
     run = subprocess.run(["node", "-e", harness], capture_output=True, text=True)
@@ -55,9 +59,7 @@ console.log(JSON.stringify({
     assert result["preserved"] == ["weight", "material"]
     # Switching to a group whose only indicator is hidden never leaks weight across groups.
     assert result["crossGroup"] == []
-    assert result["tagRefreshRebuildsValue"] is False
-    assert result["changedParameterRebuildsValue"] is True
-    print("PASS V21 global search and tag refresh preserve explicit filters")
+    print("PASS V21.1 grouped search requires explicit selection and preserves existing filters")
 
 
 if __name__ == "__main__":
