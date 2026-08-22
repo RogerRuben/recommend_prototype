@@ -3,30 +3,35 @@
   "services": {
     "recommendation": {
       "label": "智能方案推荐",
+      "description": "根据需求筛选、推荐并生成候选方案",
       "url": "/",
       "visible": true,
       "enabled": true
     },
     "quick_price": {
       "label": "简易价格预测",
+      "description": "快速估算成品参考价格",
       "url": "/price",
       "visible": true,
       "enabled": true
     },
     "advanced_price": {
       "label": "价格深度分析",
+      "description": "专业价格预测与综合分析",
       "url": "",
       "visible": true,
       "enabled": false
     },
     "effectiveness": {
       "label": "简易效能评价",
+      "description": "评估综合效能与主要风险",
       "url": "/effectiveness",
       "visible": true,
       "enabled": true
     },
     "admin": {
       "label": "数据管理中心",
+      "description": "维护成品数据、指标、规则与系统设置",
       "url": "/admin",
       "visible": true,
       "enabled": true

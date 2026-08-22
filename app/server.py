@@ -28,7 +28,7 @@ from .data_master import DataMasterService
 from .product_releases import ProductReleaseService
 from .local_generator import HistorySeededGenerator
 from .generation_tasks import GenerationTaskManager
-from .configuration import load_model_service_config, load_service_portal_config, load_workbench_defaults
+from .configuration import _boolean, load_model_service_config, load_service_portal_config, load_workbench_defaults
 from .range_diagnostics import build_range_diagnostics
 
 
@@ -818,9 +818,10 @@ class Application(object):
             item = dict(current.get(key) or {})
             item.update(raw)
             item["label"] = str(item.get("label") or key).strip()
+            item["description"] = str(item.get("description") or "").strip()
             item["url"] = str(item.get("url") or "").strip()
-            item["visible"] = bool(item.get("visible", True))
-            item["enabled"] = bool(item.get("enabled", True))
+            item["visible"] = _boolean(item.get("visible"), True)
+            item["enabled"] = _boolean(item.get("enabled"), True)
             if item["url"]:
                 parsed = urlparse(item["url"])
                 local = item["url"].startswith("/") and not item["url"].startswith("//") and not parsed.scheme and not parsed.netloc
