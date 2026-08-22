@@ -16,13 +16,13 @@ if str(ROOT) not in sys.path:
 
 
 EXPECTED = {
-    "numpy": "1.24.4",
+    "numpy": "1.23.5",
     "scipy": "1.10.1",
     "openpyxl": "3.1.3",
-    "sklearn": "1.3.2",
+    "sklearn": "1.2.1",
     "xgboost": "1.7.6",
-    "joblib": "1.4.2",
-    "threadpoolctl": "3.5.0",
+    "joblib": "1.1.1",
+    "threadpoolctl": "3.1.0",
     "pandas": "1.5.3",
     "matplotlib": "3.7.5",
     "seaborn": "0.13.2",
@@ -37,13 +37,10 @@ def module_version(name):
 
 
 def verify_modules(profile):
-    required = [
-        "numpy", "scipy", "openpyxl", "sklearn", "xgboost",
-        "joblib", "threadpoolctl",
-    ]
+    required = ["numpy", "scipy", "pandas", "openpyxl", "sklearn", "joblib", "threadpoolctl"]
     if profile == "training":
         required.extend([
-            "pandas", "matplotlib", "seaborn", "notebook", "ipykernel",
+            "xgboost", "matplotlib", "seaborn", "notebook", "ipykernel",
         ])
     versions = {}
     errors = []
