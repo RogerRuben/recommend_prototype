@@ -9,6 +9,8 @@ __pycache__/
 venv/
 runtime/venvs/
 runtime/
+# Optional per-machine service interpreter overrides (never commit local paths)
+runtime/service_runtime.local.bat
 
 # Offline dependency bundles are delivered separately
 **/wheelhouse_win7/
