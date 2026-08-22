@@ -2,6 +2,16 @@
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
+if exist "runtime\python38\python.exe" (
+  "runtime\python38\python.exe" -c "import os,sys; sys.exit(len(os.path.abspath('.')) // 101)"
+  if errorlevel 1 (
+    echo [ERROR] The extracted directory path is too long for the packaged Python 3.8 libraries.
+    echo Move the complete folder to a short path, for example D:\IPDemo, and start again.
+    pause
+    exit /b 1
+  )
+)
+
 if exist "runtime\service_runtime.local.bat" call "runtime\service_runtime.local.bat"
 if not exist "logs" mkdir "logs"
 

@@ -50,6 +50,7 @@ def verify_package(root):
     required = [
         "START_OFFLINE_WIN7.bat", "INSTALL_OFFLINE_RUNTIME_WIN7.bat",
         "START_ALL_SERVICES_WIN7.bat", "requirements_offline_py38.txt",
+        "runtime/python38/python.exe", "runtime/python38/python38._pth",
         "services/price_service/model/price_native_bundle.pkl",
         "services/effectiveness_service/model/current/effectiveness_runtime_manifest.json",
         "data/protocol_demo.db",

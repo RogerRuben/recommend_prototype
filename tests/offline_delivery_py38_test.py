@@ -45,7 +45,14 @@ def main():
     assert "--smoke-current-models" in installer
     assert "START_ALL_SERVICES_WIN7.bat" in starter
     assert "runtime / \"service_runtime.local.bat\"" in builder
-    assert "PRICE_SERVICE_PYTHON=%~dp0venvs" in builder
+    assert "PRICE_SERVICE_PYTHON=%~dp0python38" in builder
+    assert 'pth_lines.insert(1, "..\\\\..")' in builder
+    assert "IPDemo_V21_1_1_Offline_" in builder
+    prepare = (ROOT / "tools/prepare_embedded_python38.py").read_text(encoding="utf-8")
+    assert "--no-index" in prepare and "--ignore-installed" in prepare
+    start_all = (ROOT / "START_ALL_SERVICES_WIN7.bat").read_text(encoding="utf-8")
+    assert "runtime\\python38\\python.exe" in start_all
+    assert "path is too long" in start_all
     print("PASS offline CPython 3.8 delivery contracts")
 
 

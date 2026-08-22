@@ -17,8 +17,21 @@ python tools\wheelhouse_manifest.py ^
   --output "offline_assets\wheelhouse_win7_py38\WHEELHOUSE_MANIFEST.json"
 if errorlevel 1 goto failed
 
+if not exist "offline_assets\python-3.8.10-embed-amd64.zip" (
+  echo [INFO] Downloading the official relocatable CPython 3.8.10 x64 runtime.
+  curl.exe -L "https://www.python.org/ftp/python/3.8.10/python-3.8.10-embed-amd64.zip" ^
+    -o "offline_assets\python-3.8.10-embed-amd64.zip"
+  if errorlevel 1 goto failed
+)
+
+python tools\prepare_embedded_python38.py ^
+  --archive "offline_assets\python-3.8.10-embed-amd64.zip" ^
+  --wheelhouse "offline_assets\wheelhouse_win7_py38" ^
+  --output "offline_assets\python38_embedded"
+if errorlevel 1 goto failed
+
 echo.
-echo [PASS] Offline wheelhouse is ready.
+echo [PASS] Offline wheelhouse and relocatable Python 3.8 runtime are ready.
 echo Next: BUILD_OFFLINE_DELIVERY_PY38.bat
 exit /b 0
 

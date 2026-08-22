@@ -5,6 +5,7 @@ chcp 65001 >nul
 
 python tools\build_offline_delivery_py38.py ^
   --wheelhouse "offline_assets\wheelhouse_win7_py38" ^
+  --embedded-runtime "offline_assets\python38_embedded" ^
   --output "deliverables\offline_py38"
 if errorlevel 1 (
   echo.

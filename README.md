@@ -10,7 +10,7 @@ V19.6在V19.5共享价格／效能属性基础上持续完成数据生命周期�
 
 V11 效能模型采用“专家端在线学习、推荐系统只读复用产物”的边界设计，详见 [效能产物复用与服务边界](docs/EFFECTIVENESS_ARTIFACT_CONSUMPTION_V11.md)。需要不含离线 wheels 的源码交付时，运行 `BUILD_SOURCE_DEPLOYMENT_NO_WHEELS.bat`；在可联网或可访问内部 pip 镜像的目标机上，使用 `INSTALL_SOURCE_DEPENDENCIES_WIN7.bat` 创建运行环境。
 
-甲方机器已有 Python 3.8 x64、但完全断网时，使用 `PREPARE_OFFLINE_WHEELHOUSE_PY38.bat` 在联网开发机准备依赖，再运行 `BUILD_OFFLINE_DELIVERY_PY38.bat` 生成单个离线 ZIP。甲方解压后只需双击 `START_OFFLINE_WIN7.bat`；首次运行从包内 wheelhouse 建立隔离环境并执行双模型真实试算，后续直接启动。详见 `docs/OFFLINE_DELIVERY_PY38_WIN7.md`。
+甲方机器完全断网时，使用 `PREPARE_OFFLINE_WHEELHOUSE_PY38.bat` 在联网开发机准备依赖和官方 Python 3.8.10 x64 便携运行时，再运行 `BUILD_OFFLINE_DELIVERY_PY38.bat` 生成单个离线 ZIP。甲方解压后可直接双击 `START_OFFLINE_WIN7.bat` 或原有 `START_ALL_SERVICES_WIN7.bat`，机器自身 Python 和 PATH 不参与正式服务启动。详见 `docs/OFFLINE_DELIVERY_PY38_WIN7.md`。
 
 ## 推荐启动方式
 

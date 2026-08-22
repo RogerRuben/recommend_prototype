@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import zipfile
 from datetime import datetime
@@ -110,13 +111,25 @@ def _manifest_files(stage):
     return result
 
 
-def build_delivery(wheelhouse, output, package_name=None):
+def build_delivery(wheelhouse, embedded_runtime, output, package_name=None):
     requirements = ROOT / "requirements_offline_py38.txt"
     wheels = validate_wheelhouse(wheelhouse, requirements)
+    embedded_runtime = Path(embedded_runtime).resolve()
+    embedded_python = embedded_runtime / "python.exe"
+    if not embedded_python.is_file() or not (embedded_runtime / "python38._pth").is_file():
+        raise ValueError("Prepared relocatable Python 3.8 runtime is missing: %s" % embedded_runtime)
+    completed = subprocess.run(
+        [str(embedded_python), str(ROOT / "tools" / "verify_model_environment.py"),
+         "--profile", "runtime", "--smoke-current-models"],
+        cwd=str(ROOT), stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, universal_newlines=True,
+    )
+    if completed.returncode != 0:
+        raise ValueError("Embedded Python 3.8 model smoke failed:\n%s" % completed.stdout)
     output = Path(output).resolve()
     if output == ROOT or ROOT in output.parents and output.name in ("app", "services", "data", "config"):
         raise ValueError("Refusing unsafe output directory: %s" % output)
-    package_name = package_name or "IndustrialProtocol_V21_1_1_Offline_Py38_Win64_%s" % datetime.now().strftime("%Y%m%d")
+    package_name = package_name or "IPDemo_V21_1_1_Offline_%s" % datetime.now().strftime("%Y%m%d")
     stage = output / package_name
     zip_path = output / (package_name + ".zip")
     hash_path = output / (package_name + ".zip.sha256")
@@ -149,21 +162,37 @@ def build_delivery(wheelhouse, output, package_name=None):
 
     runtime = stage / "runtime"
     runtime.mkdir(exist_ok=True)
+    _copy_tree(embedded_runtime, runtime / "python38")
+    packaged_pth = runtime / "python38" / "python38._pth"
+    pth_lines = packaged_pth.read_text(encoding="utf-8-sig").splitlines()
+    pth_lines = [line for line in pth_lines if line.strip() != "..\\.."]
+    pth_lines.insert(1, "..\\..")
+    packaged_pth.write_text("\n".join(pth_lines) + "\n", encoding="utf-8")
     (runtime / "service_runtime.local.bat").write_text(
         "@echo off\r\n"
-        "set \"PRICE_SERVICE_PYTHON=%~dp0venvs\\offline_py38\\Scripts\\python.exe\"\r\n"
-        "set \"EFFECT_SERVICE_PYTHON=%~dp0venvs\\offline_py38\\Scripts\\python.exe\"\r\n"
-        "set \"MAIN_APP_PYTHON=%~dp0venvs\\offline_py38\\Scripts\\python.exe\"\r\n",
+        "set \"PRICE_SERVICE_PYTHON=%~dp0python38\\python.exe\"\r\n"
+        "set \"EFFECT_SERVICE_PYTHON=%~dp0python38\\python.exe\"\r\n"
+        "set \"MAIN_APP_PYTHON=%~dp0python38\\python.exe\"\r\n",
         encoding="ascii",
     )
-    (runtime / ".keep").write_text("Offline runtime is created on the target machine.\n", encoding="ascii")
+    (runtime / ".keep").write_text("Self-contained CPython 3.8 runtime.\n", encoding="ascii")
+
+    staged_smoke = subprocess.run(
+        [str(runtime / "python38" / "python.exe"),
+         str(stage / "tools" / "verify_model_environment.py"),
+         "--profile", "runtime", "--smoke-current-models"],
+        cwd=str(stage), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        universal_newlines=True,
+    )
+    if staged_smoke.returncode != 0:
+        raise RuntimeError("Packaged Python 3.8 model smoke failed:\n%s" % staged_smoke.stdout)
 
     manifest = {
         "format_version": "industrial-offline-delivery-1.0",
         "release": "V21.1.1",
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "package_name": package_name,
-        "target": {"os": "Windows 7 or later x64", "python": "CPython 3.8 x64", "network_required": False},
+        "target": {"os": "Windows 7 or later x64", "python": "bundled CPython 3.8.10 x64", "network_required": False},
         "entrypoint": "START_OFFLINE_WIN7.bat",
         "installer": "INSTALL_OFFLINE_RUNTIME_WIN7.bat",
         "wheel_count": len(wheels),
@@ -199,11 +228,12 @@ def build_delivery(wheelhouse, output, package_name=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wheelhouse", required=True)
+    parser.add_argument("--embedded-runtime", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--package-name")
     args = parser.parse_args(argv)
     try:
-        result = build_delivery(args.wheelhouse, args.output, args.package_name)
+        result = build_delivery(args.wheelhouse, args.embedded_runtime, args.output, args.package_name)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except Exception as exc:

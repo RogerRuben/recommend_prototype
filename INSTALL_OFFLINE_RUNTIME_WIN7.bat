@@ -3,6 +3,15 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 chcp 65001 >nul
 
+if exist "runtime\python38\python.exe" (
+  set "RUNTIMEPY=%CD%\runtime\python38\python.exe"
+  "%CD%\runtime\python38\python.exe" tools\verify_offline_package.py --root "%CD%"
+  if errorlevel 1 goto failed
+  "%CD%\runtime\python38\python.exe" tools\verify_model_environment.py --profile runtime --smoke-current-models
+  if errorlevel 1 goto failed
+  goto write_runtime_config
+)
+
 set "BASEPY="
 if defined PYTHON38_EXE if exist "%PYTHON38_EXE%" set "BASEPY=%PYTHON38_EXE%"
 if not defined BASEPY if exist "C:\Python38\python.exe" set "BASEPY=C:\Python38\python.exe"
@@ -43,12 +52,14 @@ if errorlevel 1 goto failed
 echo [INFO] Running real price and effectiveness model smoke tests...
 "%VENV%\Scripts\python.exe" tools\verify_model_environment.py --profile runtime --smoke-current-models
 if errorlevel 1 goto failed
+set "RUNTIMEPY=%VENV%\Scripts\python.exe"
 
+:write_runtime_config
 if not exist "runtime" mkdir "runtime"
 >"runtime\service_runtime.local.bat" echo @echo off
->>"runtime\service_runtime.local.bat" echo set "PRICE_SERVICE_PYTHON=%%~dp0venvs\offline_py38\Scripts\python.exe"
->>"runtime\service_runtime.local.bat" echo set "EFFECT_SERVICE_PYTHON=%%~dp0venvs\offline_py38\Scripts\python.exe"
->>"runtime\service_runtime.local.bat" echo set "MAIN_APP_PYTHON=%%~dp0venvs\offline_py38\Scripts\python.exe"
+>>"runtime\service_runtime.local.bat" echo set "PRICE_SERVICE_PYTHON=%RUNTIMEPY%"
+>>"runtime\service_runtime.local.bat" echo set "EFFECT_SERVICE_PYTHON=%RUNTIMEPY%"
+>>"runtime\service_runtime.local.bat" echo set "MAIN_APP_PYTHON=%RUNTIMEPY%"
 
 echo.
 echo [PASS] Offline runtime is installed and both formal models passed real calculations.
