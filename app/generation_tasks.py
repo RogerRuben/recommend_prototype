@@ -23,7 +23,7 @@ class GenerationTaskManager(object):
         relevant = dict((key, request.get(key)) for key in (
             "session_id", "selected_tags", "max_price", "min_capability", "min_cost_effectiveness",
             "min_feasibility", "indicator_filter_mode", "indicator_filters", "count",
-            "target_protocol"
+            "target_protocol", "scenario", "scenario_options", "optimization_intensity"
         ))
         # Frozen parameters change which seed values are locked during search, so
         # a different frozen set must never reuse a previously cached batch.
@@ -155,7 +155,7 @@ class GenerationTaskManager(object):
                 "rejection_details", "generation_budget", "actual_budget_used", "max_rounds", "actual_rounds",
                 "stopping_reason", "seed_agreements", "message", "batch_id", "search_profile", "search_warning",
                 "search_iterations", "generation_method", "empty_result", "preflight",
-                "explicit_filter_feasibility"
+                "explicit_filter_feasibility", "scenario", "scenario_policy", "applied_ranking"
             ))
             payload["candidates_count"] = len(result.get("candidates") or [])
         return payload

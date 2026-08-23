@@ -280,7 +280,48 @@ class HistorySeededGenerator(object):
         historical = list(historical if historical is not None else self.store.historical_agreements())
         definitions = self._parameter_definitions()
         tag_weights = dict((key, value.get("weight", 1.0)) for key, value in self.store.tag_map().items())
-        scored = [(self._request_distance(item, request, definitions, tag_weights), item) for item in historical]
+        policy = request.get("_scenario_policy") or {}
+        weights = policy.get("ranking_weights") or {}
+        if weights:
+            def outcome(item, key, fallback=None):
+                value = item.get(key)
+                if value in (None, ""):
+                    value = (item.get("evaluation") or {}).get(key)
+                if value in (None, "") and fallback:
+                    value = item.get(fallback)
+                return _float(value)
+            prices = [outcome(item, "predicted_price_wan", "historical_price_wan") for item in historical]
+            capabilities = [outcome(item, "capability_score") for item in historical]
+            valid_prices = [value for value in prices if value is not None]
+            valid_capabilities = [value for value in capabilities if value is not None]
+            pmin, pmax = (min(valid_prices), max(valid_prices)) if valid_prices else (0.0, 0.0)
+            cmin, cmax = (min(valid_capabilities), max(valid_capabilities)) if valid_capabilities else (0.0, 0.0)
+            scored = []
+            for index, item in enumerate(historical):
+                assessment = assess_requirements(
+                    item, request, definitions, self.store.tag_map(),
+                    getattr(self.store, "constraint_rows", lambda: [])(),
+                )
+                technical_conditions = [
+                    condition for condition in assessment.get("conditions") or []
+                    if condition.get("kind") in ("parameter", "tag")
+                ]
+                technical_distance = (
+                    sum(float(condition.get("gap") if condition.get("gap") is not None else (0 if condition.get("matched") else 1)) for condition in technical_conditions)
+                    / max(len(technical_conditions), 1)
+                )
+                price = prices[index]
+                price_distance = 0.5 if price is None else (0.0 if pmax == pmin else (price - pmin) / (pmax - pmin))
+                capability = capabilities[index]
+                capability_distance = 0.5 if capability is None else (0.0 if cmax == cmin else (cmax - capability) / (cmax - cmin))
+                preference_distance = (
+                    float(weights.get("technical", 0)) * technical_distance +
+                    float(weights.get("price", 0)) * price_distance +
+                    float(weights.get("capability", 0)) * capability_distance
+                )
+                scored.append((float(assessment.get("demand_penalty") or 0) + preference_distance, item))
+        else:
+            scored = [(self._request_distance(item, request, definitions, tag_weights), item) for item in historical]
         scored.sort(key=lambda x: x[0])
         selected = []
         for _score, item in scored:

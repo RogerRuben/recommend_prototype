@@ -245,8 +245,12 @@ def rank_agreements(items, request, tag_weights, definitions=None, tag_map=None,
         return []
     prices = [item["predicted_price_wan"] for item in candidates if item.get("predicted_price_wan") is not None]
     ces = [item["cost_effectiveness"] for item in candidates if item.get("cost_effectiveness") is not None]
+    capabilities = [item["capability_score"] for item in candidates if item.get("capability_score") is not None]
     pmin, pmax = (min(prices), max(prices)) if prices else (0.0, 0.0)
     cemin, cemax = (min(ces), max(ces)) if ces else (0.0, 0.0)
+    capmin, capmax = (min(capabilities), max(capabilities)) if capabilities else (0.0, 0.0)
+    scenario_policy = request.get("_scenario_policy") or {}
+    scenario_weights = scenario_policy.get("ranking_weights") or {}
     for item in candidates:
         numeric_price = item.get("predicted_price_wan")
         numeric_ce = item.get("cost_effectiveness")
@@ -262,6 +266,18 @@ def rank_agreements(items, request, tag_weights, definitions=None, tag_map=None,
         item["uncertainty_penalty"] = round(uncertainty_penalty, 3)
         if item.get("model_evaluation_available") is False:
             base_score = 0.70 * item["tag_match_score"] + 0.30 * price_score - 20.0
+        elif scenario_weights:
+            numeric_capability = item.get("capability_score")
+            capability_score = 50.0 if numeric_capability is None else (100.0 if capmax == capmin else 100.0 * (numeric_capability - capmin) / (capmax - capmin))
+            demand_fit_score = max(0.0, 100.0 - min(100.0, 20.0 * float(item.get("fit_penalty", 0) or 0)))
+            technical_score = 0.55 * demand_fit_score + 0.45 * item["tag_match_score"]
+            base_score = (
+                float(scenario_weights.get("technical", 0)) * technical_score +
+                float(scenario_weights.get("price", 0)) * price_score +
+                float(scenario_weights.get("capability", 0)) * capability_score
+            ) - uncertainty_penalty
+            item["technical_match_score"] = round(technical_score, 3)
+            item["scenario_weighted_score"] = round(base_score, 3)
         else:
             base_score = (
                 0.30 * item["tag_match_score"] + 0.25 * float(item.get("capability_score", 0)) +
@@ -342,14 +358,29 @@ def rank_historical_products(items, request, tag_weights, definitions=None, tag_
         return []
     prices = [item["predicted_price_wan"] for item in candidates if item["predicted_price_wan"] is not None]
     pmin, pmax = (min(prices), max(prices)) if prices else (0.0, 0.0)
+    scenario_policy = request.get("_scenario_policy") or {}
+    scenario_weights = scenario_policy.get("ranking_weights") or {}
     for item in candidates:
         price = item["predicted_price_wan"]
         price_score = 50.0 if price is None else 100.0 if pmax == pmin else 100.0 * (pmax - price) / (pmax - pmin)
         item["price_score"] = round(price_score, 3)
-        item["comprehensive_score"] = round(0.70 * item["tag_match_score"] + 0.30 * price_score, 3)
+        if scenario_weights:
+            technical = max(0.0, 100.0 - min(100.0, 20.0 * float(item.get("fit_penalty", 0) or 0)))
+            technical_weight = float(scenario_weights.get("technical", 0)) + float(scenario_weights.get("capability", 0))
+            price_weight = float(scenario_weights.get("price", 0))
+            total_weight = max(technical_weight + price_weight, 1e-9)
+            item["comprehensive_score"] = round((technical_weight * technical + price_weight * price_score) / total_weight, 3)
+            item["technical_match_score"] = round(technical, 3)
+            item["scenario_weighted_score"] = item["comprehensive_score"]
+        else:
+            item["comprehensive_score"] = round(0.70 * item["tag_match_score"] + 0.30 * price_score, 3)
     sort_by = str(request.get("sort_by") or "comprehensive")
     sort_order = str(request.get("sort_order") or "").strip().lower()
-    key_map = {"comprehensive": "comprehensive_score", "price": "predicted_price_wan", "tag_match": "tag_match_score"}
+    key_map = {
+        "comprehensive": "comprehensive_score", "price": "predicted_price_wan",
+        "capability": "capability_score", "cost_effectiveness": "cost_effectiveness",
+        "tag_match": "tag_match_score", "feasibility": "feasibility_probability",
+    }
     key = key_map.get(sort_by, "comprehensive_score")
     if sort_order in ("asc", "desc"):
         reverse = sort_order == "desc"
