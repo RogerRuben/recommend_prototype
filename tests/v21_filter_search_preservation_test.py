@@ -39,17 +39,22 @@ def main():
     assert "psel.onchange" not in add_filter
 
     helper = extract_function(source, "filterParametersForRow")
-    harness = helper + r"""
+    harness = 'var ALL_PARAMETER_GROUPS="__all__";\n' + helper + r"""
 const parameters = [
   {parameter_id:'weight', label:'重量', parameter_group:'结构'},
   {parameter_id:'material', label:'材料', parameter_group:'结构'},
-  {parameter_id:'sealed', label:'密封', parameter_group:'环境'}
+  {parameter_id:'sealed', label:'密封', parameter_group:'环境'},
+  {parameter_id:'orphan', label:'未分组指标', parameter_group:''}
 ];
 const preserved = filterParametersForRow(parameters, '结构', '', {weight:true}, true, 'weight');
 const crossGroup = filterParametersForRow(parameters, '环境', '', {sealed:true}, true, 'weight');
+const allParameters = filterParametersForRow(parameters, '__all__', '', {}, false, '');
+const allSearch = filterParametersForRow(parameters, '__all__', '未分组', {}, false, '');
 console.log(JSON.stringify({
   preserved:preserved.map(x=>x.parameter_id),
-  crossGroup:crossGroup.map(x=>x.parameter_id)
+  crossGroup:crossGroup.map(x=>x.parameter_id),
+  allParameters:allParameters.map(x=>x.parameter_id),
+  allSearch:allSearch.map(x=>x.parameter_id)
 }));
 """
     run = subprocess.run(["node", "-e", harness], capture_output=True, text=True)
@@ -59,7 +64,12 @@ console.log(JSON.stringify({
     assert result["preserved"] == ["weight", "material"]
     # Switching to a group whose only indicator is hidden never leaks weight across groups.
     assert result["crossGroup"] == []
-    print("PASS V21.1 grouped search requires explicit selection and preserves existing filters")
+    # New rows start from the complete parameter set, including orphan indicators.
+    assert result["allParameters"] == ["weight", "material", "sealed", "orphan"]
+    assert result["allSearch"] == ["orphan"]
+    assert "全部指标" in add_filter and "搜索全部指标" in add_filter
+    assert "group.value!==ALL_PARAMETER_GROUPS" in add_filter
+    print("PASS grouped search defaults to all indicators and preserves explicit filters")
 
 
 if __name__ == "__main__":
