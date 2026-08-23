@@ -30,6 +30,7 @@ from .local_generator import HistorySeededGenerator
 from .generation_tasks import GenerationTaskManager
 from .configuration import _boolean, load_model_service_config, load_service_portal_config, load_workbench_defaults
 from .range_diagnostics import build_range_diagnostics
+from .scenario_policy import ScenarioPolicyService
 
 
 class GeneratedSessions(object):
@@ -121,6 +122,7 @@ class Application(object):
         self.model_config = load_model_service_config(self.root)
         self.portal_config = load_service_portal_config(self.root)
         self.workbench_defaults = load_workbench_defaults(self.root)
+        self.scenario_policy = ScenarioPolicyService(self.root / "config" / "scenario_config.json")
         self.model_execution_mode = self.model_config["execution_mode"]
         self.local_runtime = None
         self.model_gateway = None
@@ -446,6 +448,8 @@ class Application(object):
         effect_manifest = self.runtime.manifest().get("effectiveness") or {}
         payload["protocols"] = effect_manifest.get("protocol_profiles") or []
         payload["active_protocol"] = effect_manifest.get("active_protocol")
+        payload["optimization_scenarios"] = self.scenario_policy.catalog()
+        payload["scenario_policy"] = self.scenario_policy.resolve({"scenario": self.scenario_policy.config["default_scenario"]})
         coverage = {}
         for rule in self.store.tag_rule_rows():
             key = str(rule.get("parameter_id") or "")
@@ -1225,7 +1229,7 @@ class Application(object):
 
     def _generate_sync(self, request, progress_callback=None):
         self._require_product_ready()
-        req = dict(request or {})
+        req, scenario_policy = self.scenario_policy.apply(request)
         session_id = str(req.get("session_id") or "default")
         count = max(1, min(int(req.get("count") or 5), 30))
         req["count"] = count
@@ -1280,6 +1284,9 @@ class Application(object):
             "generation_method": result.get("generation_method", "batched_directional_beam_search"),
             "search_profile": search_profile,
             "search_warning": search_profile.get("warning") or "",
+            "scenario": scenario_policy["scenario"],
+            "scenario_policy": scenario_policy,
+            "applied_ranking": scenario_policy["applied_ranking"],
         })
         if progress_callback:
             progress_callback(96, "方案已准备完成")
@@ -1295,7 +1302,7 @@ class Application(object):
 
     def request_generation(self, request):
         self._require_product_ready()
-        req = dict(request or {})
+        req, _policy = self.scenario_policy.apply(request)
         req["count"] = max(1, min(int(req.get("generation_count") or req.get("count") or 5), 30))
         req["search_profile"] = self.generation_search_profile(req)
         return self.generation_tasks.start(req, force=bool(req.get("force_regenerate")))
@@ -1354,7 +1361,7 @@ class Application(object):
         return [refreshed_by_id.get(item.get("agreement_id"), item) for item in candidates]
 
     def recommend(self, request):
-        request = dict(request or {})
+        request, scenario_policy = self.scenario_policy.apply(request)
         self._try_restore_model_services()
         calculation_available = not bool(self.model_data_sync_error)
         session_id = str(request.get("session_id") or "default")
@@ -1396,6 +1403,14 @@ class Application(object):
             if calculation_available else
             rank_historical_products(candidates, ranking_request, tag_weights, definitions=definitions, tag_map=tag_map, constraint_rules=constraint_rules)
         )
+        for item in ranked:
+            item["scenario"] = scenario_policy["scenario"]
+            if item.get("model_evaluation_available") is False:
+                item["scenario_recommendation"] = "当前保留%s排序意图；计算服务不可用，暂不能验证完整的场景优势。" % scenario_policy["scenario_name"]
+            elif not item.get("strict_filter_satisfied"):
+                item["scenario_recommendation"] = "该方案按%s策略参与比较，但仍有未满足项，请结合需求差距复核。" % scenario_policy["scenario_name"]
+            else:
+                item["scenario_recommendation"] = scenario_policy.get("result_explanation") or ""
         page, page_size = max(1, int(request.get("page", 1))), max(1, min(int(request.get("page_size", 12)), 50))
         start = (page - 1) * page_size
         best_effort_count = sum(1 for item in ranked if item.get("best_effort"))
@@ -1418,6 +1433,9 @@ class Application(object):
                 if ranked
                 else target_protocol
             ),
+            "scenario": scenario_policy["scenario"],
+            "scenario_policy": scenario_policy,
+            "applied_ranking": scenario_policy["applied_ranking"],
         }
 
     def agreement_detail(self, agreement_id, session_id, target_protocol=None):
@@ -1929,6 +1947,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(payload)
             elif path == "/api/portal": self._json(self.app.portal())
             elif path == "/api/bootstrap": self._json(self.app.bootstrap())
+            elif path == "/api/scenario-policy":
+                self._json(self.app.scenario_policy.resolve({
+                    "scenario": (query.get("scenario") or [None])[0],
+                    "optimization_intensity": (query.get("optimization_intensity") or [None])[0],
+                }))
             elif path == "/api/effectiveness-workbench/schema": self._json(self.app.effectiveness_workbench_schema())
             elif path == "/api/price-workbench/schema": self._json(self.app.price_workbench_schema())
             elif path.startswith("/api/generation-tasks/"):
