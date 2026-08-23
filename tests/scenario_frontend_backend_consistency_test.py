@@ -43,20 +43,21 @@ def main():
 
     cost_request, cost = service.apply({"scenario": "cost"})
     assert cost["applied_ranking"] == {
-        "sort_key": "price", "sort_direction": "asc", "display_name": "最低价格",
+        "sort_key": "price", "sort_direction": "asc",
+        "display_name": "需求匹配优先 · 同等匹配下价格最低",
         "source": "scenario_default", "source_display_name": "成本优先场景推荐",
     }
     performance_request, performance = service.apply({"scenario": "performance"})
     assert performance["applied_ranking"]["sort_key"] == "capability"
     assert performance["applied_ranking"]["sort_direction"] == "desc"
-    assert performance["applied_ranking"]["display_name"] == "最高效能"
+    assert performance["applied_ranking"]["display_name"] == "需求匹配优先 · 同等匹配下效能最高"
 
     override_request, override = service.apply({
         "scenario": "cost", "sort_source": "user_override",
         "ranking_policy": {"sort_key": "capability", "sort_direction": "desc"},
     })
     assert override["applied_ranking"]["source"] == "user_override"
-    assert override["applied_ranking"]["display_name"] == "效能降序"
+    assert override["applied_ranking"]["display_name"] == "需求匹配优先 · 同等匹配下效能降序"
     assert override_request["sort_by"] == "capability" and override_request["sort_order"] == "desc"
 
     constrained, constrained_policy = service.apply({
@@ -68,6 +69,14 @@ def main():
         "scenario": "performance", "scenario_options": {"max_price": 15},
     })
     assert constrained["max_price"] == 15
+    constrained, constrained_policy = service.apply({
+        "scenario": "performance", "max_price": 12,
+        "scenario_options": {"max_price": 15},
+    })
+    assert constrained["max_price"] == 12
+    assert constrained_policy["scenario_options"]["max_price"] == 12
+    assert constrained_policy["applied_constraints"]["sources"]["max_price"] == \
+        "business_target_overrode_scenario_alias"
 
     # Legacy clients keep their explicit pre-V21.2 sort and scoring semantics.
     legacy, legacy_policy = service.apply({"sort_by": "comprehensive", "sort_order": "desc"})
@@ -90,9 +99,15 @@ def main():
     html = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
     js = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
     server = (ROOT / "app/server.py").read_text(encoding="utf-8")
-    assert 'id="scenarioChoices"' in html and 'value="cost_effectiveness"' in html
+    assert 'id="scenarioChoices"' in html
+    assert "value=\"'+esc(item.scenario)+'\"" in js
+    assert "renderScenarioPolicies()" in js
     assert "optimization_scenarios" in server and '"applied_ranking"' in server
     assert "renderAppliedRanking(data)" in js
+    assert 'input.checked=input.value===state.scenarioCode' in js
+    assert "seq!==state.recommendSeq" in js
+    assert "state.currentBatchId=null" in js
+    assert "scenarioConstraintField" in js and 'max_price:"maxPrice"' in js
     assert 'state.sortSource="user_override"' in js
     assert 'if scenario==="cost"' not in js and "if scenario==='cost'" not in js
     config = json.loads((ROOT / "config/scenario_config.json").read_text(encoding="utf-8"))

@@ -99,18 +99,21 @@ class ScenarioPolicyService(object):
         else:
             key, direction, applied_source = default_sort["key"], default_sort["direction"], "scenario_default"
         display_names = {
-            "comprehensive": "综合推荐", "price": "最低价格" if direction == "asc" else "最高价格",
-            "capability": "最低效能" if direction == "asc" else "最高效能",
-            "cost_effectiveness": "最低效费比" if direction == "asc" else "效费比最高",
-            "tag_match": "最低标签匹配" if direction == "asc" else "标签匹配最高",
-            "feasibility": "最低可行概率" if direction == "asc" else "可行概率最高",
+            "comprehensive": "需求匹配优先 · 同等匹配下综合评分最高",
+            "price": "需求匹配优先 · 同等匹配下价格最低" if direction == "asc" else "需求匹配优先 · 同等匹配下价格最高",
+            "capability": "需求匹配优先 · 同等匹配下效能最低" if direction == "asc" else "需求匹配优先 · 同等匹配下效能最高",
+            "cost_effectiveness": "需求匹配优先 · 同等匹配下效费比最低" if direction == "asc" else "需求匹配优先 · 同等匹配下效费比最高",
+            "tag_match": "需求匹配优先 · 同等匹配下标签匹配率最低" if direction == "asc" else "需求匹配优先 · 同等匹配下标签匹配率最高",
+            "feasibility": "需求匹配优先 · 同等匹配下可行概率最低" if direction == "asc" else "需求匹配优先 · 同等匹配下可行概率最高",
         }
         if applied_source == "user_override":
             labels = {
                 "comprehensive": "综合评分", "price": "价格", "capability": "效能",
                 "cost_effectiveness": "效费比", "tag_match": "标签匹配率", "feasibility": "可行概率",
             }
-            display_names[key] = labels.get(key, key) + ("升序" if direction == "asc" else "降序")
+            display_names[key] = "需求匹配优先 · 同等匹配下%s%s" % (
+                labels.get(key, key), "升序" if direction == "asc" else "降序"
+            )
         options = dict(request.get("scenario_options") or {})
         policy = {
             "scenario": code,
@@ -145,12 +148,32 @@ class ScenarioPolicyService(object):
         effective["sort_source"] = policy["applied_ranking"]["source"]
         effective["_scenario_policy"] = policy if policy.get("strategy_active") else {}
         options = policy.get("scenario_options") or {}
+        constraint_sources = {}
         for option in policy.get("options") or []:
             key = str(option.get("key") or "")
-            if key and effective.get(key) in (None, "") and options.get(key) not in (None, ""):
-                effective[key] = float(options[key]) if option.get("type") == "number" else options[key]
+            if not key:
+                continue
+            business_value = effective.get(key)
+            scenario_value = options.get(key)
+            if business_value not in (None, ""):
+                effective[key] = float(business_value) if option.get("type") == "number" else business_value
+                options[key] = effective[key]
+                constraint_sources[key] = (
+                    "business_target_overrode_scenario_alias"
+                    if scenario_value not in (None, "") and str(scenario_value) != str(business_value)
+                    else "business_target"
+                )
+            elif scenario_value not in (None, ""):
+                effective[key] = float(scenario_value) if option.get("type") == "number" else scenario_value
+                options[key] = effective[key]
+                constraint_sources[key] = "scenario_alias"
+            else:
+                options[key] = None
+                constraint_sources[key] = "unrestricted"
+        policy["scenario_options"] = options
         policy["applied_constraints"] = {
             "min_capability": effective.get("min_capability"),
             "max_price": effective.get("max_price"),
+            "sources": constraint_sources,
         }
         return effective, policy

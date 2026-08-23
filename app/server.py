@@ -59,12 +59,29 @@ class GeneratedSessions(object):
             self._cleanup()
         return batch_id, list(prepared)
 
-    def get(self, session_id, batch_id=None):
+    def get(self, session_id, batch_id=None, fingerprint=None):
         with self.lock:
             self._cleanup()
             session = self.data.get(str(session_id), {})
             batch_id = str(batch_id or session.get("latest_batch_id") or "")
-            return list((session.get("batches") or {}).get(batch_id, {}).get("items", []))
+            batch = (session.get("batches") or {}).get(batch_id, {})
+            if fingerprint is not None and batch and batch.get("fingerprint") != fingerprint:
+                return []
+            return list(batch.get("items", []))
+
+    def batch_metadata(self, session_id, batch_id):
+        with self.lock:
+            self._cleanup()
+            session = self.data.get(str(session_id), {})
+            batch = (session.get("batches") or {}).get(str(batch_id or ""))
+            if not batch:
+                return None
+            return {
+                "batch_id": str(batch_id),
+                "fingerprint": batch.get("fingerprint"),
+                "updated": batch.get("updated"),
+                "count": len(batch.get("items") or []),
+            }
 
     def batches(self, session_id):
         with self.lock:
@@ -1294,8 +1311,14 @@ class Application(object):
 
     def generate_live(self, request):
         """Backward-compatible synchronous generation endpoint."""
-        result = self._generate_sync(request)
-        batch_id, prepared = self.sessions.add_batch(str((request or {}).get("session_id") or "default"), result.get("candidates", []))
+        prepared_request, _policy = self.scenario_policy.apply(request)
+        prepared_request["count"] = max(1, min(int(prepared_request.get("generation_count") or prepared_request.get("count") or 5), 30))
+        result = self._generate_sync(prepared_request)
+        fingerprint = self.generation_tasks.fingerprint(prepared_request)
+        batch_id, prepared = self.sessions.add_batch(
+            str(prepared_request.get("session_id") or "default"),
+            result.get("candidates", []), fingerprint=fingerprint,
+        )
         result["batch_id"] = batch_id
         result["candidates"] = prepared
         return result
@@ -1382,7 +1405,20 @@ class Application(object):
         historical_items = self.store.historical_agreements(
             target_protocol=target_protocol, recalculate=calculation_available
         )
-        generated_items = self.sessions.get(session_id, request.get("generation_batch_id")) if calculation_available else []
+        requested_batch_id = request.get("generation_batch_id")
+        batch_metadata = self.sessions.batch_metadata(session_id, requested_batch_id) if requested_batch_id else None
+        batch_request = dict(request)
+        batch_request["count"] = max(1, min(int(request.get("generation_count") or request.get("count") or 5), 30))
+        expected_batch_fingerprint = self.generation_tasks.fingerprint(batch_request) if requested_batch_id else None
+        generation_batch_stale = bool(
+            batch_metadata and batch_metadata.get("fingerprint") != expected_batch_fingerprint
+        )
+        if generation_batch_stale:
+            source_mode = "historical"
+        generated_items = (
+            self.sessions.get(session_id, requested_batch_id, fingerprint=expected_batch_fingerprint)
+            if calculation_available and requested_batch_id else []
+        )
         generated_items = self._refresh_candidates_for_protocol(generated_items, request) if calculation_available else []
         if not calculation_available:
             source_mode = "historical"
@@ -1423,6 +1459,7 @@ class Application(object):
             "source_mode": source_mode,
             "historical_available": len(historical_items),
             "live_generated_available": len(generated_items),
+            "generation_batch_stale": generation_batch_stale,
             "best_effort_count": best_effort_count,
             "generation_task": task_info,
             "calculation_available": calculation_available,

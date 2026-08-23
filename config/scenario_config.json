@@ -15,7 +15,7 @@
       "default_sort": {
         "key": "cost_effectiveness",
         "direction": "desc",
-        "display_name": "效费比最高"
+        "display_name": "需求匹配优先 · 同等匹配下效费比最高"
       },
       "ranking_weights": {
         "technical": 0.4,
@@ -38,7 +38,7 @@
       "default_sort": {
         "key": "price",
         "direction": "asc",
-        "display_name": "最低价格"
+        "display_name": "需求匹配优先 · 同等匹配下价格最低"
       },
       "ranking_weights": {
         "technical": 0.3,
@@ -63,7 +63,7 @@
       "default_sort": {
         "key": "capability",
         "direction": "desc",
-        "display_name": "最高效能"
+        "display_name": "需求匹配优先 · 同等匹配下效能最高"
       },
       "ranking_weights": {
         "technical": 0.4,

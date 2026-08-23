@@ -47,6 +47,13 @@ def main():
     assert mgr.fingerprint(dict(base, sort_by="comprehensive", sort_order="desc")) == \
            mgr.fingerprint(dict(base, sort_by="price", sort_order="asc"))
 
+    # Scenario semantics select different seeds and must never reuse a batch.
+    fp_cost = mgr.fingerprint(dict(base, scenario="cost", optimization_intensity="target"))
+    fp_performance = mgr.fingerprint(dict(base, scenario="performance", optimization_intensity="target"))
+    fp_extreme = mgr.fingerprint(dict(base, scenario="cost", optimization_intensity="extreme"))
+    assert fp_cost != fp_performance
+    assert fp_cost != fp_extreme
+
     print(json.dumps({"status": "PASS", "message": "生成指纹包含冻结参数且不含排序"}, ensure_ascii=False))
 
 
