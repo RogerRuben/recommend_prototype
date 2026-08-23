@@ -29,20 +29,32 @@
       </div>
     </section>
 
+    <section class="card scenario-card">
+      <div class="section-heading"><div><span class="step-index">03</span><h3>选择优化场景</h3></div></div>
+      <p class="section-copy">场景提供智能默认策略，不会限制您修改排序或筛选条件。</p>
+      <div id="scenarioChoices" class="scenario-choices"></div>
+      <div id="scenarioDescription" class="scenario-description">正在读取优化策略……</div>
+      <details class="scenario-advanced"><summary>高级优化设置</summary>
+        <label>优化偏好<select id="optimizationIntensity"></select></label>
+        <div id="scenarioOptions" class="scenario-options"></div>
+      </details>
+    </section>
+
     <section class="card filter-card">
-      <div class="section-heading"><div><span class="step-index">03</span><h3>技术指标条件</h3></div><button id="addFilterBtn" class="button tiny secondary">＋ 添加条件</button></div>
+      <div class="section-heading"><div><span class="step-index">04</span><h3>技术指标条件</h3></div><button id="addFilterBtn" class="button tiny secondary">＋ 添加条件</button></div>
       <div id="tagCoverageSummary" class="coverage-summary">当前标签尚未覆盖技术指标。</div><label class="coverage-toggle"><input id="hideCoveredParams" type="checkbox" checked> 隐藏标签已覆盖指标</label>
       <div class="mode-row"><span>条件组合</span><select id="filterMode"><option value="all">需全部满足 AND</option><option value="any">任一满足即可 OR</option></select></div>
       <div id="indicatorFilters"></div>
     </section>
 
     <section class="card action-card recommendation-action">
-      <div class="section-heading"><div><span class="step-index">04</span><h3>🔎 从已有方案中推荐</h3></div></div><p class="section-copy">优先复用已有历史和专家方案。</p>
-      <label>推荐排序<select id="sortBy"><option value="comprehensive">综合推荐</option><option value="price">价格</option><option value="capability">效能评分</option><option value="tag_match">标签匹配率</option></select></label>
+      <div class="section-heading"><div><span class="step-index">05</span><h3>🔎 从已有方案中推荐</h3></div></div><p class="section-copy">优先复用已有历史和专家方案。</p>
+      <label>推荐排序<select id="sortBy"><option value="comprehensive">综合推荐</option><option value="cost_effectiveness">效费比</option><option value="price">价格</option><option value="capability">效能评分</option><option value="tag_match">标签匹配率</option></select></label>
       <label>排序方向<select id="sortOrder"><option value="desc">从高到低</option><option value="asc">从低到高</option></select></label>
+      <div id="sortPolicyStatus" class="sort-policy-status">当前排序策略读取中……</div>
       <button id="recommendBtn" class="button primary full">开始智能推荐</button>
     </section>
-    <section class="card action-card generation-box"><div class="section-heading"><div><span class="step-index">05</span><h3>✦ 智能生成新方案</h3></div></div><p>当已有方案不能满足需求时，基于当前条件探索新的参数组合。</p><div id="generationBasisSummary" class="generation-basis-summary">标签 0 · 条件 0 · 冻结 0</div><div class="generation-count-note">预计生成 <b id="generationCountSummary">5</b> 个候选</div><details class="generation-frozen"><summary>保持不变的指标（<span id="frozenSummaryCount">0</span>）</summary><div id="frozenParams" class="frozen-list"></div></details><div class="generation-advanced"><details><summary>高级生成设置</summary><label>生成数量<input id="generationCount" type="number" min="1" max="30" value="5"></label><label>候选评价额度<input id="generationBudget" type="number" min="1" placeholder="自动"></label><label>最大搜索轮数<input id="generationRounds" type="number" min="1" max="15" placeholder="自动"></label></details></div><button id="generateBtn" class="button accent full">智能生成新方案</button><button id="clearLiveBtn" class="link-button full">清空生成方案</button></section>
+    <section class="card action-card generation-box"><div class="section-heading"><div><span class="step-index">06</span><h3>✦ 智能生成新方案</h3></div></div><p>当已有方案不能满足需求时，基于当前条件探索新的参数组合。</p><div id="generationBasisSummary" class="generation-basis-summary">标签 0 · 条件 0 · 冻结 0</div><div class="generation-count-note">预计生成 <b id="generationCountSummary">5</b> 个候选</div><details class="generation-frozen"><summary>保持不变的指标（<span id="frozenSummaryCount">0</span>）</summary><div id="frozenParams" class="frozen-list"></div></details><div class="generation-advanced"><details><summary>高级生成设置</summary><label>生成数量<input id="generationCount" type="number" min="1" max="30" value="5"></label><label>候选评价额度<input id="generationBudget" type="number" min="1" placeholder="自动"></label><label>最大搜索轮数<input id="generationRounds" type="number" min="1" max="15" placeholder="自动"></label></details></div><button id="generateBtn" class="button accent full">智能生成新方案</button><button id="clearLiveBtn" class="link-button full">清空生成方案</button></section>
   </aside>
 
   <div id="railResizeHandle" class="rail-resize-handle" role="separator" aria-orientation="vertical" aria-label="调整条件面板宽度" tabindex="0" title="拖动调整宽度；双击恢复默认"></div>
