@@ -36,8 +36,9 @@ def static_contracts():
     assert "ipdemo-detail-tour-v21-complete" in js and "#saveSchemeBtn" in js
     assert 'id="generationCount" type="number" min="1" max="30" value="5"' in html
     assert 'generation_count:Number(q("generationCount").value||5)' in js
-    assert 'req.get("count") or 5' in generation_tasks
-    assert 'req.get("generation_count") or req.get("count") or 5' in server
+    assert "def canonicalize_generation_controls" in generation_tasks
+    assert 'req.get("count") or req.get("generation_count") or 5' in generation_tasks
+    assert "self.generation_tasks.canonicalize_generation_controls" in server
     assert 'required=field.required===false?"":" required"' in effectiveness_js
     assert 'required=f.required===false?"":" required"' in price_js
     assert "historical_incompatible_fallback" in effectiveness_js and "historical_incompatible_fallback" in price_js

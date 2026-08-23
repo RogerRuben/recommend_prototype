@@ -1247,9 +1247,9 @@ class Application(object):
     def _generate_sync(self, request, progress_callback=None):
         self._require_product_ready()
         req, scenario_policy = self.scenario_policy.apply(request)
+        req = self.generation_tasks.canonicalize_generation_controls(req)
         session_id = str(req.get("session_id") or "default")
-        count = max(1, min(int(req.get("count") or 5), 30))
-        req["count"] = count
+        count = req["count"]
         search_profile = dict(req.get("search_profile") or self.generation_search_profile(req))
         req["search_profile"] = search_profile
         search_mode = search_profile.get("mode") or "fast"
@@ -1262,7 +1262,6 @@ class Application(object):
             )
         has_output_target = any(req.get(key) not in (None, "") for key in ("max_price", "min_capability", "min_cost_effectiveness", "min_feasibility"))
         max_budget = self.generation_budget_limit()
-        max_rounds = self.generation_rounds_limit()
         # HTTP-backed models are the dominant cost.  A compact adaptive budget
         # plus convergence stopping gives the same staged search semantics while
         # avoiding hundreds of redundant single-candidate service calls.
@@ -1274,11 +1273,8 @@ class Application(object):
         budget = min(budget, max_budget)
         # User-tunable candidate evaluation budget is a strict hard cap.
         if req.get("generation_budget") not in (None, ""):
-            budget = max(1, min(int(req["generation_budget"]), max_budget))
+            budget = int(req["generation_budget"])
         req["generation_budget"] = budget
-        # Generation rounds are canonicalized here too for synchronous callers.
-        if req.get("generation_rounds") not in (None, ""):
-            req["generation_rounds"] = max(1, min(int(req["generation_rounds"]), max_rounds))
         result = self.generator.generate(
             req, count=count, seed=req.get("seed"), budget=budget,
             search_mode=search_mode, progress_callback=progress_callback,
@@ -1312,9 +1308,9 @@ class Application(object):
     def generate_live(self, request):
         """Backward-compatible synchronous generation endpoint."""
         prepared_request, _policy = self.scenario_policy.apply(request)
-        prepared_request["count"] = max(1, min(int(prepared_request.get("generation_count") or prepared_request.get("count") or 5), 30))
-        result = self._generate_sync(prepared_request)
+        prepared_request = self.generation_tasks.canonicalize_generation_controls(prepared_request)
         fingerprint = self.generation_tasks.fingerprint(prepared_request)
+        result = self._generate_sync(prepared_request)
         batch_id, prepared = self.sessions.add_batch(
             str(prepared_request.get("session_id") or "default"),
             result.get("candidates", []), fingerprint=fingerprint,
@@ -1326,7 +1322,7 @@ class Application(object):
     def request_generation(self, request):
         self._require_product_ready()
         req, _policy = self.scenario_policy.apply(request)
-        req["count"] = max(1, min(int(req.get("generation_count") or req.get("count") or 5), 30))
+        req = self.generation_tasks.canonicalize_generation_controls(req)
         req["search_profile"] = self.generation_search_profile(req)
         return self.generation_tasks.start(req, force=bool(req.get("force_regenerate")))
 
@@ -1407,8 +1403,7 @@ class Application(object):
         )
         requested_batch_id = request.get("generation_batch_id")
         batch_metadata = self.sessions.batch_metadata(session_id, requested_batch_id) if requested_batch_id else None
-        batch_request = dict(request)
-        batch_request["count"] = max(1, min(int(request.get("generation_count") or request.get("count") or 5), 30))
+        batch_request = self.generation_tasks.canonicalize_generation_controls(request)
         expected_batch_fingerprint = self.generation_tasks.fingerprint(batch_request) if requested_batch_id else None
         generation_batch_stale = bool(
             batch_metadata and batch_metadata.get("fingerprint") != expected_batch_fingerprint

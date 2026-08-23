@@ -155,7 +155,23 @@ def main():
     assert stored["generation_rounds"] == 15, stored["generation_rounds"]
     assert stored["generation_budget"] == 50, stored["generation_budget"]
 
-    print(json.dumps({"status": "PASS", "message": "生成预算为硬上限，rounds/budget 在指纹前规范化"}, ensure_ascii=False))
+    # Every fingerprint comparison path must use the same canonical controls.
+    oversized = dict(base, generation_budget=5000, generation_rounds=100)
+    canonical = mgr.canonicalize_generation_controls(oversized)
+    equivalent = mgr.canonicalize_generation_controls(
+        dict(base, generation_budget=9000, generation_rounds=1000)
+    )
+    assert canonical["generation_budget"] == 300
+    assert canonical["generation_rounds"] == 15
+    assert mgr.fingerprint(canonical) == mgr.fingerprint(equivalent)
+    started = mgr.start(oversized)
+    assert started["fingerprint"] == mgr.fingerprint(canonical)
+
+    server_source = (ROOT / "app/server.py").read_text(encoding="utf-8")
+    assert "batch_request = self.generation_tasks.canonicalize_generation_controls(request)" in server_source
+    assert "prepared_request = self.generation_tasks.canonicalize_generation_controls(prepared_request)" in server_source
+
+    print(json.dumps({"status": "PASS", "message": "生成预算为硬上限，所有 Batch 指纹比较使用同一规范化入口"}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

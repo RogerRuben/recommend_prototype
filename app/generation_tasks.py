@@ -44,22 +44,29 @@ class GenerationTaskManager(object):
         raw = json.dumps(relevant, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
-    def start(self, request, force=False):
-        self.cleanup()
+    def canonicalize_generation_controls(self, request):
+        """Return the single canonical representation used by generation and batch identity."""
         req = dict(request or {})
-        session_id = str(req.get("session_id") or "default")
-        req["session_id"] = session_id
-        req["count"] = max(1, min(int(req.get("count") or 5), 30))
-        # Canonicalize user-tunable limits before fingerprinting so raw values
-        # like rounds=100 and rounds=1000 map to the same clamped task.
+        req["count"] = max(1, min(int(req.get("count") or req.get("generation_count") or 5), 30))
         if req.get("generation_budget") not in (None, ""):
-            req["generation_budget"] = max(1, min(int(req["generation_budget"]), self.app.generation_budget_limit()))
+            req["generation_budget"] = max(
+                1, min(int(req["generation_budget"]), self.app.generation_budget_limit())
+            )
         else:
             req["generation_budget"] = None
         if req.get("generation_rounds") not in (None, ""):
-            req["generation_rounds"] = max(1, min(int(req["generation_rounds"]), self.app.generation_rounds_limit()))
+            req["generation_rounds"] = max(
+                1, min(int(req["generation_rounds"]), self.app.generation_rounds_limit())
+            )
         else:
             req["generation_rounds"] = None
+        return req
+
+    def start(self, request, force=False):
+        self.cleanup()
+        req = self.canonicalize_generation_controls(request)
+        session_id = str(req.get("session_id") or "default")
+        req["session_id"] = session_id
         fp = self.fingerprint(req)
         with self.lock:
             old_id = self.by_fingerprint.get(fp)
