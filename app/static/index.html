@@ -13,24 +13,10 @@
   <aside class="search-rail">
     <section class="product-card card"><div class="eyebrow">当前成品</div><h2 id="productName">正在加载成品</h2><p id="productDescription"></p><div class="data-stats"><div><b id="historyCount">-</b><span>参考方案</span></div><div><b id="liveCount">0</b><span>生成方案</span></div><div><b id="savedCount">-</b><span>已保存</span></div></div></section>
 
-    <section class="card workflow-card"><div class="section-heading"><div><h3>推荐工作流程</h3></div></div><div class="workflow-steps"><span>① 选择典型场景</span><i>↓</i><span>② 设置业务目标</span><i>↓</i><span>③ 补充技术要求</span><i>↓</i><span>④ 从已有方案中推荐</span><i>↓</i><span>⑤ 必要时生成新方案</span><i>↓</i><span>⑥ 查看 / 调整 / 保存方案</span></div><div id="workflowStatus" class="workflow-status">当前尚未设置需求。<b>建议下一步：选择典型场景。</b></div></section>
-
-    <section class="card filter-card">
-      <div class="section-heading"><div><span class="step-index">01</span><h3>场景与功能偏好</h3></div><button id="clearConditionBtn" class="link-button">清空筛选条件</button></div>
-      <p class="section-copy">选择需要优先满足的场景、性能和功能。</p><div id="tagGroups"></div>
-    </section>
-
-    <section class="card filter-card">
-      <div class="section-heading"><div><span class="step-index">02</span><h3>业务目标</h3></div></div>
-      <div class="form-grid compact-grid">
-        <label class="full-field">效能评价协议<select id="targetProtocol"></select><small id="targetProtocolHint">协议作为100分参考，不参与模型训练。</small></label>
-        <label>最高价格（万元）<input id="maxPrice" type="number" step="0.1" placeholder="不限制"></label>
-        <label>最低效能评分<input id="minCapability" type="number" min="0" placeholder="不限制，可超过100"></label>
-      </div>
-    </section>
+    <section class="card workflow-card"><div class="section-heading"><div><h3>推荐工作流程</h3></div></div><div class="workflow-steps"><span>① 选择优化场景</span><i>↓</i><span>② 选择应用与功能偏好</span><i>↓</i><span>③ 设置业务目标</span><i>↓</i><span>④ 补充技术要求</span><i>↓</i><span>⑤ 从已有方案中推荐</span><i>↓</i><span>⑥ 必要时生成新方案</span><i>↓</i><span>⑦ 查看 / 调整 / 保存方案</span></div><div id="workflowStatus" class="workflow-status">当前尚未设置需求。<b>建议下一步：选择优化场景。</b></div></section>
 
     <section class="card scenario-card">
-      <div class="section-heading"><div><span class="step-index">03</span><h3>选择优化场景</h3></div></div>
+      <div class="section-heading"><div><span class="step-index">01</span><h3>选择优化场景</h3></div><button id="clearConditionBtn" class="link-button">清空筛选条件</button></div>
       <p class="section-copy">场景提供智能默认策略，不会限制您修改排序或筛选条件。</p>
       <div id="scenarioChoices" class="scenario-choices"></div>
       <div id="scenarioDescription" class="scenario-description">正在读取优化策略……</div>
@@ -38,6 +24,20 @@
         <label>优化偏好<select id="optimizationIntensity"></select></label>
         <div id="scenarioOptions" class="scenario-options"></div>
       </details>
+    </section>
+
+    <section class="card filter-card">
+      <div class="section-heading"><div><span class="step-index">02</span><h3>应用场景与功能偏好</h3></div></div>
+      <p class="section-copy">选择需要优先满足的应用场景、性能和功能标签。</p><div id="tagGroups"></div>
+    </section>
+
+    <section class="card filter-card">
+      <div class="section-heading"><div><span class="step-index">03</span><h3>业务目标</h3></div></div>
+      <div class="form-grid compact-grid">
+        <label class="full-field">效能评价协议<select id="targetProtocol"></select><small id="targetProtocolHint">协议作为100分参考，不参与模型训练。</small></label>
+        <label>最高价格（万元）<input id="maxPrice" type="number" step="0.1" placeholder="不限制"></label>
+        <label>最低效能评分<input id="minCapability" type="number" min="0" placeholder="不限制，可超过100"></label>
+      </div>
     </section>
 
     <section class="card filter-card">
