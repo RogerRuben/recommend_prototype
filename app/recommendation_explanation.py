@@ -88,6 +88,54 @@ def _candidate_options(item, index, items, scenario):
     return sorted(options, key=lambda value: -value[0])
 
 
+def _condition_text(condition):
+    label = str(condition.get("label") or condition.get("key") or "当前要求")
+    actual = condition.get("actual")
+    target = condition.get("target")
+    gap = _number(condition.get("gap"))
+    if actual not in (None, "") and target not in (None, ""):
+        suffix = "当前值%s，目标%s" % (actual, target)
+        if gap is not None:
+            suffix += "，差距%.3g" % gap
+        return label, suffix + "。"
+    return label, "该项尚未满足，其它条件仍按实际结果比较。"
+
+
+def _non_strict_options(item, index, items):
+    """Build truthful, candidate-specific options for Best Effort/Exploratory."""
+    options = []
+
+    def add(priority, code, title, summary):
+        options.append((priority, code, title, summary))
+
+    direction = item.get("solution_direction") or {}
+    branch_id = direction.get("branch_id")
+    if branch_id and branch_id != "BRANCH-ALL":
+        add(110, "direction_%s" % branch_id, direction.get("title") or "代表一条需求方向",
+            direction.get("summary") or "该方案围绕这一需求方向进行探索。")
+
+    assessment = item.get("requirement_assessment") or {}
+    unmet = [condition for condition in assessment.get("conditions") or [] if condition.get("status") == "unmatched"]
+    if unmet:
+        closest = min(unmet, key=lambda condition: _number(condition.get("gap")) if _number(condition.get("gap")) is not None else 1e9)
+        label, summary = _condition_text(closest)
+        add(100, "closest_%s" % (closest.get("key") or index), "最接近%s" % label, summary)
+        matched_count = int(assessment.get("matched_count") or 0)
+        total_count = int(assessment.get("total_count") or 0)
+        if matched_count and total_count:
+            add(86, "coverage_%d_of_%d" % (matched_count, total_count), "已满足%d项主要要求" % matched_count,
+                "当前共核对%d项要求，仍有%d项需要调整。" % (total_count, int(assessment.get("unmatched_count") or 0)))
+
+    if item.get("price_rank") == 1 and _number(item.get("predicted_price_wan")) is not None:
+        add(78, "best_effort_lowest_price", "尽力方案中成本最低", "在未完全满足条件的候选中预测价格最低。")
+    if item.get("capability_rank") == 1 and _number(item.get("capability_score")) is not None:
+        add(76, "best_effort_highest_capability", "尽力方案中效能最高", "在未完全满足条件的候选中效能评分最高。")
+    rank = int(item.get("rank") or (index + 1))
+    add(10, "exploration_rank_%d" % rank, "探索方向位列第%d" % rank,
+        "该参数组合代表当前条件下可继续复核的一条调整路线。")
+    return sorted(options, key=lambda value: -value[0])
+
+
 def annotate_candidate_recommendations(items, scenario_policy):
     """Attach relative ranks and one concise, truthful reason to each item."""
     items = list(items or [])
@@ -103,12 +151,13 @@ def annotate_candidate_recommendations(items, scenario_policy):
     for index, item in enumerate(items):
         for field, mapping in ranks.items():
             item[field] = mapping.get(index)
-        if item.get("model_evaluation_available") is False and (
-            item.get("is_generated") or item.get("predicted_price_wan") is None
+        if not item.get("strict_filter_satisfied") or (
+            item.get("model_evaluation_available") is False and item.get("is_generated")
         ):
-            reason = {"code": "model_unavailable", "title": "保留可探索参数方向", "summary": "参数组合已经形成，但当前无法完成价格和效能评价。"}
-        elif not item.get("strict_filter_satisfied"):
-            reason = {"code": "best_effort", "title": "提供可复核的尽力方向", "summary": "该方案仍有未满足项，但代表当前条件下值得比较的调整方向。"}
+            options = _non_strict_options(item, index, items)
+            chosen = next((value for value in options if value[1] not in used), options[0])
+            used.add(chosen[1])
+            reason = {"code": chosen[1], "title": chosen[2], "summary": chosen[3]}
         else:
             options = _candidate_options(item, index, items, scenario)
             chosen = next((value for value in options if value[1] not in used), options[0])

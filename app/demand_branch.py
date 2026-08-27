@@ -53,6 +53,7 @@ def combine_generation_branches(explicit_branches, tag_branches, max_branches=24
                 "title": demand["title"], "summary": demand["summary"],
                 "explicit_filters": list(demand["explicit_filters"]),
                 "assessment_filters": list(demand.get("assessment_filters") or []),
+                "explicit_conflicts": list(demand.get("explicit_conflicts") or []),
                 "explicit_filter_mode": demand["explicit_filter_mode"],
                 "tag_rules": list(tag.get("rules") or []),
                 "tag_groups": dict(tag.get("tag_groups") or {}),

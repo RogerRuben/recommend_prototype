@@ -956,15 +956,143 @@ class HistorySeededGenerator(object):
         # AND assessment but explore each explicit direction as Best Effort.
         if str(request.get("indicator_filter_mode") or "all") == "all" and len(filters) > 1:
             joint = filters_to_anchors(filters, definitions, "all")
-            if any(value.get("conflict") for value in joint.values()):
+            explicit_conflicts = self._detect_explicit_cross_conflicts(filters, definitions, joint)
+            if any(value.get("conflict") for value in joint.values()) or explicit_conflicts:
                 conflict_branches = compile_explicit_demand_branches(filters, "any", definitions)
                 for branch in conflict_branches:
                     branch["assessment_filters"] = filters
+                    branch["explicit_conflicts"] = explicit_conflicts
                     branch["title"] = branch["title"].replace("优先满足", "冲突方向：优先满足")
                     branch["summary"] += " 其它联合条件仍按未满足项如实标记。"
                 explicit = conflict_branches
         tags = self.store.tag_rule_branches(request.get("selected_tags"), max_branches=24)
         return combine_generation_branches(explicit, tags, max_branches=24)
+
+    def _detect_explicit_cross_conflicts(self, filters, definitions, joint_bounds=None):
+        """Detect hard cross-parameter conflicts in an explicit AND request.
+
+        Single-field interval contradictions remain the responsibility of
+        ``filters_to_anchors``.  This pass anchors a representative point while
+        locking every explicitly requested field, then asks the configured
+        conditional and hard affine relations whether that point can be kept.
+        It deliberately ignores advisory rules.
+        """
+        filters = list(filters or [])
+        explicit_keys = set(rule.get("parameter_id") for rule in filters if rule.get("parameter_id"))
+        if len(explicit_keys) < 2:
+            return []
+        bounds = joint_bounds if joint_bounds is not None else filters_to_anchors(filters, definitions, "all")
+        rules = getattr(self.store, "constraint_rows", lambda: [])()
+        conflicts = []
+
+        def numeric_interval(key):
+            rule_bounds = bounds.get(key) or {}
+            allowed = [_float(value) for value in rule_bounds.get("allowed") or []]
+            allowed = [value for value in allowed if value is not None]
+            if allowed:
+                return min(allowed), max(allowed)
+            lower = _float(rule_bounds.get("min"), float("-inf"))
+            upper = _float(rule_bounds.get("max"), float("inf"))
+            return lower, upper
+
+        def requested_accepts(key, candidates=None, interval=None):
+            requested = bounds.get(key) or {}
+            definition = definitions.get(key) or {}
+            allowed = requested.get("allowed") or []
+            if candidates is not None:
+                requested_lo, requested_hi = numeric_interval(key)
+                for candidate in candidates:
+                    if allowed and not any(self._value_equal(candidate, value, definition) for value in allowed):
+                        continue
+                    candidate_num = _float(candidate)
+                    if candidate_num is not None and not (requested_lo <= candidate_num <= requested_hi):
+                        continue
+                    return True
+                return False
+            requested_lo, requested_hi = numeric_interval(key)
+            return interval is not None and max(requested_lo, interval[0]) <= min(requested_hi, interval[1])
+
+        # Conditional metadata is the source of truth.  Test domain intersection,
+        # not one representative point, so a broad request such as target<=5 is
+        # not falsely declared incompatible with an inactive value of -1.
+        from .conditional_constraint import TEMPLATE_KIND, TEMPLATE_KIND_V2, parse_template_metadata
+        seen_groups = set()
+        for rule in rules:
+            group = rule.get("constraint_group")
+            if not group or group in seen_groups:
+                continue
+            meta = parse_template_metadata(rule)
+            if meta.get("template") not in (TEMPLATE_KIND, TEMPLATE_KIND_V2):
+                continue
+            seen_groups.add(group)
+            controller, target = meta.get("controller"), meta.get("target")
+            if controller not in explicit_keys or target not in explicit_keys:
+                continue
+            controller_bounds = bounds.get(controller) or {}
+            controller_allowed = list(controller_bounds.get("allowed") or [])
+            when_value = (meta.get("when") or {}).get("model_value") if meta.get("template") == TEMPLATE_KIND_V2 else meta.get("active_value", 1)
+            if controller_allowed:
+                when_possible = any(self._value_equal(value, when_value, definitions.get(controller) or {}) for value in controller_allowed)
+                otherwise_possible = any(not self._value_equal(value, when_value, definitions.get(controller) or {}) for value in controller_allowed)
+            else:
+                when_num = _float(when_value)
+                lo, hi = numeric_interval(controller)
+                when_possible = when_num is not None and lo <= when_num <= hi
+                otherwise_possible = not (when_num is not None and lo == hi == when_num)
+
+            def branch_compatible(branch):
+                mode = branch.get("mode") or "not_applicable"
+                if mode in ("not_applicable", "fixed"):
+                    return requested_accepts(target, candidates=[branch.get("model_value")])
+                if mode == "enum":
+                    return requested_accepts(target, candidates=branch.get("allowed") or [])
+                if mode == "range":
+                    lo, hi = float(branch.get("min", 0)), float(branch.get("max", 1))
+                    return requested_accepts(target, interval=(min(lo, hi), max(lo, hi)))
+                return True
+
+            if meta.get("template") == TEMPLATE_KIND_V2:
+                when_ok = branch_compatible(meta.get("then") or {})
+                otherwise_ok = branch_compatible(meta.get("otherwise") or {})
+            else:
+                inactive = float(meta.get("inactive_value", -1))
+                when_ok = requested_accepts(target, interval=(float(meta["active_min"]), float(meta["active_max"])))
+                otherwise_ok = requested_accepts(target, candidates=[inactive])
+            if not ((when_possible and when_ok) or (otherwise_possible and otherwise_ok)):
+                conflicts.append({
+                    "type": "explicit_conditional_conflict", "source": "conditional_constraint",
+                    "constraint_group": group, "controller": controller, "parameter": target,
+                    "reason": "显式技术条件与条件属性关系冲突",
+                })
+
+        for rule in rules:
+            if str(rule.get("severity") or "warning") != "error":
+                continue
+            if rule.get("rule_kind") in ("conditional_lower", "conditional_upper"):
+                continue
+            left, right = rule.get("left_parameter"), rule.get("right_parameter")
+            if left not in explicit_keys or (right and right not in explicit_keys):
+                continue
+            left_lo, left_hi = numeric_interval(left)
+            right_lo, right_hi = numeric_interval(right) if right else (0.0, 0.0)
+            multiplier = float(rule.get("multiplier") or 1)
+            offset = float(rule.get("offset") or 0)
+            if multiplier >= 0:
+                diff_lo, diff_hi = left_lo - multiplier * right_hi - offset, left_hi - multiplier * right_lo - offset
+            else:
+                diff_lo, diff_hi = left_lo - multiplier * right_lo - offset, left_hi - multiplier * right_hi - offset
+            operator = rule.get("operator")
+            impossible = {
+                "gte": diff_hi < 0, "gt": diff_hi <= 0, "lte": diff_lo > 0,
+                "lt": diff_lo >= 0, "eq": diff_lo > 0 or diff_hi < 0,
+            }.get(operator, False)
+            if impossible:
+                conflicts.append({
+                    "type": "explicit_hard_relation_conflict", "source": "constraint_rule",
+                    "rule_id": rule.get("rule_id"), "left_parameter": left,
+                    "right_parameter": right, "reason": rule.get("message") or "显式技术条件与工程硬规则冲突",
+                })
+        return conflicts
 
     def _compile_generation_branch(self, request, branch, definitions=None):
         branch = branch or {"tag_rules": [], "explicit_filters": list(request.get("indicator_filters") or []),
@@ -1007,6 +1135,7 @@ class HistorySeededGenerator(object):
             "tag_rule_groups": dict(branch.get("tag_groups") or {}),
             "unresolved_tags": list(branch.get("unresolved_tags") or []),
             "compiled_rule_count": len(branch.get("tag_rules") or []),
+            "explicit_conflicts": list(branch.get("explicit_conflicts") or []),
         }
 
     def _tag_branch_for_seed(self, request, seed_index):
@@ -1704,6 +1833,30 @@ class HistorySeededGenerator(object):
         family_coverage_ok = len(covered_families) >= min(2, len(available_families))
         return len(selected) if (not required or required.issubset(covered)) and family_coverage_ok else 0
 
+    @staticmethod
+    def _branch_search_states(records, branch_ids, completed_rounds, minimum_rounds=2, minimum_records=2, branch_effort=None):
+        """Classify demand branches after each has received a minimum effort."""
+        branch_effort = branch_effort or {}
+        states = {}
+        for branch_id in branch_ids or []:
+            branch_records = [item for item in records if item.get("demand_branch_id") == branch_id]
+            effort = branch_effort.get(branch_id) or {}
+            branch_rounds = int(effort.get("round_opportunities", completed_rounds) or 0)
+            seed_attempts = int(effort.get("seed_attempts", 0) or 0)
+            if any(item.get("strict_filter_satisfied") for item in branch_records):
+                status = "strict_found"
+            elif seed_attempts and not branch_records:
+                status = "exhausted"
+            elif branch_rounds >= minimum_rounds and len(branch_records) >= minimum_records:
+                status = "best_effort_only"
+            else:
+                status = "still_searching"
+            states[branch_id] = {
+                "status": status, "evaluated_candidates": len(branch_records),
+                "seed_attempts": seed_attempts, "round_opportunities": branch_rounds,
+            }
+        return states
+
     def _coverage_first_select(self, ranked, count, definitions, rejection=None):
         """Select quality-constrained branch/family coverage before global fill."""
         ranked = list(ranked or [])
@@ -1802,11 +1955,14 @@ class HistorySeededGenerator(object):
         trace["changed_parameters"] = list(changed)
         item["generation_trace"] = trace
         branch = trace.get("generation_branch") or {}
-        item["solution_direction"] = {
-            "branch_id": item.get("demand_branch_id") or branch.get("demand_branch_id") or "BRANCH-ALL",
-            "title": branch.get("title") or "按当前综合需求探索",
-            "summary": branch.get("summary") or "该方案代表当前综合需求下的一条参数调整路线。",
-        }
+        if branch.get("show_solution_direction"):
+            item["solution_direction"] = {
+                "branch_id": item.get("demand_branch_id") or branch.get("demand_branch_id") or "BRANCH-ALL",
+                "title": branch.get("title") or "按当前综合需求探索",
+                "summary": branch.get("summary") or "该方案代表当前综合需求下的一条参数调整路线。",
+            }
+        else:
+            item.pop("solution_direction", None)
         item["agreement_id"] = "LIVE-%06d-%03d" % (rng.randint(0, 999999), index)
         item["agreement_name"] = "基于%s生成的候选协议-%02d" % (base["agreement_id"], index)
         if item.get("generation_level") == "exploratory":
@@ -1827,7 +1983,7 @@ class HistorySeededGenerator(object):
             item["solution_fit_summary"] = "已满足当前筛选条件且位于主要模型经验范围内"
         return item
 
-    def _emergency_candidate(self, seeds, bounds, definitions, request, tag_map, rng, frozen_parameters=None, budget=None, rejection_details=None):
+    def _emergency_candidate(self, seeds, bounds, definitions, request, tag_map, rng, frozen_parameters=None, budget=None, rejection_details=None, anchor_filters=None):
         if budget is None:
             budget = {"attempted": 0, "max": 10 ** 9}
         for base in seeds:
@@ -1850,7 +2006,8 @@ class HistorySeededGenerator(object):
                     break
             finalized = self._finalize_params(params, base, locked, definitions)
             anchor_violations = validate_anchor_integrity(
-                finalized["params"], request.get("indicator_filters"), definitions, request.get("indicator_filter_mode", "all")
+                finalized["params"], anchor_filters if anchor_filters is not None else request.get("indicator_filters"),
+                definitions, "all" if anchor_filters is not None else request.get("indicator_filter_mode", "all")
             )
             if anchor_violations:
                 if rejection_details is not None:
@@ -2031,6 +2188,9 @@ class HistorySeededGenerator(object):
         active_demand_branch_ids = sorted(set(
             branch.get("demand_branch_id") for branch in generation_branches if branch.get("demand_branch_id")
         ))
+        show_solution_direction = len(active_demand_branch_ids) > 1
+        branch_effort = dict((branch_id, {"seed_attempts": 0, "round_opportunities": 0})
+                             for branch_id in active_demand_branch_ids)
         tag_weights = dict((key, value.get("weight", 1.0)) for key, value in tag_map.items())
         all_records = []
         seen = set()
@@ -2059,6 +2219,8 @@ class HistorySeededGenerator(object):
             base = seeds[seed_index % len(seeds)]
             branch = generation_branches[seed_index % len(generation_branches)] if generation_branches else None
             bounds, branch_request, branch_info = self._compile_generation_branch(request, branch, definitions)
+            branch_info["show_solution_direction"] = show_solution_direction
+            branch_effort.setdefault(branch_info["demand_branch_id"], {"seed_attempts": 0, "round_opportunities": 0})["seed_attempts"] += 1
             branch_bounds.append(bounds)
             params = dict(base["params"])
             locked, anchor_conflicts = self._anchor_demands(params, bounds, definitions)
@@ -2185,6 +2347,8 @@ class HistorySeededGenerator(object):
         pending = []
         while beam and attempted_evaluations < max_evaluations and iteration < len(step_schedule):
             iteration += 1
+            for branch_id in set(item.get("demand_branch_id") for item in beam if item.get("demand_branch_id")):
+                branch_effort.setdefault(branch_id, {"seed_attempts": 0, "round_opportunities": 0})["round_opportunities"] += 1
             step_scale = step_schedule[iteration - 1]
             round_records = list(beam)
             pending = []
@@ -2385,10 +2549,20 @@ class HistorySeededGenerator(object):
             # Stop as soon as final selection can return the requested number of
             # genuinely different strict solutions.  Counting three times the
             # requested amount caused unnecessary model batches on easy demands.
-            diverse_strict = self._diverse_strict_count(
-                all_records, definitions, historical=history, required_branch_ids=active_demand_branch_ids
+            branch_search_states = self._branch_search_states(
+                all_records, active_demand_branch_ids, iteration, branch_effort=branch_effort
             )
-            if diverse_strict >= count:
+            strict_capable_branches = [
+                branch_id for branch_id, state in branch_search_states.items()
+                if state["status"] == "strict_found"
+            ]
+            all_branches_explored = all(
+                state["status"] != "still_searching" for state in branch_search_states.values()
+            )
+            diverse_strict = self._diverse_strict_count(
+                all_records, definitions, historical=history, required_branch_ids=strict_capable_branches
+            )
+            if diverse_strict >= count and all_branches_explored:
                 stopped_for_count = True
                 break
             if not pending:
@@ -2421,17 +2595,31 @@ class HistorySeededGenerator(object):
 
         if not usable and attempted_evaluations < max_evaluations:
             budget_state = {"attempted": attempted_evaluations, "max": max_evaluations}
-            emergency, emergency_base = self._emergency_candidate(
-                seeds, bounds, definitions, request, tag_map, rng,
-                frozen_parameters=request.get("frozen_parameters"), budget=budget_state,
-                rejection_details=rejection_details,
-            )
-            attempted_evaluations = budget_state["attempted"]
-            if emergency is not None:
+            emergency_records = []
+            for branch in generation_branches:
+                if budget_state["attempted"] >= budget_state["max"]:
+                    break
+                emergency_bounds, emergency_request, emergency_branch_info = self._compile_generation_branch(
+                    request, branch, definitions
+                )
+                emergency_branch_info["show_solution_direction"] = show_solution_direction
+                emergency, emergency_base = self._emergency_candidate(
+                    seeds, emergency_bounds, definitions, emergency_request, tag_map, rng,
+                    frozen_parameters=request.get("frozen_parameters"), budget=budget_state,
+                    rejection_details=rejection_details,
+                    anchor_filters=emergency_branch_info.get("anchor_filters"),
+                )
+                if emergency is None:
+                    continue
                 emergency["_base"] = emergency_base
                 emergency["_changed"] = self._changed_parameters(emergency["params"], emergency_base["params"], definitions)
+                self._attach_lineage(emergency, emergency_base, emergency_branch_info)
                 if emergency["_changed"]:
-                    usable.append(emergency)
+                    emergency_records.append(emergency)
+            attempted_evaluations = budget_state["attempted"]
+            usable.extend(self._coverage_first_select(
+                sorted(emergency_records, key=lambda item: item["_search_key"]), count, definitions
+            ))
 
         if not usable and all_records:
             # Last-resort no-empty guarantee: return the closest successfully
@@ -2468,7 +2656,11 @@ class HistorySeededGenerator(object):
                 for key in ("_base", "_locked", "_anchor_conflicts", "_changed", "_search_key", "_request", "_risk_signature"):
                     public.pop(key, None)
                 ranking_pool.append(public)
-            ranked_public = rank_agreements(ranking_pool, request, tag_weights)
+            ranked_public = rank_agreements(
+                ranking_pool, request, tag_weights,
+                definitions=definitions, tag_map=tag_map,
+                constraint_rules=getattr(self.store, "constraint_rows", lambda: [])(),
+            )
             by_signature = dict((tuple((k, x["params"][k]) for k in sorted(x["params"])), x) for x in strict_candidates)
             ranked = []
             for ranked_item in ranked_public:
@@ -2552,4 +2744,7 @@ class HistorySeededGenerator(object):
             "search_iterations": iteration,
             "search_mode": "deep_extrapolation" if deep_search else "fast",
             "explicit_filter_feasibility": explicit_feasibility,
+            "branch_search_states": self._branch_search_states(
+                all_records, active_demand_branch_ids, iteration, branch_effort=branch_effort
+            ),
         }
