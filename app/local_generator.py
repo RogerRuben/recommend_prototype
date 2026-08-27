@@ -1786,10 +1786,11 @@ class HistorySeededGenerator(object):
             return False
         return key[1] <= best_key[1] + max(0.20, abs(best_key[1]) * 0.50 + 0.05)
 
-    def _beam_select(self, records, definitions, width=10):
+    def _beam_select(self, records, definitions, width=10, branch_effort=None):
         records = sorted(records, key=lambda x: x["_search_key"])
         if not records:
             return []
+        branch_effort = branch_effort or {}
         eligible = [item for item in records if self._diversity_quality_eligible(item, records[0])]
         selected, family_counts = [], {}
         family_cap = max(1, int(math.ceil(float(width) * 0.40)))
@@ -1815,6 +1816,12 @@ class HistorySeededGenerator(object):
             branch_id = item.get("demand_branch_id") or "BRANCH-ALL"
             if branch_id not in branch_ids:
                 branch_ids.append(branch_id)
+        branch_order = dict((branch_id, index) for index, branch_id in enumerate(branch_ids))
+        branch_ids.sort(key=lambda branch_id: (
+            int((branch_effort.get(branch_id) or {}).get("round_opportunities", 0) or 0),
+            int((branch_effort.get(branch_id) or {}).get("beam_admissions", 0) or 0),
+            branch_order[branch_id],
+        ))
         for branch_id in branch_ids:
             add(next(item for item in eligible if (item.get("demand_branch_id") or "BRANCH-ALL") == branch_id), enforce_distance=False)
             if len(selected) >= width:
@@ -1838,6 +1845,47 @@ class HistorySeededGenerator(object):
             if len(selected) >= width:
                 break
         return selected
+
+    def _update_branch_beam_effort(self, current_beam, comparison_pool, branch_ids, branch_effort, round_number):
+        """Track quality eligibility separately from finite beam admission."""
+        quality_counts = dict((branch_id, 0) for branch_id in branch_ids or [])
+        selected_counts = dict((branch_id, 0) for branch_id in branch_ids or [])
+        pool = list(comparison_pool or current_beam or [])
+        best = min(pool, key=lambda item: item["_search_key"]) if pool else None
+        for record in pool:
+            branch_id = record.get("demand_branch_id")
+            if branch_id in quality_counts and (best is None or self._diversity_quality_eligible(record, best)):
+                quality_counts[branch_id] += 1
+        for record in current_beam or []:
+            branch_id = record.get("demand_branch_id")
+            if branch_id in selected_counts:
+                selected_counts[branch_id] += 1
+        for branch_id in quality_counts:
+            effort = branch_effort.setdefault(branch_id, {})
+            effort["quality_eligible_centers"] = quality_counts[branch_id]
+            effort["selected_beam_centers"] = selected_counts[branch_id]
+            if selected_counts[branch_id]:
+                effort["beam_admissions"] = int(effort.get("beam_admissions", 0) or 0) + 1
+                effort["last_alive_round"] = round_number
+        return branch_effort
+
+    @staticmethod
+    def _beam_candidate_pool(round_records, all_records, branch_ids):
+        """Keep the best known centre from every branch eligible for rotation."""
+        pool = list(round_records or [])
+        present = set(id(item) for item in pool)
+        for branch_id in branch_ids or []:
+            candidates = [
+                item for item in (all_records or [])
+                if item.get("demand_branch_id") == branch_id
+            ]
+            if not candidates:
+                continue
+            best = min(candidates, key=lambda item: item["_search_key"])
+            if id(best) not in present:
+                pool.append(best)
+                present.add(id(best))
+        return pool
 
     def _diverse_strict_count(self, records, definitions, historical=None, distance=0.018, required_branch_ids=None):
         """Count strict solutions that can actually survive final diversity selection."""
@@ -1871,14 +1919,21 @@ class HistorySeededGenerator(object):
         states = {}
         for branch_id in branch_ids or []:
             branch_records = [item for item in records if item.get("demand_branch_id") == branch_id]
+            tracks_capacity = branch_id in branch_effort
             effort = branch_effort.get(branch_id) or {}
             branch_rounds = int(effort.get("round_opportunities", completed_rounds) or 0)
             seed_attempts = int(effort.get("seed_attempts", 0) or 0)
-            eligible_centers = int(effort.get("eligible_beam_centers", 0) or 0)
+            quality_centers = int(effort.get("quality_eligible_centers", 0) or 0)
+            selected_centers = int(effort.get("selected_beam_centers", 0) or 0)
             proposal_attempts = int(effort.get("proposal_attempts", 0) or 0)
-            if any(item.get("strict_filter_satisfied") for item in branch_records):
+            has_strict = any(item.get("strict_filter_satisfied") for item in branch_records)
+            if tracks_capacity and quality_centers > 0 and selected_centers == 0:
+                status = "waiting_for_capacity"
+            elif tracks_capacity and quality_centers > 0 and branch_rounds == 0:
+                status = "still_searching"
+            elif has_strict:
                 status = "strict_found"
-            elif branch_records and seed_attempts and eligible_centers == 0:
+            elif branch_records and seed_attempts and quality_centers == 0:
                 status = "exhausted_by_quality"
             elif seed_attempts and not branch_records:
                 status = "exhausted"
@@ -1889,7 +1944,9 @@ class HistorySeededGenerator(object):
             states[branch_id] = {
                 "status": status, "evaluated_candidates": len(branch_records),
                 "seed_attempts": seed_attempts, "round_opportunities": branch_rounds,
-                "eligible_beam_centers": eligible_centers,
+                "quality_eligible_centers": quality_centers,
+                "selected_beam_centers": selected_centers,
+                "beam_admissions": int(effort.get("beam_admissions", 0) or 0),
                 "proposal_attempts": proposal_attempts,
                 "last_alive_round": effort.get("last_alive_round"),
             }
@@ -2228,30 +2285,23 @@ class HistorySeededGenerator(object):
         ))
         show_solution_direction = len(active_demand_branch_ids) > 1
         branch_effort = dict((branch_id, {
-            "seed_attempts": 0, "round_opportunities": 0, "eligible_beam_centers": 0,
+            "seed_attempts": 0, "round_opportunities": 0, "quality_eligible_centers": 0,
+            "selected_beam_centers": 0, "beam_admissions": 0,
             "proposal_attempts": 0, "last_alive_round": None,
         })
                              for branch_id in active_demand_branch_ids)
 
         def branch_effort_row(branch_id):
             return branch_effort.setdefault(branch_id, {
-                "seed_attempts": 0, "round_opportunities": 0, "eligible_beam_centers": 0,
+                "seed_attempts": 0, "round_opportunities": 0, "quality_eligible_centers": 0,
+                "selected_beam_centers": 0, "beam_admissions": 0,
                 "proposal_attempts": 0, "last_alive_round": None,
             })
 
         def update_beam_effort(current_beam, round_number, comparison_pool=None):
-            counts = dict((branch_id, 0) for branch_id in active_demand_branch_ids)
-            pool = list(comparison_pool or current_beam or [])
-            best = min(pool, key=lambda item: item["_search_key"]) if pool else None
-            for record in current_beam or []:
-                branch_id = record.get("demand_branch_id")
-                if branch_id in counts and (best is None or self._diversity_quality_eligible(record, best)):
-                    counts[branch_id] += 1
-            for branch_id, count_in_beam in counts.items():
-                effort = branch_effort_row(branch_id)
-                effort["eligible_beam_centers"] = count_in_beam
-                if count_in_beam:
-                    effort["last_alive_round"] = round_number
+            self._update_branch_beam_effort(
+                current_beam, comparison_pool, active_demand_branch_ids, branch_effort, round_number
+            )
         tag_weights = dict((key, value.get("weight", 1.0)) for key, value in tag_map.items())
         all_records = []
         seen = set()
@@ -2397,7 +2447,9 @@ class HistorySeededGenerator(object):
             beam.append(record)
         beam_width = 14 if deep_search else 10
         initial_beam_pool = list(beam)
-        beam = self._beam_select(beam, definitions, width=min(beam_width, max(4, len(beam))))
+        beam = self._beam_select(
+            beam, definitions, width=min(beam_width, max(4, len(beam))), branch_effort=branch_effort
+        )
         update_beam_effort(beam, 0, initial_beam_pool)
 
         # Stage 2: adaptive iterative neighborhoods. Better candidates become the
@@ -2411,7 +2463,7 @@ class HistorySeededGenerator(object):
         while beam and attempted_evaluations < max_evaluations and iteration < len(step_schedule):
             iteration += 1
             for branch_id in active_demand_branch_ids:
-                if branch_effort_row(branch_id).get("eligible_beam_centers", 0) > 0:
+                if branch_effort_row(branch_id).get("selected_beam_centers", 0) > 0:
                     branch_effort_row(branch_id)["round_opportunities"] += 1
             step_scale = step_schedule[iteration - 1]
             round_records = list(beam)
@@ -2612,8 +2664,11 @@ class HistorySeededGenerator(object):
                 self._attach_lineage(record, item["base"], center_lineage)
                 round_records.append(record)
                 all_records.append(record)
-            beam = self._beam_select(round_records, definitions, width=beam_width)
-            update_beam_effort(beam, iteration, round_records)
+            beam_pool = self._beam_candidate_pool(round_records, all_records, active_demand_branch_ids)
+            beam = self._beam_select(
+                beam_pool, definitions, width=beam_width, branch_effort=branch_effort
+            )
+            update_beam_effort(beam, iteration, beam_pool)
             # Stop as soon as final selection can return the requested number of
             # genuinely different strict solutions.  Counting three times the
             # requested amount caused unnecessary model batches on easy demands.
@@ -2625,7 +2680,8 @@ class HistorySeededGenerator(object):
                 if state["status"] == "strict_found"
             ]
             all_branches_explored = all(
-                state["status"] != "still_searching" for state in branch_search_states.values()
+                state["status"] not in ("still_searching", "waiting_for_capacity")
+                for state in branch_search_states.values()
             )
             diverse_strict = self._diverse_strict_count(
                 all_records, definitions, historical=history, required_branch_ids=strict_capable_branches

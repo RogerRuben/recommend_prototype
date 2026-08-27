@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Compile explicit and tag requirements into bounded generation branches."""
 
+import heapq
 import itertools
 
 
@@ -36,6 +37,73 @@ def compile_explicit_demand_branches(filters, mode="all", definitions=None):
     ]
 
 
+def _bounded_maximal_valid_sets(keys, conflict_groups, limit):
+    """Return large valid key sets first without enumerating the full power set.
+
+    A valid selected set must omit at least one key from every conflict group.
+    The complement is therefore a hitting set.  A bounded best-first search over
+    hitting sets yields the least-relaxed (largest selected) directions first.
+    Greedy maximal sets provide deterministic coverage if pathological metadata
+    exhausts the search-state budget before enough solutions are found.
+    """
+    ordered_keys = tuple(sorted(set(keys or [])))
+    groups = []
+    for group in conflict_groups or []:
+        normalized = frozenset(str(key) for key in group if key in ordered_keys)
+        if len(normalized) > 1 and normalized not in groups:
+            groups.append(normalized)
+    if not ordered_keys or not groups:
+        return [set(ordered_keys)]
+
+    cap = max(1, int(limit or 1))
+    state_cap = max(4096, cap * 512)
+    queue = [(0, tuple(), frozenset())]
+    visited = {frozenset()}
+    selected_sets = []
+    selected_signatures = set()
+    expanded = 0
+
+    def add_selected(selected):
+        signature = tuple(sorted(selected))
+        if signature not in selected_signatures:
+            selected_signatures.add(signature)
+            selected_sets.append(set(selected))
+
+    while queue and expanded < state_cap and len(selected_sets) < cap:
+        _size, _ordered_drop, dropped = heapq.heappop(queue)
+        expanded += 1
+        uncovered = next((group for group in groups if not group.intersection(dropped)), None)
+        if uncovered is None:
+            # Superset hitting sets do not describe maximal selected sets.
+            if any(all(group.intersection(dropped - {key}) for group in groups) for key in dropped):
+                continue
+            add_selected(set(ordered_keys) - set(dropped))
+            continue
+        for key in sorted(uncovered):
+            next_dropped = frozenset(set(dropped) | {key})
+            if next_dropped in visited:
+                continue
+            visited.add(next_dropped)
+            heapq.heappush(queue, (len(next_dropped), tuple(sorted(next_dropped)), next_dropped))
+
+    # Bounded greedy completion avoids the old >12 fallback that retained only
+    # one core key.  Different rotations expose alternative maximal directions.
+    orders = []
+    for offset in range(len(ordered_keys)):
+        rotated = ordered_keys[offset:] + ordered_keys[:offset]
+        orders.extend((rotated, tuple(reversed(rotated))))
+    for order in orders:
+        selected = set()
+        for key in order:
+            trial = selected | {key}
+            if not any(group.issubset(trial) for group in groups):
+                selected = trial
+        add_selected(selected)
+
+    selected_sets.sort(key=lambda item: (-len(item), tuple(sorted(item))))
+    return selected_sets[:cap]
+
+
 def compile_conflict_core_branches(filters, conflict_key_groups, definitions=None, max_branches=24):
     """Relax only mutually incompatible filter keys and preserve common filters.
 
@@ -56,28 +124,15 @@ def compile_conflict_core_branches(filters, conflict_key_groups, definitions=Non
     cross_groups = [group for group in groups if len(group) > 1]
     cross_keys = sorted(set().union(*cross_groups)) if cross_groups else []
 
+    branch_cap = max(1, int(max_branches))
     valid_sets = []
     if cross_keys:
-        # Conflict cores are expected to be small.  Bound pathological metadata
-        # before subset enumeration; the fallback still preserves every common
-        # filter and explores one core key per direction.
-        if len(cross_keys) <= 12:
-            for size in range(len(cross_keys) + 1):
-                for subset_tuple in itertools.combinations(cross_keys, size):
-                    subset = set(subset_tuple)
-                    if any(group.issubset(subset) for group in cross_groups):
-                        continue
-                    valid_sets.append(subset)
-            valid_sets = [
-                subset for subset in valid_sets
-                if not any(subset < other for other in valid_sets)
-            ]
-        else:
-            valid_sets = [{key} for key in cross_keys]
+        valid_sets = _bounded_maximal_valid_sets(cross_keys, cross_groups, branch_cap)
     else:
         valid_sets = [set()]
 
     candidates = []
+    signatures = set()
     for selected_keys in valid_sets:
         selected_cross = [
             rule for rule in filters
@@ -98,11 +153,12 @@ def compile_conflict_core_branches(filters, conflict_key_groups, definitions=Non
                 (rule.get("parameter_id"), rule.get("operator"), str(rule.get("value1")), str(rule.get("value2")))
                 for rule in chosen
             )
-            if signature not in [item[0] for item in candidates]:
+            if signature not in signatures:
+                signatures.add(signature)
                 candidates.append((signature, chosen))
-            if len(candidates) >= max(1, int(max_branches)):
+            if len(candidates) >= branch_cap:
                 break
-        if len(candidates) >= max(1, int(max_branches)):
+        if len(candidates) >= branch_cap:
             break
 
     result = []

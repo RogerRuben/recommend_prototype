@@ -167,6 +167,25 @@ def test_conflict_core_preserves_common_filters_and_combines_independent_groups(
     assert all(branch["assessment_filters"] == filters for branch in branches)
 
 
+def test_large_conflict_core_keeps_maximal_sets_and_cap_prefers_least_relaxation():
+    keys = ["K%02d" % index for index in range(13)]
+    filters = [{"parameter_id": key, "operator": "eq", "value1": index}
+               for index, key in enumerate(keys)]
+    branches = compile_conflict_core_branches(filters, [set(keys)], max_branches=24)
+    assert len(branches) == 13, branches
+    assert all(len(branch["explicit_filters"]) == 12 for branch in branches), branches
+
+    asymmetric = [
+        {"parameter_id": "A", "operator": "eq", "value1": 1},
+        {"parameter_id": "B", "operator": "eq", "value1": 1},
+        {"parameter_id": "C", "operator": "eq", "value1": 1},
+    ]
+    least_relaxed = compile_conflict_core_branches(
+        asymmetric, [{"A", "B"}, {"A", "C"}], max_branches=1
+    )
+    assert {rule["parameter_id"] for rule in least_relaxed[0]["explicit_filters"]} == {"B", "C"}, least_relaxed
+
+
 def test_hard_feasible_domain_coupling_enters_conflict_core():
     definitions = {
         "a": {"parameter_id": "a", "label": "A", "value_type": "number", "search_type": "continuous",
@@ -211,11 +230,53 @@ def test_impossible_branch_becomes_best_effort_only_after_minimum_effort():
     assert settled["B"]["status"] == "best_effort_only"
 
     eliminated = HistorySeededGenerator._branch_search_states(records, ["A", "B"], 1, branch_effort={
-        "A": {"seed_attempts": 2, "round_opportunities": 1, "eligible_beam_centers": 5},
-        "B": {"seed_attempts": 2, "round_opportunities": 0, "eligible_beam_centers": 0,
+        "A": {"seed_attempts": 2, "round_opportunities": 1, "quality_eligible_centers": 5,
+              "selected_beam_centers": 5},
+        "B": {"seed_attempts": 2, "round_opportunities": 0, "quality_eligible_centers": 0,
+              "selected_beam_centers": 0,
               "proposal_attempts": 0, "last_alive_round": 0},
     })
     assert eliminated["B"]["status"] == "exhausted_by_quality", eliminated
+
+
+def test_quality_eligible_branches_rotate_when_branch_count_exceeds_beam_width():
+    generator = HistorySeededGenerator(_Store({}), _Runtime(), _evaluate, None)
+    records = []
+    branch_ids = ["BRANCH-%02d" % index for index in range(1, 13)]
+    for index, branch_id in enumerate(branch_ids):
+        records.append({
+            "demand_branch_id": branch_id,
+            "family_id": branch_id + ":SEED",
+            "params": {"x": index},
+            "_search_key": (0.0, 0.01 + index * 0.001, 0.0, 0.0, 0.0, 0.0, 0.0),
+            "strict_filter_satisfied": True,
+        })
+    effort = dict((branch_id, {
+        "seed_attempts": 1, "round_opportunities": 0,
+        "quality_eligible_centers": 0, "selected_beam_centers": 0,
+        "beam_admissions": 0, "proposal_attempts": 0, "last_alive_round": None,
+    }) for branch_id in branch_ids)
+
+    first = generator._beam_select(records, {}, width=10, branch_effort=effort)
+    generator._update_branch_beam_effort(first, records, branch_ids, effort, 0)
+    first_ids = {item["demand_branch_id"] for item in first}
+    waiting = set(branch_ids) - first_ids
+    assert len(waiting) == 2, first_ids
+    states = generator._branch_search_states(records, branch_ids, 0, branch_effort=effort)
+    assert all(states[branch_id]["quality_eligible_centers"] > 0 for branch_id in waiting), states
+    assert all(states[branch_id]["status"] == "waiting_for_capacity" for branch_id in waiting), states
+
+    for branch_id in first_ids:
+        effort[branch_id]["round_opportunities"] += 1
+    second_pool = generator._beam_candidate_pool(first, records, branch_ids)
+    second = generator._beam_select(second_pool, {}, width=10, branch_effort=effort)
+    second_ids = {item["demand_branch_id"] for item in second}
+    assert waiting.issubset(second_ids), (waiting, second_ids)
+    generator._update_branch_beam_effort(second, records, branch_ids, effort, 1)
+    assert all(effort[branch_id]["selected_beam_centers"] > 0 for branch_id in waiting), effort
+    for branch_id in second_ids:
+        effort[branch_id]["round_opportunities"] += 1
+    assert all(effort[branch_id]["round_opportunities"] > 0 for branch_id in waiting), effort
 
 
 def test_generate_stops_when_impossible_branch_is_eliminated_by_quality():
@@ -305,8 +366,10 @@ if __name__ == "__main__":
     test_cross_parameter_conditional_and_conflict_splits_directions()
     test_cross_parameter_affine_hard_conflict_uses_interval_feasibility()
     test_conflict_core_preserves_common_filters_and_combines_independent_groups()
+    test_large_conflict_core_keeps_maximal_sets_and_cap_prefers_least_relaxation()
     test_hard_feasible_domain_coupling_enters_conflict_core()
     test_impossible_branch_becomes_best_effort_only_after_minimum_effort()
+    test_quality_eligible_branches_rotate_when_branch_count_exceeds_beam_width()
     test_generate_stops_when_impossible_branch_is_eliminated_by_quality()
     test_non_strict_reasons_are_candidate_specific()
     test_onboarding_clear_and_single_branch_direction_contracts()
