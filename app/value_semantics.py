@@ -106,6 +106,51 @@ def display_definition_mapping(definition):
     return {str(k): str(v) for k, v in parsed.items()} if isinstance(parsed, dict) else {}
 
 
+def special_value_keys(definition):
+    """Return explicitly declared special business-state keys.
+
+    Display mappings are presentation-only and are intentionally not inferred as
+    special states.  Keys remain canonical strings in metadata while comparison
+    uses :func:`values_equal` against the original business value.
+    """
+    if not definition:
+        return []
+    raw = definition.get("special_value_keys_json")
+    if raw in (None, ""):
+        return []
+    if isinstance(raw, (list, tuple)):
+        values = list(raw)
+    else:
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            return []
+        values = parsed if isinstance(parsed, list) else []
+    result = []
+    for value in values:
+        key = str(value).strip()
+        if key and key not in result:
+            result.append(key)
+    return result
+
+
+def is_special_value(definition, value):
+    if value is None or value == "":
+        return False
+    return any(values_equal(value, key, definition) for key in special_value_keys(definition))
+
+
+def special_value_label(definition, value):
+    if not is_special_value(definition, value):
+        return None
+    return business_display_value(value, definition)
+
+
+def normal_numeric_values(definition, values):
+    """Exclude structural special states from an otherwise numeric domain."""
+    return [value for value in (values or []) if not is_special_value(definition, value)]
+
+
 def mapping_target(value, definition=None):
     """Return the model value a business label/encoding maps to, else ``None``.
 

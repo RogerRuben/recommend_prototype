@@ -8,7 +8,7 @@ from __future__ import print_function
 
 import math
 
-from .value_semantics import normalize_numeric
+from .value_semantics import is_special_value, normalize_numeric, special_value_label
 
 
 def _range(actual, lower, upper, source):
@@ -43,26 +43,32 @@ def build_range_diagnostics(business_parameters, definitions, model_feature_spec
     for key in sorted(keys):
         definition = definitions.get(key) or {}
         actual = business_parameters.get(key)
+        special = is_special_value(definition, actual)
         item = {
             "parameter_id": key,
             "label": definition.get("label") or key,
             "unit": definition.get("unit") or "",
             "actual": actual,
-            "business_reference": _range(actual, definition.get("min_value"), definition.get("max_value"), "data_master"),
+            "special_state": special,
+            "special_state_label": special_value_label(definition, actual) if special else None,
+            "business_reference": None if special else _range(actual, definition.get("min_value"), definition.get("max_value"), "data_master"),
             "model_contracts": {},
             "training_ranges": {},
         }
         model_actual = model_parameters.get(key, actual)
         for kind, spec in (specs_by_key.get(key) or {}).items():
-            contract = _range(model_actual, spec.get("min"), spec.get("max"), "%s_schema" % kind)
-            training = _range(model_actual, spec.get("training_min"), spec.get("training_max"), "%s_training" % kind)
+            contract = None if special else _range(model_actual, spec.get("min"), spec.get("max"), "%s_schema" % kind)
+            training = None if special else _range(model_actual, spec.get("training_min"), spec.get("training_max"), "%s_training" % kind)
             if contract is not None:
                 item["model_contracts"][kind] = contract
             if training is not None:
                 item["training_ranges"][kind] = training
         ranges = [item["business_reference"]] + list(item["model_contracts"].values()) + list(item["training_ranges"].values())
         ranges = [value for value in ranges if value is not None]
-        if ranges:
+        if special:
+            item["outside_any_reference"] = False
+            result.append(item)
+        elif ranges:
             item["outside_any_reference"] = any(value.get("inside") is False for value in ranges)
             result.append(item)
     return result

@@ -10,7 +10,7 @@ from __future__ import print_function
 
 from .conditional_constraint import TEMPLATE_KIND, parse_template_metadata
 from .recommender import filter_match
-from .value_semantics import normalize_numeric
+from .value_semantics import is_special_value, normalize_numeric
 
 
 def _number(value):
@@ -31,6 +31,8 @@ def _rule_gap(params, rule, definition, matched):
     value2 = rule.get("value2")
     actual = params.get(rule.get("parameter_id"))
     definition = definition or {}
+    if is_special_value(definition, actual):
+        return 1.0
     span = max(float(definition.get("max_value") or 1) - float(definition.get("min_value") or 0), 1e-9)
     a = _number(actual)
     if operator in ("gte", "gt", "lte", "lt", "eq"):
@@ -182,6 +184,9 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
                 "matched": bool(ok), "status": "matched" if ok else "unmatched",
                 "gap": round(gap, 6), "group": mode, "group_matched": group_matched,
             }
+            if is_special_value(definition, params.get(key)) and operator != "special_is":
+                condition["actual_state"] = "special"
+                condition["reason"] = "special_state_not_numeric"
             meta = inactive_flags.get(key)
             if meta is not None:
                 condition["actual_state"] = "inactive"
@@ -243,6 +248,6 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
 def _operator_text(operator):
     return {
         "gte": "不低于", "gt": "高于", "lte": "不高于", "lt": "低于", "eq": "等于",
-        "boolean_is": "为", "text_equals": "等于", "text_contains": "包含",
+        "boolean_is": "为", "special_is": "状态为", "text_equals": "等于", "text_contains": "包含",
         "range_inside": "位于区间", "range_contains": "覆盖区间", "range_overlap": "与区间相交",
     }.get(operator, operator)

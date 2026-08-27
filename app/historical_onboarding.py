@@ -200,6 +200,7 @@ def _infer_parameter(header, parameter_id, values, missing_tokens, order):
         "allowed_values_json": json.dumps(allowed, ensure_ascii=False) if allowed else None,
         "model_value_mapping_json": None,
         "display_value_mapping_json": None,
+        "special_value_keys_json": None,
         "required": required,
         "auto_adjustable": 0 if value_type == "text" else 1,
         "decimal_places": decimals,

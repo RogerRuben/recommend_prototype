@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .model_field_types import model_types_compatible
 from .display_mapping import dump_display_mapping, normalize_display_mapping
+from .value_semantics import is_special_value, normalize_numeric
 
 from .recommender import filter_match
 
@@ -160,7 +161,7 @@ class Store(object):
                 CREATE TABLE IF NOT EXISTS parameter_definitions(
                     parameter_id TEXT PRIMARY KEY, label TEXT NOT NULL, unit TEXT, value_type TEXT NOT NULL,
                     min_value REAL, max_value REAL, observed_min REAL, observed_max REAL, preference TEXT, description TEXT, adjustment_hint TEXT,
-                    allowed_values_json TEXT, model_value_mapping_json TEXT, display_value_mapping_json TEXT,
+                    allowed_values_json TEXT, model_value_mapping_json TEXT, display_value_mapping_json TEXT, special_value_keys_json TEXT,
                     search_type TEXT NOT NULL DEFAULT 'auto', required INTEGER NOT NULL DEFAULT 1,
                     auto_adjustable INTEGER NOT NULL DEFAULT 1, decimal_places INTEGER NOT NULL DEFAULT 3,
                     parameter_group TEXT NOT NULL DEFAULT '其他',
@@ -234,6 +235,7 @@ class Store(object):
                     ("parameter_definitions", "allowed_values_json TEXT"),
                     ("parameter_definitions", "model_value_mapping_json TEXT"),
                     ("parameter_definitions", "display_value_mapping_json TEXT"),
+                    ("parameter_definitions", "special_value_keys_json TEXT"),
                     ("parameter_definitions", "search_type TEXT NOT NULL DEFAULT 'auto'"),
                     ("parameter_definitions", "required INTEGER NOT NULL DEFAULT 1"),
                     ("parameter_definitions", "auto_adjustable INTEGER NOT NULL DEFAULT 1"),
@@ -596,7 +598,7 @@ class Store(object):
                     continue
                 if op in ("gte", "gt"): target["min"] = max(v1, float(target.get("min", v1)))
                 elif op in ("lte", "lt"): target["max"] = min(v1, float(target.get("max", v1)))
-                elif op in ("eq", "boolean_is"):
+                elif op in ("eq", "boolean_is", "special_is"):
                     target["min"] = v1; target["max"] = v1
                 elif op == "range_inside" and v2 is not None:
                     target["min"] = min(v1, v2); target["max"] = max(v1, v2)
@@ -1006,11 +1008,14 @@ class Store(object):
                         item.get("display_value_mapping_json"),
                         _json_list(item.get("allowed_values_json")),
                     )
+                    special_keys = item.get("special_value_keys_json")
+                    if isinstance(special_keys, (list, tuple)):
+                        special_keys = json.dumps([str(value) for value in special_keys], ensure_ascii=False)
                     conn.execute("""INSERT INTO parameter_definitions
                         (parameter_id,label,parameter_group,unit,value_type,min_value,max_value,observed_min,observed_max,preference,description,adjustment_hint,
-                         allowed_values_json,model_value_mapping_json,display_value_mapping_json,search_type,required,auto_adjustable,decimal_places,display_order,enabled,model_bound)
-                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
-                        item["parameter_id"],item["label"],item.get("parameter_group") or "其他",item.get("unit"),item["value_type"],item.get("min_value"),item.get("max_value"),item.get("observed_min"),item.get("observed_max"),item.get("preference"),item.get("description"),item.get("adjustment_hint"),item.get("allowed_values_json"),item.get("model_value_mapping_json"),display_mapping,item.get("search_type") or "auto",int(item.get("required",1)),int(item.get("auto_adjustable",1)),int(item.get("decimal_places",3)),int(item.get("display_order",1)),int(item.get("enabled",1)),int(item.get("model_bound",1))))
+                         allowed_values_json,model_value_mapping_json,display_value_mapping_json,special_value_keys_json,search_type,required,auto_adjustable,decimal_places,display_order,enabled,model_bound)
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                        item["parameter_id"],item["label"],item.get("parameter_group") or "其他",item.get("unit"),item["value_type"],item.get("min_value"),item.get("max_value"),item.get("observed_min"),item.get("observed_max"),item.get("preference"),item.get("description"),item.get("adjustment_hint"),item.get("allowed_values_json"),item.get("model_value_mapping_json"),display_mapping,special_keys or None,item.get("search_type") or "auto",int(item.get("required",1)),int(item.get("auto_adjustable",1)),int(item.get("decimal_places",3)),int(item.get("display_order",1)),int(item.get("enabled",1)),int(item.get("model_bound",1))))
                 group_items = data.get("parameter_groups")
                 if not group_items:
                     seen = []
@@ -1244,6 +1249,13 @@ class Store(object):
                 continue
             left_key, right_key = rule["left_parameter"], rule.get("right_parameter")
             if left_key not in params or (right_key and right_key not in params): continue
+            if is_special_value(definitions.get(left_key), params.get(left_key)) or (right_key and is_special_value(definitions.get(right_key), params.get(right_key))):
+                messages.append({
+                    "source": "constraint", "severity": rule.get("severity") or "warning", "title": rule["rule_name"],
+                    "message": "当前特殊业务状态无法参与该数值规则。", "detail": "special_state_not_numeric",
+                    "suggestion": "请确认该参数状态是否符合业务要求。", "parameters": [left_key] + ([right_key] if right_key else []),
+                })
+                continue
             left = float(params[left_key]); right = float(rule.get("offset") or 0)
             if right_key: right += float(rule.get("multiplier") or 1) * float(params[right_key])
             if not self._compare(left, rule["operator"], right):
@@ -1259,6 +1271,13 @@ class Store(object):
         for item in couplings:
             a, b = item["parameter_a"], item["parameter_b"]
             if a not in params or b not in params: continue
+            if is_special_value(definitions.get(a), params.get(a)) or is_special_value(definitions.get(b), params.get(b)):
+                messages.append({
+                    "source": "coupling", "severity": item.get("severity") or "warning", "title": item["coupling_name"],
+                    "message": "当前特殊业务状态不参与常规数值耦合比较。", "detail": "special_state_not_numeric",
+                    "suggestion": "请按业务状态复核该耦合关系。", "parameters": [a, b],
+                })
+                continue
             if item["coupling_type"] == "feasible_domain":
                 rhs = float(item.get("multiplier") or 1) * float(params[a]) + float(item.get("offset") or 0)
                 if not self._compare(float(params[b]), item.get("domain_operator") or "gte", rhs):
@@ -1498,6 +1517,8 @@ class Store(object):
                 data["model_value_mapping_json"] = json.dumps(data["model_value_mapping_json"], ensure_ascii=False)
             if isinstance(data.get("display_value_mapping_json"), dict):
                 data["display_value_mapping_json"] = json.dumps(data["display_value_mapping_json"], ensure_ascii=False)
+            if isinstance(data.get("special_value_keys_json"), (list, tuple)):
+                data["special_value_keys_json"] = json.dumps(list(data["special_value_keys_json"]), ensure_ascii=False)
             try:
                 allowed = json.loads(data.get("allowed_values_json") or "[]")
             except (TypeError, ValueError):
@@ -1514,6 +1535,18 @@ class Store(object):
             data["model_value_mapping_json"] = json.dumps(mapping, ensure_ascii=False) if mapping else None
             display_mapping = normalize_display_mapping(data.get("display_value_mapping_json"), allowed)
             data["display_value_mapping_json"] = json.dumps(display_mapping, ensure_ascii=False) if display_mapping else None
+            try:
+                special_keys = json.loads(data.get("special_value_keys_json") or "[]")
+            except (TypeError, ValueError):
+                raise ValueError("特殊业务状态值必须是JSON数组，例如：[\"-1\"]")
+            if not isinstance(special_keys, list):
+                raise ValueError("特殊业务状态值必须是JSON数组。")
+            value_type = str(data.get("value_type") or "number").lower()
+            if value_type in ("number", "float", "integer", "ip_grade", "boolean", "bool"):
+                invalid = [value for value in special_keys if normalize_numeric(value) is None]
+                if invalid:
+                    raise ValueError("特殊业务状态值必须能够转换为当前数值类型：%s" % invalid[0])
+            data["special_value_keys_json"] = json.dumps([str(value) for value in special_keys], ensure_ascii=False) if special_keys else None
 
         defaults = {
             "products": {"enabled": 1},

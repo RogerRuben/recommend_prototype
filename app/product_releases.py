@@ -72,6 +72,7 @@ HEADER_ALIASES = {
         "allowed_values": ("allowed_values", "allowed_values_json", "允许值"),
         "model_value_mapping_json": ("model_value_mapping_json", "模型取值映射", "模型取值映射(JSON)"),
         "display_value_mapping_json": ("display_value_mapping_json", "前端显示映射", "前端显示映射(JSON)"),
+        "special_value_keys_json": ("special_value_keys_json", "特殊业务状态值", "特殊业务状态值(JSON数组)"),
         "required": ("required", "是否必填"),
         "auto_adjustable": ("auto_adjustable", "允许自动调整"),
         "decimal_places": ("decimal_places", "显示小数位"),
@@ -174,6 +175,7 @@ CSV_COLUMNS = {
         ("adjustment_hint", "调整提示"), ("allowed_values_json", "允许值"),
         ("model_value_mapping_json", "模型取值映射(JSON)"),
         ("display_value_mapping_json", "前端显示映射(JSON)"),
+        ("special_value_keys_json", "特殊业务状态值(JSON数组)"),
         ("required", "是否必填"), ("auto_adjustable", "允许自动调整"),
         ("decimal_places", "显示小数位"), ("display_order", "显示顺序"),
         ("enabled", "是否启用"), ("model_bound", "是否模型字段"),
@@ -318,6 +320,7 @@ class ProductReleaseService(object):
                 "allowed_values_json": json.dumps(allowed, ensure_ascii=False) if allowed else None,
                 "model_value_mapping_json": None,
                 "display_value_mapping_json": None,
+                "special_value_keys_json": None,
                 "search_type": spec.get("search_type") or "auto",
                 "required": 1 if spec.get("required", True) else 0,
                 "auto_adjustable": 1 if spec.get("auto_adjustable", True) else 0,
@@ -600,6 +603,7 @@ class ProductReleaseService(object):
             allowed = _json_allowed(row.get("allowed_values"))
             mapping = clean(row.get("model_value_mapping_json"))
             display_mapping = clean(row.get("display_value_mapping_json"))
+            special_keys = clean(row.get("special_value_keys_json"))
             if mapping:
                 parsed_mapping = json.loads(mapping)
                 if not isinstance(parsed_mapping, dict):
@@ -607,6 +611,11 @@ class ProductReleaseService(object):
                 mapping = json.dumps(parsed_mapping, ensure_ascii=False)
             if display_mapping:
                 display_mapping = dump_display_mapping(display_mapping, allowed)
+            if special_keys:
+                parsed_special = json.loads(special_keys)
+                if not isinstance(parsed_special, list):
+                    raise ValueError("特殊业务状态值必须是JSON数组")
+                special_keys = json.dumps([str(value) for value in parsed_special], ensure_ascii=False)
             return {
                 "parameter_id": clean(row.get("parameter_id")), "label": clean(row.get("label")),
                 "parameter_group": clean(row.get("parameter_group")) or "其他",
@@ -617,6 +626,7 @@ class ProductReleaseService(object):
                 "allowed_values_json": json.dumps(allowed, ensure_ascii=False) if allowed else None,
                 "model_value_mapping_json": mapping or None,
                 "display_value_mapping_json": display_mapping or None,
+                "special_value_keys_json": special_keys or None,
                 "search_type": normalize_search_type(row.get("search_type")),
                 "required": _bool(row.get("required")), "auto_adjustable": _bool(row.get("auto_adjustable")),
                 "decimal_places": integer(row.get("decimal_places"), 3),

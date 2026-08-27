@@ -3,7 +3,7 @@ from __future__ import print_function
 
 import math
 
-from .value_semantics import canonical_filter_value, definition_mapping, mapping_target, normalize_boolean, normalize_numeric, values_equal
+from .value_semantics import canonical_filter_value, definition_mapping, is_special_value, mapping_target, normalize_boolean, normalize_numeric, values_equal
 
 
 DEFAULT_FEASIBILITY_GATE = 0.65
@@ -33,6 +33,8 @@ def filter_match(params, rule, definition=None):
     actual = params.get(key)
     value1 = rule.get("value1")
     value2 = rule.get("value2")
+    if operator == "special_is":
+        return is_special_value(definition, value1) and values_equal(actual, value1, definition)
     if operator == "boolean_is":
         # A mapped third state (无该属性 -> -1) must match the stored inactive
         # value; compare through the mapping before the two-value boolean truth.
@@ -59,6 +61,10 @@ def filter_match(params, rule, definition=None):
                                 canonical_filter_value(value1, definition), definition)
         left, right = str(actual).strip().lower(), str(value1 or "").strip().lower()
         return left == right if operator == "text_equals" else right in left
+    # A declared special state is a legal business value, but it is not a point
+    # in the normal numeric domain.  Legacy exact equality remains compatible.
+    if is_special_value(definition, actual):
+        return operator == "eq" and is_special_value(definition, value1) and values_equal(actual, value1, definition)
     a = _number(actual)
     b = _number(value1)
     if operator in ("gt", "gte", "lt", "lte", "eq"):

@@ -26,8 +26,9 @@ def static_contracts():
     price_js = (ROOT / "app/static/price.js").read_text(encoding="utf-8")
     generation_tasks = (ROOT / "app/generation_tasks.py").read_text(encoding="utf-8")
     server = (ROOT / "app/server.py").read_text(encoding="utf-8")
-    for token in ("railResizeHandle", "hideCoveredParams", "workflowStatus", "helpBtn"):
+    for token in ("railResizeHandle", "hideCoveredParams", "demandSummary", "recommendBtn", "helpBtn"):
         assert token in html
+    assert "推荐工作流程" not in html
     assert "parameterSearch" not in html
     assert "filter-search-results" in js and "selectParameter(" in js
     home_tour = js[js.index("function playTour(){"):js.index("function playDetailTour(){")]

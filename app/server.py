@@ -31,6 +31,7 @@ from .generation_tasks import GenerationTaskManager
 from .configuration import _boolean, load_model_service_config, load_service_portal_config, load_workbench_defaults
 from .range_diagnostics import build_range_diagnostics
 from .scenario_policy import ScenarioPolicyService
+from .recommendation_explanation import annotate_candidate_recommendations
 
 
 class GeneratedSessions(object):
@@ -762,6 +763,7 @@ class Application(object):
             field["unit"] = definition.get("unit") or field.get("unit") or ""
             field["parameter_id"] = key
             field["display_value_mapping_json"] = definition.get("display_value_mapping_json")
+            field["special_value_keys_json"] = definition.get("special_value_keys_json")
             field["business_value_type"] = definition.get("value_type")
             business_allowed = self._json_array(definition.get("allowed_values_json"))
             if business_allowed:
@@ -1434,14 +1436,9 @@ class Application(object):
             if calculation_available else
             rank_historical_products(candidates, ranking_request, tag_weights, definitions=definitions, tag_map=tag_map, constraint_rules=constraint_rules)
         )
+        ranked = annotate_candidate_recommendations(ranked, scenario_policy)
         for item in ranked:
             item["scenario"] = scenario_policy["scenario"]
-            if item.get("model_evaluation_available") is False:
-                item["scenario_recommendation"] = "当前保留%s排序意图；计算服务不可用，暂不能验证完整的场景优势。" % scenario_policy["scenario_name"]
-            elif not item.get("strict_filter_satisfied"):
-                item["scenario_recommendation"] = "该方案按%s策略参与比较，但仍有未满足项，请结合需求差距复核。" % scenario_policy["scenario_name"]
-            else:
-                item["scenario_recommendation"] = scenario_policy.get("result_explanation") or ""
         page, page_size = max(1, int(request.get("page", 1))), max(1, min(int(request.get("page_size", 12)), 50))
         start = (page - 1) * page_size
         best_effort_count = sum(1 for item in ranked if item.get("best_effort"))
@@ -1955,7 +1952,7 @@ class Handler(BaseHTTPRequestHandler):
         target = (self.app.static_dir / rel).resolve()
         if not str(target).startswith(str(self.app.static_dir.resolve())) or not target.is_file(): self._json({"error":"not_found"},404); return
         data = target.read_bytes(); ctype = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
-        self.send_response(200); self.send_header("Content-Type",ctype + ("; charset=utf-8" if ctype.startswith("text/") or ctype in ("application/javascript","application/json") else "")); self.send_header("Content-Length",str(len(data))); self.end_headers(); self.wfile.write(data)
+        self.send_response(200); self.send_header("Content-Type",ctype + ("; charset=utf-8" if ctype.startswith("text/") or ctype in ("application/javascript","application/json") else "")); self.send_header("Content-Length",str(len(data))); self.send_header("Cache-Control","no-store, no-cache, must-revalidate"); self.send_header("Pragma","no-cache"); self.end_headers(); self.wfile.write(data)
 
     def do_GET(self):
         parsed = urlparse(self.path); path, query = parsed.path, parse_qs(parsed.query)

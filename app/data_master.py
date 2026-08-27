@@ -13,7 +13,7 @@ from .display_mapping import dump_display_mapping, normalize_display_mapping
 
 SHEETS = OrderedDict([
     ("成品信息", ["成品代号", "成品名称", "成品说明", "是否启用"]),
-    ("指标定义", ["指标编号", "指标名称", "指标分组", "单位", "取值类型", "搜索类型", "工程下限", "工程上限", "效能方向", "指标说明", "调整提示", "允许值", "是否必填", "允许自动调整", "显示小数位", "显示顺序", "是否启用", "模型取值映射(JSON)", "前端显示映射(JSON)"]),
+    ("指标定义", ["指标编号", "指标名称", "指标分组", "单位", "取值类型", "搜索类型", "工程下限", "工程上限", "效能方向", "指标说明", "调整提示", "允许值", "是否必填", "允许自动调整", "显示小数位", "显示顺序", "是否启用", "模型取值映射(JSON)", "前端显示映射(JSON)", "特殊业务状态值(JSON数组)"]),
     ("指标分组", ["分组名称", "显示顺序", "说明", "是否启用", "默认折叠"]),
     ("标签字典", ["标签编号", "标签名称", "标签分组", "匹配权重", "生成判定方式", "标签说明", "是否启用"]),
     ("标签规则", ["规则编号", "标签编号", "指标编号", "比较关系", "条件值1", "条件值2", "规则组", "是否启用"]),
@@ -45,7 +45,7 @@ def integer(value, default=0):
 
 def normalize_operator(value):
     text = clean(value).lower()
-    mapping = {">=":"gte", "≥":"gte", "不低于":"gte", "gte":"gte", ">":"gt", "大于":"gt", "gt":"gt", "<=":"lte", "≤":"lte", "不高于":"lte", "lte":"lte", "<":"lt", "小于":"lt", "lt":"lt", "=":"eq", "==":"eq", "eq":"eq", "包含":"text_contains", "等于":"text_equals", "为":"boolean_is", "有无为":"boolean_is", "范围位于":"range_inside", "范围相交":"range_overlap"}
+    mapping = {">=":"gte", "≥":"gte", "不低于":"gte", "gte":"gte", ">":"gt", "大于":"gt", "gt":"gt", "<=":"lte", "≤":"lte", "不高于":"lte", "lte":"lte", "<":"lt", "小于":"lt", "lt":"lt", "=":"eq", "==":"eq", "eq":"eq", "包含":"text_contains", "等于":"text_equals", "为":"boolean_is", "有无为":"boolean_is", "状态为":"special_is", "special_is":"special_is", "范围位于":"range_inside", "范围相交":"range_overlap"}
     return mapping.get(text, text)
 
 
@@ -98,7 +98,7 @@ def display_bool(value):
 
 
 def display_operator(value):
-    return {"gte":"≥", "gt":">", "lte":"≤", "lt":"<", "eq":"=", "boolean_is":"为", "text_equals":"等于", "text_contains":"包含", "range_inside":"范围位于", "range_overlap":"范围相交"}.get(clean(value), clean(value))
+    return {"gte":"≥", "gt":">", "lte":"≤", "lt":"<", "eq":"=", "boolean_is":"为", "special_is":"状态为", "text_equals":"等于", "text_contains":"包含", "range_inside":"范围位于", "range_overlap":"范围相交"}.get(clean(value), clean(value))
 
 
 def display_value_type(value):
@@ -198,7 +198,7 @@ def rows_to_dicts(rows):
 
 SUPPORTED_VALUE_TYPES = ("number", "boolean", "ip_grade", "enum", "text")
 SUPPORTED_SEARCH_TYPES = ("auto", "continuous", "integer", "ordered_discrete", "unordered_enum", "boolean")
-SUPPORTED_OPERATORS = ("gte", "gt", "lte", "lt", "eq", "boolean_is", "text_equals", "text_contains", "range_inside", "range_overlap")
+SUPPORTED_OPERATORS = ("gte", "gt", "lte", "lt", "eq", "boolean_is", "special_is", "text_equals", "text_contains", "range_inside", "range_overlap")
 SUPPORTED_COUPLING_TYPES = ("positive", "negative", "feasible_domain")
 SUPPORTED_SEVERITIES = ("info", "warning", "error")
 OUTPUT_FIELDS = ("__predicted_price_wan", "__capability_score", "__feasibility_probability")
@@ -335,6 +335,18 @@ def validate_business_data(data):
                 normalize_display_mapping(raw_display_mapping, _json_allowed(item.get("allowed_values_json")))
             except ValueError as exc:
                 errors.append("指标%s：%s" % (pid, exc))
+        raw_special = item.get("special_value_keys_json")
+        if raw_special not in (None, ""):
+            try:
+                parsed_special = json.loads(raw_special) if isinstance(raw_special, str) else raw_special
+                if not isinstance(parsed_special, list):
+                    errors.append("指标%s的特殊业务状态值必须是JSON数组。" % pid)
+                elif item.get("value_type") in ("number", "ip_grade", "boolean"):
+                    invalid = [value for value in parsed_special if num(value) is None]
+                    if invalid:
+                        errors.append("指标%s的特殊业务状态值无法转换为数值：%s。" % (pid, invalid[0]))
+            except Exception:
+                errors.append("指标%s的特殊业务状态值必须是JSON数组。" % pid)
 
     # Parameter-group existence is a business reference check.
     group_names = set(clean(g.get("group_name")) for g in (data.get("parameter_groups") or []) if clean(g.get("group_name")))
@@ -545,7 +557,7 @@ class DataMasterService(object):
         rows.append(("成品信息", [SHEETS["成品信息"], [product.get("product_code"), product.get("product_name"), product.get("product_description"), display_bool(product.get("enabled", 1))]]))
         params = []
         for p in snap["parameters"]:
-            params.append([p.get("parameter_id"), p.get("label"), p.get("parameter_group", "其他"), p.get("unit"), display_value_type(p.get("value_type")), display_search_type(p.get("search_type", "auto")), p.get("min_value"), p.get("max_value"), display_preference(p.get("preference")), p.get("description"), p.get("adjustment_hint"), "、".join(str(x) for x in _json_allowed(p.get("allowed_values_json"))), display_bool(p.get("required", 1)), display_bool(p.get("auto_adjustable", 1)), p.get("decimal_places", 3), p.get("display_order"), display_bool(p.get("enabled", 1)), p.get("model_value_mapping_json") or "", p.get("display_value_mapping_json") or ""])
+            params.append([p.get("parameter_id"), p.get("label"), p.get("parameter_group", "其他"), p.get("unit"), display_value_type(p.get("value_type")), display_search_type(p.get("search_type", "auto")), p.get("min_value"), p.get("max_value"), display_preference(p.get("preference")), p.get("description"), p.get("adjustment_hint"), "、".join(str(x) for x in _json_allowed(p.get("allowed_values_json"))), display_bool(p.get("required", 1)), display_bool(p.get("auto_adjustable", 1)), p.get("decimal_places", 3), p.get("display_order"), display_bool(p.get("enabled", 1)), p.get("model_value_mapping_json") or "", p.get("display_value_mapping_json") or "", p.get("special_value_keys_json") or ""])
         rows.append(("指标定义", [SHEETS["指标定义"]] + params))
         groups = []
         for g in snap.get("parameter_groups", []):
@@ -662,6 +674,13 @@ class DataMasterService(object):
                         display_mapping = dump_display_mapping(display_mapping_text, _json_allowed(allowed))
                     except ValueError as exc:
                         raise ValueError("指标%s：%s" % (clean(r.get("指标编号")), exc))
+                special_text = clean(r.get("特殊业务状态值(JSON数组)"))
+                special_keys = None
+                if special_text:
+                    parsed_special = json.loads(special_text)
+                    if not isinstance(parsed_special, list):
+                        raise ValueError("指标%s的特殊业务状态值必须是JSON数组。" % clean(r.get("指标编号")))
+                    special_keys = json.dumps([str(value) for value in parsed_special], ensure_ascii=False)
                 parameters.append({
                     "parameter_id": clean(r.get("指标编号")), "label": clean(r.get("指标名称")),
                     "parameter_group": clean(r.get("指标分组")) or "其他", "unit": clean(r.get("单位")),
@@ -669,6 +688,7 @@ class DataMasterService(object):
                     "preference": normalize_preference(r.get("效能方向")), "description": clean(r.get("指标说明")), "adjustment_hint": clean(r.get("调整提示")),
                     "allowed_values_json": allowed or None, "model_value_mapping_json": mapping,
                     "display_value_mapping_json": display_mapping,
+                    "special_value_keys_json": special_keys,
                     "required": parse_bool(r.get("是否必填", 1)), "auto_adjustable": parse_bool(r.get("允许自动调整", 1)),
                     "decimal_places": integer(r.get("显示小数位"), 3), "display_order": integer(r.get("显示顺序"), len(parameters)+1), "enabled": parse_bool(r.get("是否启用", 1)), "model_bound": 1,
                 })

@@ -32,9 +32,10 @@ import time
 from .anchor_feasibility import assess_explicit_filter_feasibility, validate_anchor_integrity
 from .constraint_projection import active_parameter_set, project_constraints
 from .coupling_pairs import build_coupling_pairs, exploration_pairs
+from .demand_branch import compile_explicit_demand_branches, combine_generation_branches
 from .recommender import rank_agreements
 from .requirement_assessment import assess_requirements
-from .value_semantics import canonical_filter_value, canonicalize_parameter_value, nice_engineering_step, normalize_boolean, normalize_numeric, values_equal
+from .value_semantics import canonical_filter_value, canonicalize_parameter_value, is_special_value, nice_engineering_step, normal_numeric_values, normalize_boolean, normalize_numeric, special_value_keys, values_equal
 
 
 def _float(value, default=None):
@@ -211,9 +212,10 @@ def filters_to_anchors(filters, definitions=None, mode="all"):
     values.  Business-to-model encoding happens only in Store.runtime_parameters
     immediately before a model call.
     """
-    # OR filters cannot safely be reduced to one joint generation box.
-    if mode != "all":
-        return {}
+    # A multi-rule OR is compiled into independent branches before this function
+    # is called.  A one-rule OR is equivalent to its single explicit anchor.
+    if mode != "all" and len(filters or []) > 1:
+        raise ValueError("多个 OR 条件必须先编译为独立 Demand Branch")
     definitions = definitions or {}
     result = {}
     for rule in filters or []:
@@ -223,7 +225,9 @@ def filters_to_anchors(filters, definitions=None, mode="all"):
         definition = definitions.get(key) or {}
         item = result.setdefault(key, {})
         v1, v2 = _float(rule.get("value1")), _float(rule.get("value2"))
-        if op == "gte" and v1 is not None:
+        if op == "special_is" and is_special_value(definition, rule.get("value1")):
+            item["allowed"] = [rule.get("value1")]
+        elif op == "gte" and v1 is not None:
             item["min"] = max(v1, float(item.get("min", v1)))
         elif op == "gt" and v1 is not None:
             item["min"] = max(v1 + 1e-7, float(item.get("min", v1 + 1e-7)))
@@ -339,6 +343,9 @@ class HistorySeededGenerator(object):
             if key not in a or key not in b:
                 continue
             kind = self._search_type(definition)
+            if is_special_value(definition, a[key]) or is_special_value(definition, b[key]):
+                values.append(0.0 if self._value_equal(a[key], b[key], definition) else 1.0)
+                continue
             if kind in ("boolean", "unordered_enum"):
                 values.append(0.0 if self._value_equal(a[key], b[key], definition) else 1.0)
             elif kind == "ordered_discrete":
@@ -365,7 +372,7 @@ class HistorySeededGenerator(object):
         ]
         means, stds = {}, {}
         for key in numeric:
-            vals = [float(item["params"][key]) for item in seeds if item.get("params", {}).get(key) not in (None, "")]
+            vals = [float(item["params"][key]) for item in seeds if item.get("params", {}).get(key) not in (None, "") and not is_special_value(definitions[key], item["params"][key])]
             means[key] = _mean(vals)
             span = float(definitions[key].get("max_value") or 1) - float(definitions[key].get("min_value") or 0)
             stds[key] = max(_std(vals), span * 0.025)
@@ -377,6 +384,8 @@ class HistorySeededGenerator(object):
                 pairs = [
                     (float(x["params"][key_i]), float(x["params"][key_j]))
                     for x in seeds if key_i in x.get("params", {}) and key_j in x.get("params", {})
+                    and not is_special_value(definitions[key_i], x["params"][key_i])
+                    and not is_special_value(definitions[key_j], x["params"][key_j])
                 ]
                 if len(pairs) >= 3:
                     mi, mj = _mean([x[0] for x in pairs]), _mean([x[1] for x in pairs])
@@ -423,6 +432,8 @@ class HistorySeededGenerator(object):
     def _normalized_allowed_values(self, definition):
         values = self._allowed_values(definition)
         kind = self._search_type(definition)
+        if kind in ("continuous", "integer", "ordered_discrete"):
+            values = normal_numeric_values(definition, values)
         if kind == "ordered_discrete":
             projected = [(value, _float(value)) for value in values]
             if values and all(number is not None for _value, number in projected):
@@ -447,6 +458,8 @@ class HistorySeededGenerator(object):
         explainable.
         """
         kind = self._search_type(definition)
+        if is_special_value(definition, current) or is_special_value(definition, candidate):
+            return 0.0 if self._value_equal(current, candidate, definition) else 1.0
         if kind in ("boolean", "unordered_enum"):
             return 0.0 if self._value_equal(current, candidate, definition) else 1.0
         if kind == "ordered_discrete":
@@ -483,6 +496,13 @@ class HistorySeededGenerator(object):
             remaining.sort(key=lambda value: abs(float(value) - current_num))
             edge = [allowed[0], allowed[-1]]
             return list(dict.fromkeys(remaining[:4] + edge))
+        declared_specials = special_value_keys(definition)
+        if is_special_value(definition, current):
+            starters = normal_numeric_values(definition, self._allowed_values(definition))
+            default = definition.get("default_value", definition.get("business_default"))
+            if default not in (None, "") and not is_special_value(definition, default):
+                starters.insert(0, default)
+            return list(dict.fromkeys(starters))
         current_num = _float(current)
         if current_num is None:
             return []
@@ -511,6 +531,9 @@ class HistorySeededGenerator(object):
         for value in values:
             if not self._value_equal(value, current, definition) and not any(self._value_equal(value, existing, definition) for existing in unique):
                 unique.append(value)
+        for special in declared_specials:
+            if not any(self._value_equal(special, existing, definition) for existing in unique):
+                unique.append(canonicalize_parameter_value(definition, special))
         return unique
 
     def _anchor_demands(self, params, bounds, definitions):
@@ -531,6 +554,12 @@ class HistorySeededGenerator(object):
                 continue
             allowed = rule.get("allowed")
             if allowed:
+                explicit_special = next((candidate for candidate in allowed if is_special_value(definition, candidate)), None)
+                if explicit_special is not None:
+                    value = canonicalize_parameter_value(definition, explicit_special)
+                    locked[key] = value
+                    params[key] = value
+                    continue
                 numeric_allowed = [candidate for candidate in allowed if _float(candidate) is not None]
                 string_allowed = [candidate for candidate in allowed if _float(candidate) is None]
                 current = params.get(key)
@@ -595,6 +624,10 @@ class HistorySeededGenerator(object):
                         "resolution": "explicit_filter_conflict",
                     })
             kind = self._search_type(definition)
+            if is_special_value(definition, value):
+                locked[key] = canonicalize_parameter_value(definition, value)
+                params[key] = locked[key]
+                continue
             if kind == "boolean":
                 if allowed is not None and any(_float(x) not in (0.0, 1.0) for x in allowed):
                     if _float(value) is not None:
@@ -879,6 +912,8 @@ class HistorySeededGenerator(object):
             if key not in params:
                 continue
             kind = self._search_type(definition)
+            if is_special_value(definition, params[key]):
+                continue
             allowed = self._normalized_allowed_values(definition)
             if kind in ("ordered_discrete", "unordered_enum") and allowed:
                 if kind == "ordered_discrete":
@@ -907,16 +942,40 @@ class HistorySeededGenerator(object):
     def _operator_text(operator):
         return {
             "gte": "不低于", "gt": "高于", "lte": "不高于", "lt": "低于", "eq": "等于",
-            "boolean_is": "为", "text_equals": "等于", "text_contains": "包含",
+            "boolean_is": "为", "special_is": "状态为", "text_equals": "等于", "text_contains": "包含",
             "range_inside": "位于区间", "range_contains": "覆盖区间", "range_overlap": "与区间相交",
         }.get(operator, operator)
 
-    def _tag_branch_for_seed(self, request, seed_index):
-        branches = self.store.tag_rule_branches(request.get("selected_tags"), max_branches=24)
-        branch = branches[seed_index % max(len(branches), 1)] if branches else {"rules": [], "tag_groups": {}, "unresolved_tags": []}
+    def _generation_branches(self, request, definitions=None):
+        definitions = definitions or self._parameter_definitions()
+        filters = list(request.get("indicator_filters") or [])
+        explicit = compile_explicit_demand_branches(
+            filters, request.get("indicator_filter_mode", "all"), definitions
+        )
+        # When a true AND box is internally contradictory, preserve the original
+        # AND assessment but explore each explicit direction as Best Effort.
+        if str(request.get("indicator_filter_mode") or "all") == "all" and len(filters) > 1:
+            joint = filters_to_anchors(filters, definitions, "all")
+            if any(value.get("conflict") for value in joint.values()):
+                conflict_branches = compile_explicit_demand_branches(filters, "any", definitions)
+                for branch in conflict_branches:
+                    branch["assessment_filters"] = filters
+                    branch["title"] = branch["title"].replace("优先满足", "冲突方向：优先满足")
+                    branch["summary"] += " 其它联合条件仍按未满足项如实标记。"
+                explicit = conflict_branches
+        tags = self.store.tag_rule_branches(request.get("selected_tags"), max_branches=24)
+        return combine_generation_branches(explicit, tags, max_branches=24)
+
+    def _compile_generation_branch(self, request, branch, definitions=None):
+        branch = branch or {"tag_rules": [], "explicit_filters": list(request.get("indicator_filters") or []),
+                            "explicit_filter_mode": request.get("indicator_filter_mode", "all"),
+                            "branch_id": "BRANCH-ALL", "demand_branch_id": "BRANCH-ALL",
+                            "title": "按当前综合需求探索", "summary": "按当前综合需求探索。"}
         technical = []
         branch_request = dict(request)
-        for rule in branch.get("rules") or []:
+        branch_request["indicator_filters"] = list(branch.get("assessment_filters") or branch.get("explicit_filters") or [])
+        branch_request["indicator_filter_mode"] = "all"
+        for rule in branch.get("tag_rules") or []:
             key = str(rule.get("parameter_id") or "")
             op = rule.get("operator")
             try:
@@ -934,16 +993,28 @@ class HistorySeededGenerator(object):
                 branch_request["min_feasibility"] = value if current in (None, "") else max(float(current), value)
             elif not key.startswith("__"):
                 technical.append({"parameter_id": key, "operator": op, "value1": rule.get("value1"), "value2": rule.get("value2")})
-        definitions = self._parameter_definitions()
+        definitions = definitions or self._parameter_definitions()
         bounds = merge_bounds(
             filters_to_anchors(technical, definitions, "all"),
-            filters_to_anchors(request.get("indicator_filters"), definitions, request.get("indicator_filter_mode", "all")),
+            filters_to_anchors(branch.get("explicit_filters") or [], definitions, "all"),
         )
         return bounds, branch_request, {
+            "branch_id": branch.get("branch_id") or "BRANCH-ALL",
+            "demand_branch_id": branch.get("demand_branch_id") or "BRANCH-ALL",
+            "title": branch.get("title") or "按当前综合需求探索",
+            "summary": branch.get("summary") or "按当前综合需求探索。",
+            "anchor_filters": list(branch.get("explicit_filters") or []),
             "tag_rule_groups": dict(branch.get("tag_groups") or {}),
             "unresolved_tags": list(branch.get("unresolved_tags") or []),
-            "compiled_rule_count": len(branch.get("rules") or []),
+            "compiled_rule_count": len(branch.get("tag_rules") or []),
         }
+
+    def _tag_branch_for_seed(self, request, seed_index):
+        """Backward-compatible entry point backed by the unified branch compiler."""
+        definitions = self._parameter_definitions()
+        branches = self._generation_branches(request, definitions)
+        branch = branches[seed_index % max(len(branches), 1)] if branches else None
+        return self._compile_generation_branch(request, branch, definitions)
 
     @staticmethod
     def _output_target_penalty(evaluation, request):
@@ -1165,6 +1236,12 @@ class HistorySeededGenerator(object):
         node_id = "N%03d-%03d" % (int(iteration), int(attempt))
         parent_node_id = (parent_record or {}).get("generation_trace", {}).get("node_id")
         move_changes = self._changed_parameters(params, (parent_record or {}).get("params") or base["params"], definitions) if parent_record else self._changed_parameters(params, base["params"], definitions)
+        prior_params = (parent_record or {}).get("params") or base["params"]
+        special_transition = any(
+            key in params and key in prior_params
+            and is_special_value(definition, params[key]) != is_special_value(definition, prior_params[key])
+            for key, definition in definitions.items()
+        )
         item.update({
             "unmet_conditions": demand_unmet + hard_conflicts,
             "demand_unmet_conditions": demand_unmet,
@@ -1176,6 +1253,7 @@ class HistorySeededGenerator(object):
             "projection_repairs": projection_repairs or [],
             "structural_move": bool(
                 (isinstance(search_move, str) and search_move.startswith("结构调整"))
+                or special_transition
                 or any(rep.get("type") in ("conditional_activation", "conditional_deactivation") for rep in (projection_repairs or []))
             ),
             "extrapolation_warnings": extrapolation,
@@ -1540,27 +1618,73 @@ class HistorySeededGenerator(object):
                 changed.append(key)
         return changed
 
+    @staticmethod
+    def _diversity_quality_eligible(item, best):
+        """Keep diversity inside the same hard/requirement quality band."""
+        key, best_key = item["_search_key"], best["_search_key"]
+        if key[0] > best_key[0] + 1e-9:
+            return False
+        return key[1] <= best_key[1] + max(0.20, abs(best_key[1]) * 0.50 + 0.05)
+
     def _beam_select(self, records, definitions, width=10):
         records = sorted(records, key=lambda x: x["_search_key"])
-        selected = []
+        if not records:
+            return []
+        eligible = [item for item in records if self._diversity_quality_eligible(item, records[0])]
+        selected, family_counts = [], {}
+        family_cap = max(1, int(math.ceil(float(width) * 0.40)))
+
+        def add(item, enforce_distance=True, enforce_family=True):
+            if item in selected:
+                return False
+            family = item.get("family_id") or ""
+            if enforce_family and family and family_counts.get(family, 0) >= family_cap:
+                return False
+            if enforce_distance and selected and min(
+                self._normalized_distance(item["params"], other["params"], definitions) for other in selected
+            ) < 0.008:
+                return False
+            selected.append(item)
+            if family:
+                family_counts[family] = family_counts.get(family, 0) + 1
+            return True
+
+        # Stage A: preserve one quality-qualified centre from every demand branch.
+        branch_ids = []
+        for item in eligible:
+            branch_id = item.get("demand_branch_id") or "BRANCH-ALL"
+            if branch_id not in branch_ids:
+                branch_ids.append(branch_id)
+        for branch_id in branch_ids:
+            add(next(item for item in eligible if (item.get("demand_branch_id") or "BRANCH-ALL") == branch_id), enforce_distance=False)
+            if len(selected) >= width:
+                return selected[:width]
+        # Stage B: preserve distinct seed families before global competition.
+        seen_families = set()
+        for item in eligible:
+            family = item.get("family_id") or ""
+            if family and family not in seen_families:
+                add(item)
+                seen_families.add(family)
+            if len(selected) >= width:
+                return selected[:width]
+        # Stage C: fill globally, applying the soft 40% family cap while alternatives exist.
         for item in records:
-            if not selected or min(self._normalized_distance(item["params"], x["params"], definitions) for x in selected) >= 0.008:
-                selected.append(item)
+            add(item)
+            if len(selected) >= width:
+                return selected[:width]
+        for item in records:
+            add(item, enforce_distance=False, enforce_family=False)
             if len(selected) >= width:
                 break
-        if len(selected) < width:
-            for item in records:
-                if item not in selected:
-                    selected.append(item)
-                if len(selected) >= width:
-                    break
         return selected
 
-    def _diverse_strict_count(self, records, definitions, historical=None, distance=0.018):
+    def _diverse_strict_count(self, records, definitions, historical=None, distance=0.018, required_branch_ids=None):
         """Count strict solutions that can actually survive final diversity selection."""
+        strict_records = [record for record in records if record.get("strict_filter_satisfied")]
         selected = []
         for item in sorted(
-            (record for record in records if record.get("strict_filter_satisfied")),
+            strict_records,
             key=lambda record: record["_search_key"],
         ):
             if historical and any(
@@ -1573,7 +1697,63 @@ class HistorySeededGenerator(object):
                 for existing in selected
             ) >= distance:
                 selected.append(item)
-        return len(selected)
+        required = set(required_branch_ids or [])
+        covered = set(item.get("demand_branch_id") for item in selected if item.get("demand_branch_id"))
+        available_families = set(item.get("family_id") for item in strict_records if item.get("family_id"))
+        covered_families = set(item.get("family_id") for item in selected if item.get("family_id"))
+        family_coverage_ok = len(covered_families) >= min(2, len(available_families))
+        return len(selected) if (not required or required.issubset(covered)) and family_coverage_ok else 0
+
+    def _coverage_first_select(self, ranked, count, definitions, rejection=None):
+        """Select quality-constrained branch/family coverage before global fill."""
+        ranked = list(ranked or [])
+        if not ranked:
+            return []
+        eligible = [item for item in ranked if self._diversity_quality_eligible(item, ranked[0])]
+        selected, selected_risks = [], set()
+
+        def add(item, enforce_distance=True):
+            if item in selected:
+                return False
+            risk = item.get("_risk_signature")
+            if risk and risk in selected_risks:
+                if rejection is not None:
+                    rejection["repeated_risk_signature"] += 1
+                return False
+            if enforce_distance and selected and min(
+                self._normalized_distance(item["params"], existing["params"], definitions) for existing in selected
+            ) < 0.018:
+                return False
+            selected.append(item)
+            if risk:
+                selected_risks.add(risk)
+            return True
+
+        seen = set()
+        for item in eligible:
+            branch = item.get("demand_branch_id") or "BRANCH-ALL"
+            if branch not in seen:
+                add(item, enforce_distance=False)
+                seen.add(branch)
+            if len(selected) >= count:
+                return selected
+        seen = set(item.get("family_id") for item in selected)
+        for item in eligible:
+            family = item.get("family_id")
+            if family not in seen:
+                add(item)
+                seen.add(family)
+            if len(selected) >= count:
+                return selected
+        for item in ranked:
+            add(item)
+            if len(selected) >= count:
+                return selected
+        for item in ranked:
+            add(item, enforce_distance=False)
+            if len(selected) >= count:
+                break
+        return selected
 
     def _build_generation_path(self, record, node_map):
         """Backtrace a candidate's node chain into a replayable generation path."""
@@ -1599,6 +1779,21 @@ class HistorySeededGenerator(object):
         path.reverse()
         return path
 
+    @staticmethod
+    def _attach_lineage(record, base, branch_info):
+        branch_info = dict(branch_info or {})
+        demand_branch_id = branch_info.get("demand_branch_id") or "BRANCH-ALL"
+        seed_id = str((base or {}).get("agreement_id") or "UNKNOWN-SEED")
+        record["demand_branch_id"] = demand_branch_id
+        record["seed_id"] = seed_id
+        record["family_id"] = "%s:%s" % (demand_branch_id, seed_id)
+        trace = record.setdefault("generation_trace", {})
+        trace["generation_branch"] = branch_info
+        trace["demand_branch_id"] = demand_branch_id
+        trace["seed_id"] = seed_id
+        trace["family_id"] = record["family_id"]
+        return record
+
     def _make_public_item(self, record, base, changed, index, rng):
         item = dict(record)
         for private_key in ("_search_key", "_base", "_locked", "_anchor_conflicts", "_changed", "_request", "_risk_signature"):
@@ -1606,6 +1801,12 @@ class HistorySeededGenerator(object):
         trace = dict(item.get("generation_trace") or {})
         trace["changed_parameters"] = list(changed)
         item["generation_trace"] = trace
+        branch = trace.get("generation_branch") or {}
+        item["solution_direction"] = {
+            "branch_id": item.get("demand_branch_id") or branch.get("demand_branch_id") or "BRANCH-ALL",
+            "title": branch.get("title") or "按当前综合需求探索",
+            "summary": branch.get("summary") or "该方案代表当前综合需求下的一条参数调整路线。",
+        }
         item["agreement_id"] = "LIVE-%06d-%03d" % (rng.randint(0, 999999), index)
         item["agreement_name"] = "基于%s生成的候选协议-%02d" % (base["agreement_id"], index)
         if item.get("generation_level") == "exploratory":
@@ -1826,6 +2027,10 @@ class HistorySeededGenerator(object):
         numeric, _means, stds, lower = self._local_statistics(seeds, definitions)
         tag_map = self.store.tag_map()
         branch_bounds = []
+        generation_branches = self._generation_branches(request, definitions)
+        active_demand_branch_ids = sorted(set(
+            branch.get("demand_branch_id") for branch in generation_branches if branch.get("demand_branch_id")
+        ))
         tag_weights = dict((key, value.get("weight", 1.0)) for key, value in tag_map.items())
         all_records = []
         seen = set()
@@ -1849,8 +2054,11 @@ class HistorySeededGenerator(object):
         # They are evaluated together.  Previous releases issued one price and one
         # effectiveness HTTP request per seed before the actual search started.
         initial_pending = []
-        for seed_index, base in enumerate(seeds):
-            bounds, branch_request, branch_info = self._tag_branch_for_seed(request, seed_index)
+        assignment_count = max(len(seeds), len(generation_branches))
+        for seed_index in range(assignment_count):
+            base = seeds[seed_index % len(seeds)]
+            branch = generation_branches[seed_index % len(generation_branches)] if generation_branches else None
+            bounds, branch_request, branch_info = self._compile_generation_branch(request, branch, definitions)
             branch_bounds.append(bounds)
             params = dict(base["params"])
             locked, anchor_conflicts = self._anchor_demands(params, bounds, definitions)
@@ -1873,7 +2081,7 @@ class HistorySeededGenerator(object):
             finalized = self._finalize_params(params, base, locked, definitions, soft_strength=0.18)
             params = finalized["params"]
             anchor_violations = validate_anchor_integrity(
-                params, request.get("indicator_filters"), definitions, request.get("indicator_filter_mode", "all")
+                params, branch_info.get("anchor_filters"), definitions, "all"
             )
             if anchor_violations:
                 rejection["anchor_invariant"] += 1
@@ -1961,6 +2169,7 @@ class HistorySeededGenerator(object):
             record["generation_trace"]["locked_sources"] = item["locked_sources"]
             record["generation_trace"]["anchor_resolutions"] = item.get("anchor_resolutions") or []
             record["generation_trace"]["completion_repairs"] = item.get("completion_repairs") or []
+            self._attach_lineage(record, item["base"], item["branch_info"])
             all_records.append(record)
             beam.append(record)
         beam_width = 14 if deep_search else 10
@@ -2013,7 +2222,7 @@ class HistorySeededGenerator(object):
                     finalized = self._finalize_params(params, base, locked, definitions, soft_strength=0.32, repair_reference=center_record["params"])
                     params = finalized["params"]
                     anchor_violations = validate_anchor_integrity(
-                        params, request.get("indicator_filters"), definitions, request.get("indicator_filter_mode", "all")
+                        params, (center_record.get("generation_trace", {}).get("generation_branch") or {}).get("anchor_filters", center_request.get("indicator_filters")), definitions, "all"
                     )
                     if anchor_violations:
                         rejection["anchor_invariant"] += 1
@@ -2055,7 +2264,7 @@ class HistorySeededGenerator(object):
                     )
                     params = finalized["params"]
                     anchor_violations = validate_anchor_integrity(
-                        params, request.get("indicator_filters"), definitions, request.get("indicator_filter_mode", "all")
+                        params, (center_record.get("generation_trace", {}).get("generation_branch") or {}).get("anchor_filters", (center_record.get("_request") or request).get("indicator_filters")), definitions, "all"
                     )
                     if anchor_violations:
                         rejection["anchor_invariant"] += 1
@@ -2168,13 +2377,17 @@ class HistorySeededGenerator(object):
                 record["generation_trace"]["tag_branch"] = dict(item["center_record"].get("generation_trace", {}).get("tag_branch") or {})
                 record["generation_trace"]["locked_sources"] = record["_locked_sources"]
                 record["generation_trace"]["anchor_resolutions"] = item.get("anchor_resolutions") or []
+                center_lineage = dict(item["center_record"].get("generation_trace", {}).get("generation_branch") or {})
+                self._attach_lineage(record, item["base"], center_lineage)
                 round_records.append(record)
                 all_records.append(record)
             beam = self._beam_select(round_records, definitions, width=beam_width)
             # Stop as soon as final selection can return the requested number of
             # genuinely different strict solutions.  Counting three times the
             # requested amount caused unnecessary model batches on easy demands.
-            diverse_strict = self._diverse_strict_count(all_records, definitions, historical=history)
+            diverse_strict = self._diverse_strict_count(
+                all_records, definitions, historical=history, required_branch_ids=active_demand_branch_ids
+            )
             if diverse_strict >= count:
                 stopped_for_count = True
                 break
@@ -2271,25 +2484,7 @@ class HistorySeededGenerator(object):
         else:
             ranked = sorted(usable, key=lambda item: item["_search_key"])
 
-        selected = []
-        selected_risks = set()
-        for item in ranked:
-            risk_signature = item.get("_risk_signature")
-            if risk_signature and risk_signature in selected_risks:
-                rejection["repeated_risk_signature"] += 1
-                continue
-            if not selected or min(self._normalized_distance(item["params"], existing["params"], definitions) for existing in selected) >= 0.018:
-                selected.append(item)
-                if risk_signature:
-                    selected_risks.add(risk_signature)
-            if len(selected) >= count:
-                break
-        if len(selected) < count:
-            for item in ranked:
-                if item not in selected:
-                    selected.append(item)
-                if len(selected) >= count:
-                    break
+        selected = self._coverage_first_select(ranked, count, definitions, rejection=rejection)
         if not selected and usable:
             selected = usable[:1]
 
