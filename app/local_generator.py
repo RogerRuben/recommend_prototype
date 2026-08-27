@@ -32,7 +32,7 @@ import time
 from .anchor_feasibility import assess_explicit_filter_feasibility, validate_anchor_integrity
 from .constraint_projection import active_parameter_set, project_constraints
 from .coupling_pairs import build_coupling_pairs, exploration_pairs
-from .demand_branch import compile_explicit_demand_branches, combine_generation_branches
+from .demand_branch import compile_explicit_demand_branches, compile_conflict_core_branches, combine_generation_branches
 from .recommender import rank_agreements
 from .requirement_assessment import assess_requirements
 from .value_semantics import canonical_filter_value, canonicalize_parameter_value, is_special_value, nice_engineering_step, normal_numeric_values, normalize_boolean, normalize_numeric, special_value_keys, values_equal
@@ -957,16 +957,45 @@ class HistorySeededGenerator(object):
         if str(request.get("indicator_filter_mode") or "all") == "all" and len(filters) > 1:
             joint = filters_to_anchors(filters, definitions, "all")
             explicit_conflicts = self._detect_explicit_cross_conflicts(filters, definitions, joint)
-            if any(value.get("conflict") for value in joint.values()) or explicit_conflicts:
-                conflict_branches = compile_explicit_demand_branches(filters, "any", definitions)
+            conflict_key_groups = [
+                {key} for key, value in joint.items() if value.get("conflict")
+            ] + [set(item.get("parameter_ids") or []) for item in explicit_conflicts]
+            conflict_key_groups = [group for group in conflict_key_groups if group]
+            if conflict_key_groups:
+                conflict_branches = compile_conflict_core_branches(
+                    filters, conflict_key_groups, definitions, max_branches=24
+                )
                 for branch in conflict_branches:
-                    branch["assessment_filters"] = filters
                     branch["explicit_conflicts"] = explicit_conflicts
-                    branch["title"] = branch["title"].replace("优先满足", "冲突方向：优先满足")
-                    branch["summary"] += " 其它联合条件仍按未满足项如实标记。"
                 explicit = conflict_branches
         tags = self.store.tag_rule_branches(request.get("selected_tags"), max_branches=24)
         return combine_generation_branches(explicit, tags, max_branches=24)
+
+    @staticmethod
+    def _numeric_bounds_interval(bounds, key):
+        rule_bounds = (bounds or {}).get(key) or {}
+        allowed = [_float(value) for value in rule_bounds.get("allowed") or []]
+        allowed = [value for value in allowed if value is not None]
+        if allowed:
+            return min(allowed), max(allowed)
+        return (
+            _float(rule_bounds.get("min"), float("-inf")),
+            _float(rule_bounds.get("max"), float("inf")),
+        )
+
+    @classmethod
+    def _affine_relation_impossible(cls, bounds, left, right, multiplier, offset, operator):
+        left_lo, left_hi = cls._numeric_bounds_interval(bounds, left)
+        right_lo, right_hi = cls._numeric_bounds_interval(bounds, right) if right else (0.0, 0.0)
+        multiplier, offset = float(multiplier), float(offset)
+        if multiplier >= 0:
+            diff_lo, diff_hi = left_lo - multiplier * right_hi - offset, left_hi - multiplier * right_lo - offset
+        else:
+            diff_lo, diff_hi = left_lo - multiplier * right_lo - offset, left_hi - multiplier * right_hi - offset
+        return {
+            "gte": diff_hi < 0, "gt": diff_hi <= 0, "lte": diff_lo > 0,
+            "lt": diff_lo >= 0, "eq": diff_lo > 0 or diff_hi < 0,
+        }.get(operator, False)
 
     def _detect_explicit_cross_conflicts(self, filters, definitions, joint_bounds=None):
         """Detect hard cross-parameter conflicts in an explicit AND request.
@@ -985,22 +1014,12 @@ class HistorySeededGenerator(object):
         rules = getattr(self.store, "constraint_rows", lambda: [])()
         conflicts = []
 
-        def numeric_interval(key):
-            rule_bounds = bounds.get(key) or {}
-            allowed = [_float(value) for value in rule_bounds.get("allowed") or []]
-            allowed = [value for value in allowed if value is not None]
-            if allowed:
-                return min(allowed), max(allowed)
-            lower = _float(rule_bounds.get("min"), float("-inf"))
-            upper = _float(rule_bounds.get("max"), float("inf"))
-            return lower, upper
-
         def requested_accepts(key, candidates=None, interval=None):
             requested = bounds.get(key) or {}
             definition = definitions.get(key) or {}
             allowed = requested.get("allowed") or []
             if candidates is not None:
-                requested_lo, requested_hi = numeric_interval(key)
+                requested_lo, requested_hi = self._numeric_bounds_interval(bounds, key)
                 for candidate in candidates:
                     if allowed and not any(self._value_equal(candidate, value, definition) for value in allowed):
                         continue
@@ -1009,7 +1028,7 @@ class HistorySeededGenerator(object):
                         continue
                     return True
                 return False
-            requested_lo, requested_hi = numeric_interval(key)
+            requested_lo, requested_hi = self._numeric_bounds_interval(bounds, key)
             return interval is not None and max(requested_lo, interval[0]) <= min(requested_hi, interval[1])
 
         # Conditional metadata is the source of truth.  Test domain intersection,
@@ -1036,7 +1055,7 @@ class HistorySeededGenerator(object):
                 otherwise_possible = any(not self._value_equal(value, when_value, definitions.get(controller) or {}) for value in controller_allowed)
             else:
                 when_num = _float(when_value)
-                lo, hi = numeric_interval(controller)
+                lo, hi = self._numeric_bounds_interval(bounds, controller)
                 when_possible = when_num is not None and lo <= when_num <= hi
                 otherwise_possible = not (when_num is not None and lo == hi == when_num)
 
@@ -1062,6 +1081,7 @@ class HistorySeededGenerator(object):
                 conflicts.append({
                     "type": "explicit_conditional_conflict", "source": "conditional_constraint",
                     "constraint_group": group, "controller": controller, "parameter": target,
+                    "parameter_ids": [controller, target],
                     "reason": "显式技术条件与条件属性关系冲突",
                 })
 
@@ -1073,24 +1093,35 @@ class HistorySeededGenerator(object):
             left, right = rule.get("left_parameter"), rule.get("right_parameter")
             if left not in explicit_keys or (right and right not in explicit_keys):
                 continue
-            left_lo, left_hi = numeric_interval(left)
-            right_lo, right_hi = numeric_interval(right) if right else (0.0, 0.0)
             multiplier = float(rule.get("multiplier") or 1)
             offset = float(rule.get("offset") or 0)
-            if multiplier >= 0:
-                diff_lo, diff_hi = left_lo - multiplier * right_hi - offset, left_hi - multiplier * right_lo - offset
-            else:
-                diff_lo, diff_hi = left_lo - multiplier * right_lo - offset, left_hi - multiplier * right_hi - offset
             operator = rule.get("operator")
-            impossible = {
-                "gte": diff_hi < 0, "gt": diff_hi <= 0, "lte": diff_lo > 0,
-                "lt": diff_lo >= 0, "eq": diff_lo > 0 or diff_hi < 0,
-            }.get(operator, False)
-            if impossible:
+            if self._affine_relation_impossible(bounds, left, right, multiplier, offset, operator):
                 conflicts.append({
                     "type": "explicit_hard_relation_conflict", "source": "constraint_rule",
                     "rule_id": rule.get("rule_id"), "left_parameter": left,
-                    "right_parameter": right, "reason": rule.get("message") or "显式技术条件与工程硬规则冲突",
+                    "right_parameter": right, "parameter_ids": [left] + ([right] if right else []),
+                    "reason": rule.get("message") or "显式技术条件与工程硬规则冲突",
+                })
+
+        for relation in getattr(self.store, "coupling_rows", lambda: [])():
+            if relation.get("coupling_type") != "feasible_domain":
+                continue
+            if str(relation.get("severity") or "warning") != "error":
+                continue
+            parameter_a, parameter_b = relation.get("parameter_a"), relation.get("parameter_b")
+            if parameter_a not in explicit_keys or parameter_b not in explicit_keys:
+                continue
+            if self._affine_relation_impossible(
+                bounds, parameter_b, parameter_a,
+                float(relation.get("multiplier") or 1), float(relation.get("offset") or 0),
+                relation.get("domain_operator") or "gte",
+            ):
+                conflicts.append({
+                    "type": "explicit_hard_coupling_conflict", "source": "feasible_domain_coupling",
+                    "coupling_id": relation.get("coupling_id"), "parameter_a": parameter_a,
+                    "parameter_b": parameter_b, "parameter_ids": [parameter_a, parameter_b],
+                    "reason": relation.get("message") or "显式技术条件与工程可行域冲突",
                 })
         return conflicts
 
@@ -1843,8 +1874,12 @@ class HistorySeededGenerator(object):
             effort = branch_effort.get(branch_id) or {}
             branch_rounds = int(effort.get("round_opportunities", completed_rounds) or 0)
             seed_attempts = int(effort.get("seed_attempts", 0) or 0)
+            eligible_centers = int(effort.get("eligible_beam_centers", 0) or 0)
+            proposal_attempts = int(effort.get("proposal_attempts", 0) or 0)
             if any(item.get("strict_filter_satisfied") for item in branch_records):
                 status = "strict_found"
+            elif branch_records and seed_attempts and eligible_centers == 0:
+                status = "exhausted_by_quality"
             elif seed_attempts and not branch_records:
                 status = "exhausted"
             elif branch_rounds >= minimum_rounds and len(branch_records) >= minimum_records:
@@ -1854,6 +1889,9 @@ class HistorySeededGenerator(object):
             states[branch_id] = {
                 "status": status, "evaluated_candidates": len(branch_records),
                 "seed_attempts": seed_attempts, "round_opportunities": branch_rounds,
+                "eligible_beam_centers": eligible_centers,
+                "proposal_attempts": proposal_attempts,
+                "last_alive_round": effort.get("last_alive_round"),
             }
         return states
 
@@ -2189,8 +2227,31 @@ class HistorySeededGenerator(object):
             branch.get("demand_branch_id") for branch in generation_branches if branch.get("demand_branch_id")
         ))
         show_solution_direction = len(active_demand_branch_ids) > 1
-        branch_effort = dict((branch_id, {"seed_attempts": 0, "round_opportunities": 0})
+        branch_effort = dict((branch_id, {
+            "seed_attempts": 0, "round_opportunities": 0, "eligible_beam_centers": 0,
+            "proposal_attempts": 0, "last_alive_round": None,
+        })
                              for branch_id in active_demand_branch_ids)
+
+        def branch_effort_row(branch_id):
+            return branch_effort.setdefault(branch_id, {
+                "seed_attempts": 0, "round_opportunities": 0, "eligible_beam_centers": 0,
+                "proposal_attempts": 0, "last_alive_round": None,
+            })
+
+        def update_beam_effort(current_beam, round_number, comparison_pool=None):
+            counts = dict((branch_id, 0) for branch_id in active_demand_branch_ids)
+            pool = list(comparison_pool or current_beam or [])
+            best = min(pool, key=lambda item: item["_search_key"]) if pool else None
+            for record in current_beam or []:
+                branch_id = record.get("demand_branch_id")
+                if branch_id in counts and (best is None or self._diversity_quality_eligible(record, best)):
+                    counts[branch_id] += 1
+            for branch_id, count_in_beam in counts.items():
+                effort = branch_effort_row(branch_id)
+                effort["eligible_beam_centers"] = count_in_beam
+                if count_in_beam:
+                    effort["last_alive_round"] = round_number
         tag_weights = dict((key, value.get("weight", 1.0)) for key, value in tag_map.items())
         all_records = []
         seen = set()
@@ -2220,7 +2281,7 @@ class HistorySeededGenerator(object):
             branch = generation_branches[seed_index % len(generation_branches)] if generation_branches else None
             bounds, branch_request, branch_info = self._compile_generation_branch(request, branch, definitions)
             branch_info["show_solution_direction"] = show_solution_direction
-            branch_effort.setdefault(branch_info["demand_branch_id"], {"seed_attempts": 0, "round_opportunities": 0})["seed_attempts"] += 1
+            branch_effort_row(branch_info["demand_branch_id"])["seed_attempts"] += 1
             branch_bounds.append(bounds)
             params = dict(base["params"])
             locked, anchor_conflicts = self._anchor_demands(params, bounds, definitions)
@@ -2335,7 +2396,9 @@ class HistorySeededGenerator(object):
             all_records.append(record)
             beam.append(record)
         beam_width = 14 if deep_search else 10
+        initial_beam_pool = list(beam)
         beam = self._beam_select(beam, definitions, width=min(beam_width, max(4, len(beam))))
+        update_beam_effort(beam, 0, initial_beam_pool)
 
         # Stage 2: adaptive iterative neighborhoods. Better candidates become the
         # next centres; the step size shrinks as the search progresses.
@@ -2347,8 +2410,9 @@ class HistorySeededGenerator(object):
         pending = []
         while beam and attempted_evaluations < max_evaluations and iteration < len(step_schedule):
             iteration += 1
-            for branch_id in set(item.get("demand_branch_id") for item in beam if item.get("demand_branch_id")):
-                branch_effort.setdefault(branch_id, {"seed_attempts": 0, "round_opportunities": 0})["round_opportunities"] += 1
+            for branch_id in active_demand_branch_ids:
+                if branch_effort_row(branch_id).get("eligible_beam_centers", 0) > 0:
+                    branch_effort_row(branch_id)["round_opportunities"] += 1
             step_scale = step_schedule[iteration - 1]
             round_records = list(beam)
             pending = []
@@ -2479,6 +2543,9 @@ class HistorySeededGenerator(object):
                         break
             for item in pending:
                 seen.add(item["signature"])
+                branch_id = item.get("center_record", {}).get("demand_branch_id")
+                if branch_id:
+                    branch_effort_row(branch_id)["proposal_attempts"] += 1
             if progress_callback:
                 base_progress = 20 if deep_search else 35
                 span = 62 if deep_search else 48
@@ -2546,6 +2613,7 @@ class HistorySeededGenerator(object):
                 round_records.append(record)
                 all_records.append(record)
             beam = self._beam_select(round_records, definitions, width=beam_width)
+            update_beam_effort(beam, iteration, round_records)
             # Stop as soon as final selection can return the requested number of
             # genuinely different strict solutions.  Counting three times the
             # requested amount caused unnecessary model batches on easy demands.

@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app.conditional_constraint import compile_conditional_relationship_v2
+from app.demand_branch import compile_conflict_core_branches
 from app.local_generator import HistorySeededGenerator
 from app.recommendation_explanation import annotate_candidate_recommendations
 
@@ -111,7 +112,7 @@ def test_cross_parameter_conditional_and_conflict_splits_directions():
         {"parameter_id": "module", "operator": "gte", "value1": 5},
     ], "selected_tags": []}
     branches = generator._generation_branches(request, definitions)
-    assert [branch["demand_branch_id"] for branch in branches] == ["BRANCH-01", "BRANCH-02"], branches
+    assert [branch["demand_branch_id"] for branch in branches] == ["CONFLICT-01", "CONFLICT-02"], branches
     assert all(branch["assessment_filters"] == request["indicator_filters"] for branch in branches)
     assert all(branch["explicit_conflicts"] for branch in branches)
 
@@ -149,6 +150,52 @@ def test_cross_parameter_affine_hard_conflict_uses_interval_feasibility():
     assert len(generator._generation_branches(feasible, definitions)) == 1
 
 
+def test_conflict_core_preserves_common_filters_and_combines_independent_groups():
+    definitions = dict((key, {"label": key}) for key in "ABCDE")
+    filters = [
+        {"parameter_id": key, "operator": "eq", "value1": key.lower()}
+        for key in "ABCDE"
+    ]
+    branches = compile_conflict_core_branches(
+        filters, [{"A", "B"}, {"C", "D"}], definitions, max_branches=24
+    )
+    key_sets = [set(rule["parameter_id"] for rule in branch["explicit_filters"]) for branch in branches]
+    assert key_sets == [
+        {"A", "C", "E"}, {"A", "D", "E"}, {"B", "C", "E"}, {"B", "D", "E"},
+    ], key_sets
+    assert all("E" in keys for keys in key_sets)
+    assert all(branch["assessment_filters"] == filters for branch in branches)
+
+
+def test_hard_feasible_domain_coupling_enters_conflict_core():
+    definitions = {
+        "a": {"parameter_id": "a", "label": "A", "value_type": "number", "search_type": "continuous",
+              "min_value": 0, "max_value": 20, "default_value": 5, "enabled": 1, "auto_adjustable": 1},
+        "b": {"parameter_id": "b", "label": "B", "value_type": "number", "search_type": "continuous",
+              "min_value": 0, "max_value": 30, "default_value": 5, "enabled": 1, "auto_adjustable": 1},
+        "c": {"parameter_id": "c", "label": "C", "value_type": "number", "search_type": "continuous",
+              "min_value": 0, "max_value": 10, "default_value": 5, "enabled": 1, "auto_adjustable": 1},
+    }
+
+    class CouplingStore(_Store):
+        def coupling_rows(self):
+            return [{"coupling_id": "FD-1", "coupling_type": "feasible_domain", "severity": "error",
+                     "parameter_a": "a", "parameter_b": "b", "multiplier": 2, "offset": 0,
+                     "domain_operator": "lte", "message": "B不得高于2A"}]
+
+    generator = HistorySeededGenerator(CouplingStore(definitions), _Runtime(), _evaluate, None)
+    request = {"indicator_filter_mode": "all", "selected_tags": [], "indicator_filters": [
+        {"parameter_id": "a", "operator": "lte", "value1": 3},
+        {"parameter_id": "b", "operator": "gte", "value1": 10},
+        {"parameter_id": "c", "operator": "lte", "value1": 5},
+    ]}
+    branches = generator._generation_branches(request, definitions)
+    assert len(branches) == 2, branches
+    assert all(any(rule["parameter_id"] == "c" for rule in branch["explicit_filters"]) for branch in branches)
+    assert all(any(conflict["source"] == "feasible_domain_coupling" for conflict in branch["explicit_conflicts"])
+               for branch in branches)
+
+
 def test_impossible_branch_becomes_best_effort_only_after_minimum_effort():
     records = []
     for index in range(5):
@@ -162,6 +209,49 @@ def test_impossible_branch_becomes_best_effort_only_after_minimum_effort():
     assert early["B"]["status"] == "still_searching"
     assert settled["A"]["status"] == "strict_found"
     assert settled["B"]["status"] == "best_effort_only"
+
+    eliminated = HistorySeededGenerator._branch_search_states(records, ["A", "B"], 1, branch_effort={
+        "A": {"seed_attempts": 2, "round_opportunities": 1, "eligible_beam_centers": 5},
+        "B": {"seed_attempts": 2, "round_opportunities": 0, "eligible_beam_centers": 0,
+              "proposal_attempts": 0, "last_alive_round": 0},
+    })
+    assert eliminated["B"]["status"] == "exhausted_by_quality", eliminated
+
+
+def test_generate_stops_when_impossible_branch_is_eliminated_by_quality():
+    sys.path.insert(0, str(ROOT / "tests"))
+    from beam_multi_round_test import _MockRuntime, _MockStore, mock_evaluate
+
+    class QualityEliminationGenerator(HistorySeededGenerator):
+        def _record_from_params(self, params, base, request, *args, **kwargs):
+            record = super(QualityEliminationGenerator, self)._record_from_params(
+                params, base, request, *args, **kwargs
+            )
+            filters = request.get("indicator_filters") or []
+            if filters and filters[0].get("parameter_id") == "attr_b":
+                record["strict_filter_satisfied"] = False
+                record["best_effort"] = True
+                record["generation_level"] = "best_effort"
+                record["_search_key"] = (0.0, 99.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+            return record
+
+        def _diverse_strict_count(self, records, definitions, historical=None, distance=0.018, required_branch_ids=None):
+            strict_a = [item for item in records if item.get("strict_filter_satisfied")
+                        and item.get("demand_branch_id") == "BRANCH-01"]
+            return 5 if strict_a else 0
+
+    generator = QualityEliminationGenerator(_MockStore(), _MockRuntime(), mock_evaluate, None)
+    result = generator.generate({
+        "selected_tags": [], "indicator_filter_mode": "any",
+        "indicator_filters": [
+            {"parameter_id": "attr_a", "operator": "lte", "value1": 2},
+            {"parameter_id": "attr_b", "operator": "lte", "value1": 2},
+        ],
+        "sort_by": "comprehensive", "target_protocol": None, "generation_rounds": 7,
+    }, count=5, seed=23, budget=120, search_mode="fast")
+    assert result["branch_search_states"]["BRANCH-02"]["status"] == "exhausted_by_quality", result
+    assert result["stopping_reason"] == "requested_count_met", result
+    assert result["actual_rounds"] < result["max_rounds"], result
 
 
 def test_non_strict_reasons_are_candidate_specific():
@@ -183,6 +273,19 @@ def test_non_strict_reasons_are_candidate_specific():
     assert items[1]["recommendation_reason"]["code"] == "direction_BRANCH-02"
     assert items[2]["recommendation_reason"]["code"] == "exploration_rank_3"
 
+    mapped = [{
+        "rank": 1, "strict_filter_satisfied": False,
+        "requirement_assessment": {"conditions": [
+            {"kind": "parameter", "parameter_id": "state", "key": "state", "label": "状态",
+             "target": 1, "actual": -1, "gap": 1, "status": "unmatched"}
+        ]},
+    }]
+    annotate_candidate_recommendations(mapped, {"scenario": "balanced"}, definitions={
+        "state": {"value_type": "boolean", "display_value_mapping_json": '{"-1":"无该属性","1":"有"}'},
+    })
+    summary = mapped[0]["recommendation_reason"]["summary"]
+    assert "当前值无该属性" in summary and "目标有" in summary and "-1" not in summary, summary
+
 
 def test_onboarding_clear_and_single_branch_direction_contracts():
     source = (ROOT / "app" / "static" / "app.js").read_text(encoding="utf-8")
@@ -201,7 +304,10 @@ if __name__ == "__main__":
     test_special_is_survives_final_strict_rerank()
     test_cross_parameter_conditional_and_conflict_splits_directions()
     test_cross_parameter_affine_hard_conflict_uses_interval_feasibility()
+    test_conflict_core_preserves_common_filters_and_combines_independent_groups()
+    test_hard_feasible_domain_coupling_enters_conflict_core()
     test_impossible_branch_becomes_best_effort_only_after_minimum_effort()
+    test_generate_stops_when_impossible_branch_is_eliminated_by_quality()
     test_non_strict_reasons_are_candidate_specific()
     test_onboarding_clear_and_single_branch_direction_contracts()
     print("PASS V21.3 closure hotfix")

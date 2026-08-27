@@ -2,6 +2,8 @@
 """Deterministic, candidate-specific recommendation explanations."""
 from __future__ import division
 
+from .value_semantics import business_display_value
+
 
 def _number(value):
     try:
@@ -88,20 +90,23 @@ def _candidate_options(item, index, items, scenario):
     return sorted(options, key=lambda value: -value[0])
 
 
-def _condition_text(condition):
+def _condition_text(condition, definitions=None):
     label = str(condition.get("label") or condition.get("key") or "当前要求")
     actual = condition.get("actual")
     target = condition.get("target")
     gap = _number(condition.get("gap"))
     if actual not in (None, "") and target not in (None, ""):
-        suffix = "当前值%s，目标%s" % (actual, target)
+        definition = (definitions or {}).get(condition.get("parameter_id") or condition.get("key"))
+        actual_text = business_display_value(actual, definition) if definition else str(actual)
+        target_text = business_display_value(target, definition) if definition else str(target)
+        suffix = "当前值%s，目标%s" % (actual_text, target_text)
         if gap is not None:
             suffix += "，差距%.3g" % gap
         return label, suffix + "。"
     return label, "该项尚未满足，其它条件仍按实际结果比较。"
 
 
-def _non_strict_options(item, index, items):
+def _non_strict_options(item, index, items, definitions=None):
     """Build truthful, candidate-specific options for Best Effort/Exploratory."""
     options = []
 
@@ -118,7 +123,7 @@ def _non_strict_options(item, index, items):
     unmet = [condition for condition in assessment.get("conditions") or [] if condition.get("status") == "unmatched"]
     if unmet:
         closest = min(unmet, key=lambda condition: _number(condition.get("gap")) if _number(condition.get("gap")) is not None else 1e9)
-        label, summary = _condition_text(closest)
+        label, summary = _condition_text(closest, definitions)
         add(100, "closest_%s" % (closest.get("key") or index), "最接近%s" % label, summary)
         matched_count = int(assessment.get("matched_count") or 0)
         total_count = int(assessment.get("total_count") or 0)
@@ -136,7 +141,7 @@ def _non_strict_options(item, index, items):
     return sorted(options, key=lambda value: -value[0])
 
 
-def annotate_candidate_recommendations(items, scenario_policy):
+def annotate_candidate_recommendations(items, scenario_policy, definitions=None):
     """Attach relative ranks and one concise, truthful reason to each item."""
     items = list(items or [])
     ranks = {
@@ -154,7 +159,7 @@ def annotate_candidate_recommendations(items, scenario_policy):
         if not item.get("strict_filter_satisfied") or (
             item.get("model_evaluation_available") is False and item.get("is_generated")
         ):
-            options = _non_strict_options(item, index, items)
+            options = _non_strict_options(item, index, items, definitions)
             chosen = next((value for value in options if value[1] not in used), options[0])
             used.add(chosen[1])
             reason = {"code": chosen[1], "title": chosen[2], "summary": chosen[3]}

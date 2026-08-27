@@ -1436,7 +1436,7 @@ class Application(object):
             if calculation_available else
             rank_historical_products(candidates, ranking_request, tag_weights, definitions=definitions, tag_map=tag_map, constraint_rules=constraint_rules)
         )
-        ranked = annotate_candidate_recommendations(ranked, scenario_policy)
+        ranked = annotate_candidate_recommendations(ranked, scenario_policy, definitions=definitions)
         for item in ranked:
             item["scenario"] = scenario_policy["scenario"]
         page, page_size = max(1, int(request.get("page", 1))), max(1, min(int(request.get("page_size", 12)), 50))
