@@ -1,249 +1,597 @@
-# 工业技术协议智能推荐系统 V21
+# 工业技术协议智能推荐系统
 
-V21 聚焦推荐工作流体验、统一服务导航与简易 Workbench：推荐条件栏支持调整宽度，技术指标按分组检索并提示标签覆盖关系；登录默认进入可配置的五入口 Portal；价格和效能 Workbench 使用同一个确定性历史协议作为示例，并由 DataMaster 补充中文字段、单位与显示映射。实现和运维边界见 `docs/V21_WORKFLOW_PORTAL_WORKBENCH.md`。
+当前开发线：V21.3.2
 
-V20 确立的业务语义继续保持：DataMaster、模型 Schema 与训练范围是非阻断诊断元数据；用户显式业务值不会被参考范围静默截断；显示文本变化不会改变数据库、生成或模型输入。详细规则见 `docs/V20_RECOMMENDATION_REFACTOR.md`。
+本项目面向工业成品技术协议的需求录入、历史方案推荐、候选方案生成、价格预测、效能评价和业务数据维护。系统采用“推荐主应用 + 价格模型服务 + 效能模型服务”的三服务结构，并支持 Windows 7、Python 3.8 和完全离线部署。
 
-当前 clean 运行主线：双独立 HTTP 模型服务、原 Notebook 任意模型子集一键导出、独立价格/效能工作台、数据中心可视化指标约束，以及仅以实算 JSON 为准的宽松服务准入。Win7 安装和最终测试见 `docs/CLEAN_WIN7_DEPLOYMENT_V19_6_13.md`。
+本文是项目主入口文档，重点说明当前代码如何实现、服务之间如何调用、关键数据语义和开发维护边界。历史版本说明和专项交付说明保留在 `docs/` 目录中。
 
-V19.6在V19.5共享价格／效能属性基础上持续完成数据生命周期治理、模型服务解耦、显式计算和待发布成品工作区重构。随包演示成品和模型只用于验证流程，不代表真实工程结论。
+## 1. 核心设计原则
 
-V11 效能模型采用“专家端在线学习、推荐系统只读复用产物”的边界设计，详见 [效能产物复用与服务边界](docs/EFFECTIVENESS_ARTIFACT_CONSUMPTION_V11.md)。需要不含离线 wheels 的源码交付时，运行 `BUILD_SOURCE_DEPLOYMENT_NO_WHEELS.bat`；在可联网或可访问内部 pip 镜像的目标机上，使用 `INSTALL_SOURCE_DEPENDENCIES_WIN7.bat` 创建运行环境。
+下面的规则属于系统业务语义，不应被 UI 优化、模型升级或生成算法修改破坏。
 
-甲方机器完全断网时，使用 `PREPARE_OFFLINE_WHEELHOUSE_PY38.bat` 在联网开发机准备依赖和官方 Python 3.8.10 x64 便携运行时，再运行 `BUILD_OFFLINE_DELIVERY_PY38.bat` 生成单个离线 ZIP。甲方解压后可直接双击 `START_OFFLINE_WIN7.bat` 或原有 `START_ALL_SERVICES_WIN7.bat`，机器自身 Python 和 PATH 不参与正式服务启动。详见 `docs/OFFLINE_DELIVERY_PY38_WIN7.md`。
+### 1.1 用户显式需求优先
 
-## 推荐启动方式
+- 用户选择的标签、价格目标、效能目标、技术指标条件和冻结参数属于显式需求。
+- 搜索只帮助用户找到指标，不能自动选择第一个匹配项。
+- 标签刷新、分组切换、显示映射和排序操作不能静默修改已有显式条件。
+- 用户手动排序的优先级高于场景默认排序，场景默认排序高于系统默认排序。
 
-本地Windows 7建议使用64位Python 3.8。
+### 1.2 参考范围只用于诊断
 
-### 三服务模式
+DataMaster 工程范围、模型 Schema 范围和训练范围都可能滞后于真实业务，只用于解释风险和提示外推。
 
-```bat
-START_ALL_SERVICES_WIN7.bat
-```
+它们不能静默执行：
 
-默认端口：
+- 拒绝用户输入；
+- 把用户输入截断到范围边界；
+- 把连续数值吸附到历史离散值；
+- 在 0 次模型评价、0 轮搜索时终止 Generator。
+
+只有明确工程硬规则、非法数据类型、模型服务实际拒绝或系统故障可以阻断计算。
+
+### 1.3 三层值语义必须分离
+
+| 层级 | 用途 | 示例 |
+| --- | --- | --- |
+| Business Value | 数据库、筛选、生成、保存方案中的规范业务值 | `0`、`1`、`-1` |
+| Display Value | 页面向操作人员展示的文本 | `无`、`有`、`无该属性` |
+| Model Value | 发送给价格或效能模型的编码值 | 由模型映射决定 |
+
+显示映射只能改变用户看到的文本。数据库值、生成值、筛选值、保存方案和模型输入必须保持规范语义。相关实现位于 `app/value_semantics.py`、`app/display_mapping.py` 和 `app/store.py`。
+
+数值字段还可以通过 `special_value_keys_json` 声明特殊业务状态，例如把 `-1` 声明为“无该属性”。特殊状态仍保存原业务值，通过 `special_is` 参与筛选；它不参与普通数值范围、距离和插值计算。主应用的 Bootstrap/Workbench Schema 会把 DataMaster 中的特殊状态元数据提供给前端，浏览器缓存不能成为这类语义的唯一来源。
+
+### 1.4 先尽力生成，再判断满足程度
+
+| 层级 | 含义 |
+| --- | --- |
+| Strict | 满足全部显式需求，且没有明确工程硬冲突 |
+| Best Effort | 无法严格满足，但给出可复核、尽量接近要求的方向 |
+| Exploratory | 参数组合已经生成，但模型没有完成评价或明确拒绝评价 |
+
+多样性不能把不满足条件的方案伪装成 Strict，也不能为了不同而返回明显劣质方案。
+
+## 2. 系统架构
 
 ```text
-价格预测服务：http://127.0.0.1:18101/docs
-效能预测服务：http://127.0.0.1:18102/docs
-智能推荐系统：http://127.0.0.1:17891/
-数据管理中心：http://127.0.0.1:17891/admin
+浏览器
+  │ HTTP / JSON
+  ▼
+推荐主应用（默认 127.0.0.1:17891）
+  ├─ 页面与认证
+  ├─ 业务数据与规则
+  ├─ 历史方案推荐
+  ├─ 智能生成任务
+  ├─ 场景策略与推荐解释
+  └─ 数据管理中心
+       │
+       ├──── HTTP ────► 价格服务（127.0.0.1:18101）
+       │                 ├─ Schema
+       │                 ├─ 单条预测
+       │                 └─ 批量预测
+       │
+       └──── HTTP ────► 效能服务（127.0.0.1:18102）
+                         ├─ Schema
+                         ├─ 单条/批量评价
+                         └─ 改进建议
 ```
 
-推荐系统将完整方案JSON并行发送给两个模型服务。价格服务和效能服务自行选择字段、执行预处理和推理。
+推荐主应用负责业务语义和流程编排。两个模型服务只负责各自的字段选择、模型输入验证和推理，不直接修改业务数据库。
 
-V19.6.1开始，三服务模式直接以两个服务的`/api/v1/schema`构建字段目录，不再由项目内置JSON bundle决定成品代号、字段角色和生成字段。`config/model_services.json`是默认配置来源，环境变量仅用于明确覆盖；正式服务模式默认关闭本地模型回退。
+### 2.1 三个进程的职责
 
-V19.6.2开始，成品业务数据可以先进入独立“待发布成品”草稿。模型服务切换后即使当前运行数据库暂时不匹配，管理中心仍可进入；推荐和计算会明确暂停，直到对应草稿校验并激活。
+| 进程 | 入口 | 默认端口 | 主要职责 |
+| --- | --- | ---: | --- |
+| 推荐主应用 | `run_app.py` / `app/server.py` | 17891 | 页面、认证、推荐、生成、评价编排、保存方案、数据管理 |
+| 价格服务 | `services/price_service/app.py` | 18101 | 加载价格模型、返回字段契约、价格预测和批量预测 |
+| 效能服务 | `services/effectiveness_service/app.py` | 18102 | 加载效能运行包、效能与可行性评价、批量评价、改进建议 |
 
-### 单进程兼容模式
+### 2.2 模型调用关系
 
-```bat
-START_ALL_WIN7.bat
+推荐主应用通过 `app/model_service_client.py` 调用两个独立 HTTP 服务。
+
+```text
+Business Parameters
+  ↓ app/store.py：规范化业务值
+  ↓ Business → Model 映射
+Model Parameters
+  ├─ POST 价格 /api/v1/predict 或 /predict/batch
+  └─ POST 效能 /api/v1/evaluate 或 /evaluate/batch
+  ↓
+联合评价、规则诊断、排序与解释
+  ↓
+Business Parameters + Display Mapping 返回前端
 ```
 
-该模式继续使用项目内置模型，适合服务尚未部署时的演示和故障回退。
+配置优先级为：代码默认值 `<` `config/model_services.json` `<` 环境变量。正式三服务模式默认关闭本地模型 fallback；模型服务不能运行时，应明确失败或进入历史方案降级模式，不能偷偷切换为演示模型。
 
-## 模型服务
+## 3. 目录结构与代码职责
 
-价格服务支持：
+| 路径 | 职责 |
+| --- | --- |
+| `app/server.py` | 主应用对象、HTTP 路由、认证、推荐/生成/评价编排、Admin API |
+| `app/store.py` | SQLite 数据访问、业务值规范化、标签与规则、保存方案、备份恢复 |
+| `app/recommender.py` | 历史与生成候选的筛选、评分、排序 |
+| `app/scenario_policy.py` | 场景策略单一来源、默认排序、权重和用户排序覆盖 |
+| `app/recommendation_explanation.py` | 确定性的候选级推荐理由 |
+| `app/local_generator.py` | 历史种子、锚定、候选修复、自适应 Beam、最终选择 |
+| `app/demand_branch.py` | AND/OR/冲突需求分支，以及显式分支与标签分支组合 |
+| `app/requirement_assessment.py` | 统一需求满足度判断 |
+| `app/constraint_projection.py` | 条件约束投影、激活状态和修复轨迹 |
+| `app/coupling_pairs.py` | 耦合关系与联合调整 |
+| `app/anchor_feasibility.py` | 显式锚点可行性与冲突诊断 |
+| `app/range_diagnostics.py` | DataMaster、Schema、训练范围的非阻断诊断 |
+| `app/generation_tasks.py` | 异步任务、请求 canonicalization、Fingerprint 和缓存 |
+| `app/product_releases.py` | 待发布成品维护、校验、导入导出和激活 |
+| `app/data_master.py` | DataMaster 工作簿导入、导出和校验 |
+| `app/static/` | 推荐页、Portal、登录页、Admin、价格/效能 Workbench |
+| `services/price_service/` | 价格服务、原生 bundle、自定义 ExpertTree/TreeNode |
+| `services/effectiveness_service/` | 效能服务和冻结/原始运行包适配 |
+| `config/` | 模型服务、优化场景、Portal 和 Workbench 配置 |
+| `data/protocol_demo.db` | 当前运行业务数据库 |
+| `data_master/` | DataMaster 当前工作簿和模板 |
+| `tools/` | 环境检查、运行时选择、离线打包、交付验证 |
+| `tests/` | 可直接执行的专项回归脚本 |
 
-- `native_pickle`：直接加载原Notebook导出的完整原生模型包；
-- `portable_json`：无NumPy、scikit-learn、XGBoost和joblib依赖的演示后备模式。
+## 4. 推荐工作流
 
-原生价格包使用Python标准库pickle协议4，包含原Scaler、原拟合模型、字段顺序、集成权重、log逆变换、单位换算和残差校准。它不依赖joblib，但仍要求安装模型对象本身需要的scikit-learn和可选XGBoost。
+### 4.1 前端状态
 
-效能服务支持：
+| 状态 | 行为 |
+| --- | --- |
+| Initial | 只加载产品、场景、标签、指标和协议，不请求推荐 |
+| Ready | 用户已设置需求，但尚未点击推荐 |
+| Recommended | 用户主动点击“开始智能推荐”，展示当前请求结果 |
+| Dirty | 推荐后需求发生变化，旧结果隐藏并要求重新推荐 |
 
-- `original_effectiveness_runtime`：直接运行原效能源码、Workbook和可选State；
-- `snapshot_json`：当前演示模型兼容模式。
+业务条件变化只更新需求摘要和 Dirty 状态，不自动请求 `/api/recommend`。纯展示排序可以在当前结果有效时重新排序。
 
-原运行时模式不会把效能工程近似重写成另一个模型。
+### 4.2 优化场景
 
-接口文档：
+场景配置位于 `config/scenario_config.json`。
 
-- `docs/api/MODEL_SERVICES_API.md`
-- `docs/MODEL_SERVICE_DEPLOYMENT_WIN7.md`
-- 两个服务各自的`/docs`和`/openapi.json`
+| 场景 | 默认目标 | 主要权重方向 |
+| --- | --- | --- |
+| 综合优化 `balanced` | 同等需求匹配下效费比最高 | 技术、价格、效能平衡 |
+| 成本优先 `cost` | 同等需求匹配下价格最低 | 提高价格权重，可设最低效能 |
+| 性能优先 `performance` | 同等需求匹配下效能最高 | 提高效能权重，可设最高预算 |
 
-## 数据生命周期管理
+前端不自行推断场景。`ScenarioPolicyService` 返回统一策略，前端展示和后端排序都读取同一结构：
 
-管理页面中的标签、标签规则、耦合关系、约束规则和协议采用：
+```json
+{
+  "scenario": "cost",
+  "scenario_name": "成本优先",
+  "ranking_weights": {
+    "technical": 0.3,
+    "price": 0.6,
+    "capability": 0.1
+  },
+  "applied_ranking": {
+    "sort_key": "price",
+    "sort_direction": "asc",
+    "source": "scenario_default"
+  }
+}
+```
+
+排序优先级：`user_override > scenario_default > system_default`。
+
+### 4.3 技术指标条件
+
+```text
+选择指标分组
+  ↓
+在全集或当前组中搜索/浏览指标
+  ↓
+用户明确选择指标
+  ↓
+根据指标类型重建 operator 和 value editor
+```
+
+搜索词、标签变化和覆盖提示不能改变已选 `parameter_id/operator/value`。布尔、枚举、连续数值、整数/IP 等编辑器根据真实指标定义生成。
+
+### 4.4 候选级推荐理由
+
+场景说明只解释总体策略；每张候选卡片的理由由 `app/recommendation_explanation.py` 根据当前候选池确定性生成。系统会识别最低价格、最高效能、最高效费比、技术匹配最完整、接近最低价但效能更高、接近最高效能但价格更低，以及最接近未满足条件的 Best Effort 方向。
+
+理由必须由真实指标支持，不调用大模型，也不为了文案不同而制造不真实结论。
+
+## 5. 智能生成实现
+
+### 5.1 异步任务与 Fingerprint
+
+`POST /api/generation/request` 创建或复用异步生成任务，前端通过 `GET /api/generation-tasks/{task_id}` 轮询状态。
+
+Fingerprint 包含会改变生成语义的场景、标签、价格/效能目标、技术条件、冻结参数、生成数量、评价额度、轮数、当前成品、业务语义版本和模型版本。排序、分页和结果来源模式不进入 Fingerprint。
+
+`count`、`generation_budget` 和 `generation_rounds` 在创建任务、同步生成和 stale 比较前统一 canonicalize，避免服务器截断后产生不同指纹。
+
+### 5.2 Anchor 与候选修复
+
+显式技术条件编译为业务锚点。连续数值保持用户输入，不因历史 `allowed_values` 或参考范围而吸附。
+
+模型必需字段缺失时，Preflight 是候选修复阶段，不是任务终止门。补值只允许作用于用户未指定且未冻结的字段：
+
+```text
+候选现值
+  > 当前历史种子
+  > 其它历史协议合法值
+  > 业务默认值/允许值
+  > 模型 Schema 默认值
+  > 训练均值
+  > 参考范围中点
+```
+
+修复后重新执行完整的缺失、映射和模型允许值验证。
+
+### 5.3 Demand Branch
+
+`app/demand_branch.py` 将需求编译成搜索方向：
+
+- `A AND B`：一个联合分支；
+- `A OR B`：分别生成 A、B 两个显式需求分支；
+- AND 存在真实冲突：识别 Conflict Core，只放松冲突条件，无冲突显式条件保留在每个方向；
+- 显式需求分支与标签规则分支组合，最多保留 24 个 Generation Branch，显式需求优先。
+
+跨字段冲突检测覆盖条件模板、硬 affine 规则和 `feasible_domain + severity=error` 耦合。超大 Conflict Core 使用有界 maximal-set 搜索，优先保留“放松条件最少”的分支。
+
+### 5.4 Seed Family 与多样性 Beam
+
+每个候选从 Stage 1 起携带：
+
+```text
+demand_branch_id
+seed_id
+family_id = demand_branch_id + ":" + seed_id
+```
+
+Beam 选择顺序：
+
+```text
+质量带内的 Demand Branch 覆盖
+  ↓
+不同 Seed Family 覆盖
+  ↓
+剩余位置按全局搜索质量竞争
+```
+
+单一 Family 在存在其它合理方向时采用约 40% 的软上限。最终候选同样先覆盖 Branch，再覆盖 Family，最后按排名填充。
+
+当 Branch 数大于 Beam 宽度时，系统分别记录：
+
+- `quality_eligible_centers`：比较池中质量合格的中心；
+- `selected_beam_centers`：本轮实际获得 Beam 槽位的中心。
+
+质量合格但暂时没有容量的分支进入 `waiting_for_capacity`，不会被误判为 `exhausted_by_quality`。Beam 按已获得的搜索机会轮转，并保留每个分支的最佳中心。
+
+### 5.5 提前停止
+
+提前停止同时考虑 Strict 数量、Demand Branch、Seed Family、参数/结构差异，以及各分支是否已找到 Strict、形成 Best Effort、质量淘汰或完成最低探索。单一 Family 的多个轻微变体不能冒充多方向结果；无法形成 Strict 的分支也不会无限阻止任务结束。
+
+## 6. 数据、规则与持久化
+
+### 6.1 运行数据库
+
+默认数据库为 `data/protocol_demo.db`，保存成品、指标与分组、标签与规则、耦合、条件约束、历史协议和专家方案。
+
+管理操作遵循：
 
 ```text
 启用 → 停用/归档 → 依赖检查 → 自动备份 → 永久删除
 ```
 
-列表直接提供启用/停用操作。普通删除实际为归档，可以恢复。永久删除只对已停用且无引用的记录开放。停用标签下的规则仍可编辑保存，但暂不参与推荐。
+普通删除应可恢复；永久删除只用于已停用且无引用的数据。
 
-当前业务成品不能在普通表格中直接停用，应通过成品数据工作区备份并切换。指标启停不受当前HTTP模型字段约束。
+### 6.2 DataMaster 与待发布成品
 
-## 成品数据工作区
+DataMaster 文件：
 
-管理中心的“成品数据工作区”支持四种并行维护方式：
+- `data_master/DataMaster_Current.xlsx`
+- `data_master/DataMaster_Template.xlsx`
 
-- 在网页中逐条新增、编辑和删除成品信息、指标、标签、标签规则、耦合、约束和历史协议；
-- 为上述任一模块单独上传CSV或XLSX，不再要求一张工作簿一次构建整个项目。
-- 直接上传包含价格与属性的普通历史成品 CSV/XLSX，指定 `-1`、`\`、`/` 等缺失符，由系统推断字段类型、允许值和必填性并建立草稿；
-- 下载草稿维护工作簿，在 Excel 中修订后整体回导当前草稿。
+系统支持网页逐项维护、CSV/XLSX 分模块导入、普通历史表自动建草稿、维护工作簿和完整离线发布包。只有“备份并切换业务数据”会改变当前运行数据；激活前先备份 SQLite，再原子切换，不自动替换模型。
 
-自动推断会把任一行曾经缺失的属性设为非必填。列名具有“是否/有无”语义时，0/1 推断为布尔；含义不明确的 0/1 保留为枚举并标记人工确认。编辑单条历史协议时，属性显示为独立输入框，无需手写 `params JSON`。
+### 6.3 Portal 配置
 
-新建空白草稿不会读取当前价格/效能服务Schema；从历史表建立草稿也不依赖当前模型。文件预览只检查表格格式和单元格类型；“检查业务数据（可选）”只检查数据库可写性和本地跨模块引用，不比较模型成品、模型字段、单位或必填性。
+`config/service_portal.json` 控制 `label / description / url / visible / enabled`。Admin 保存时执行 URL 校验、旧文件备份、临时文件写入和原子替换。它只管理导航入口，不修改 `config/model_services.json`。
 
-当前双模型未使用的业务扩展指标会按普通业务字段保留，可继续用于界面展示、筛选和业务规则。模型所需字段是否齐全只在点击计算时由对应HTTP服务处理。
+## 7. 启动与运行
 
-“备份并切换业务数据”是唯一影响运行数据的操作。系统先备份SQLite数据库，再原子替换成品主数据；不会调用模型或重新计算导入的历史协议。原DataMaster仍保留为批量迁移和完整导入入口，但不再是唯一维护方式。
+### 7.1 标准启动
 
-### 断网电脑离线发布
-
-开发机与甲方断网机之间可以使用单个离线发布包：
+```bat
+START_ALL_SERVICES_WIN7.bat
+```
 
 ```text
-开发机：复制当前运行数据或建立草稿 → 分模块维护 → 导出完整离线发布包
-断网机：导入离线发布包 → 进入草稿 → 检查业务数据（可选） → 备份并切换
+选择并 smoke 验证价格 Python
+  ↓
+启动价格与效能服务
+  ↓
+检查两个 /health
+  ↓
+执行 Schema + 实际预测/评价验证
+  ↓
+启动推荐主应用并打开 /portal
 ```
 
-发布包包含七个业务模块，并带有规范化JSON的SHA256传输完整性校验。SHA256用于发现文件损坏或意外改动，不代表数字签名或发布者身份认证。导入发布包不会直接写入运行主数据；后续业务切换也不读取当前机器上的模型契约。
+标准启动脚本默认开启认证。开发环境可使用 `START_ALL_NO_BROWSER.bat`。
 
-每个草稿模块均可单独下载UTF-8 CSV模板；历史协议模板会根据该草稿的指标和标签动态生成。也可以点击“复制当前运行数据为草稿”，在现有成品基础上修改，避免从空表重新维护。
-
-### 价格、效能和成品数据统一交付
-
-V19.6.4新增统一离线交付包，将正式价格原生bundle、正式效能运行包和上述成品数据发布包绑定为一个ZIP。构建阶段可对这一套已配套产物做交付验收；安装阶段重新校验文件SHA-256，自动备份旧模型及SQLite，并把业务数据导入为草稿。安装不会自动切换业务数据，由用户检查后确认；数据中心本身不以模型契约作为切换门禁。
+### 7.2 三个 Python 运行时相互独立
 
 ```bat
-BUILD_PRODUCT_DELIVERY_WIN7.bat --price-model <价格pkl> --effectiveness-package <效能运行包目录> --business-release <成品数据json> --output <交付zip>
-VERIFY_PRODUCT_DELIVERY_WIN7.bat <交付zip> --expected-sha256 <已确认摘要>
-INSTALL_PRODUCT_DELIVERY_WIN7.bat <交付zip> --expected-sha256 <已确认摘要>
-ROLLBACK_PRODUCT_DELIVERY_WIN7.bat <安装返回的备份ID>
+set "PRICE_SERVICE_PYTHON=C:\path\to\price_python.exe"
+set "EFFECT_SERVICE_PYTHON=C:\path\to\effect_python.exe"
+set "MAIN_APP_PYTHON=C:\path\to\main_python.exe"
 ```
 
-完整操作和正式/演示模型边界见`docs/PRODUCT_DELIVERY_WIN7.md`。
+也可以放入不提交 Git 的 `runtime/service_runtime.local.bat`。价格解释器不能只按路径存在判断；`tools/check_price_runtime.py` 会实际导入服务、加载模型并执行预测，只有 smoke 通过的解释器才能启动价格服务。
 
-### 虚拟正式成品验收基线
+### 7.3 常用页面
 
-V19.6.5新增确定性的`VIRTUAL_COUPLED_ACTUATOR`验收基线，覆盖价格专用、效能专用和共有属性，连续/整数/布尔/IP/枚举类型，10个标签、6条耦合及40条协议。基线会生成原生`price_native_bundle.pkl`，并调用原效能`ProjectApp`模拟专家偏好与可行性证据，保存Workbook+State正式运行包。
+| 页面 | 地址 |
+| --- | --- |
+| 登录 | `http://127.0.0.1:17891/login` |
+| Portal | `http://127.0.0.1:17891/portal` |
+| 智能推荐 | `http://127.0.0.1:17891/` |
+| 简易价格预测 | `http://127.0.0.1:17891/price` |
+| 简易效能评价 | `http://127.0.0.1:17891/effectiveness` |
+| 数据管理中心 | `http://127.0.0.1:17891/admin` |
+| 价格接口文档 | `http://127.0.0.1:18101/docs` |
+| 效能接口文档 | `http://127.0.0.1:18102/docs` |
+
+主应用默认在 17891～17901 之间选择空闲端口，并写入 `runtime/last_port.txt`。
+
+## 8. HTTP API
+
+### 8.1 主应用状态接口
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/api/health` | 主应用健康、模型模式、数据库完整性 |
+| GET | `/api/auth/status` | 登录和只读状态 |
+| POST | `/api/auth/login` | 登录并写入认证 Cookie |
+| POST | `/api/auth/logout` | 退出登录 |
+| GET | `/api/portal` | Portal 服务导航配置 |
+| GET | `/api/bootstrap` | 当前成品、指标、分组、标签、协议和模型状态 |
+| GET | `/api/scenario-policy` | 解析场景和优化强度 |
+
+### 8.2 推荐与生成接口
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| POST | `/api/recommend` | 筛选并排序历史或指定生成批次中的候选 |
+| POST | `/api/generation/request` | 创建或复用异步生成任务 |
+| GET | `/api/generation-tasks/{task_id}` | 查询生成进度和结果 |
+| POST | `/api/generate-live` | 同步生成，主要用于兼容和测试 |
+| POST | `/api/clear-live-generated` | 清除指定会话的生成批次 |
+| GET | `/api/agreements/{agreement_id}` | 获取历史或生成方案详情 |
+
+推荐请求示例：
+
+```json
+{
+  "session_id": "operator-001",
+  "scenario": "cost",
+  "optimization_intensity": "target",
+  "scenario_options": {"min_capability": 80},
+  "selected_tags": ["TAG-001"],
+  "max_price": 15,
+  "indicator_filter_mode": "all",
+  "indicator_filters": [
+    {"parameter_id": "attr_006", "operator": "lte", "value1": 3}
+  ],
+  "source_mode": "historical",
+  "page": 1,
+  "page_size": 12
+}
+```
+
+用户覆盖排序时增加：
+
+```json
+{
+  "sort_source": "user_override",
+  "sort_by": "capability",
+  "sort_order": "desc"
+}
+```
+
+异步生成请求可增加：
+
+```json
+{
+  "count": 5,
+  "generation_budget": 360,
+  "generation_rounds": 7,
+  "frozen_parameters": ["attr_021"]
+}
+```
+
+### 8.3 评价、保存与 Workbench
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| POST | `/api/evaluate` | 对编辑后的完整方案重新计算价格与效能 |
+| POST | `/api/improve` | 请求效能服务生成调整建议 |
+| POST | `/api/save-scheme` | 使用有效 evaluation token 保存专家方案 |
+| GET | `/api/saved` | 查询保存方案 |
+| GET | `/api/saved/{scheme_id}` | 查询保存方案详情 |
+| GET | `/api/price-workbench/schema` | 价格 Workbench 字段和示例 |
+| POST | `/api/price-workbench/predict` | 只调用价格服务 |
+| GET | `/api/effectiveness-workbench/schema` | 效能 Workbench 字段和示例 |
+| POST | `/api/effectiveness-workbench/evaluate` | 只调用效能服务 |
+
+方案详情修改参数后不会自动计算。前端先标记结果过期；重新计算后获得新的 evaluation token。保存时服务端核对参数哈希，禁止把旧评价绑定到已修改参数。
+
+### 8.4 Admin 接口
+
+Admin API 位于 `/api/admin/`，主要包括：
+
+- `snapshot`、`upsert`、`delete`、`toggle`、`purge`；
+- `backup`、`backups`、`restore-backup`、`upload-database`；
+- `portal-config`；
+- `conditional-constraint/upsert` 和 `conditional-constraint/delete`；
+- `wide-import/preview` 和 `wide-import/commit`；
+- `datamaster/template`、`current`、`preview` 和 `commit`；
+- `product-releases/*` 草稿创建、维护、校验、导入导出和激活。
+
+写接口在只读演示模式下会被拒绝；Admin 可通过 `IPDEMO_DISABLE_ADMIN=1` 关闭。
+
+### 8.5 价格服务 API
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/health` | 模型加载和服务健康 |
+| GET | `/api/v1/schema` | 产品、字段、允许值和范围契约 |
+| POST | `/api/v1/predict` | 单方案价格预测 |
+| POST | `/api/v1/predict/batch` | 批量价格预测，最多 1000 条 |
+| GET | `/openapi.json` | OpenAPI 3.0 |
+| GET | `/docs` | 简易接口测试页 |
+
+```json
+{
+  "request_id": "PRICE-001",
+  "product_code": "PRODUCT_CODE",
+  "candidate_id": "CANDIDATE-001",
+  "parameters": {"attr_001": 1}
+}
+```
+
+正式模式使用 `services/price_service/model/price_native_bundle.pkl`。自定义 `ExpertTree` 和 `TreeNode` 位于 `services/price_service/expert_tree.py`，加载逻辑位于 `native_bundle.py`。正式启动不允许用 portable fallback 掩盖原生模型或 sklearn 运行时不兼容。
+
+### 8.6 效能服务 API
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/health` | 模型和运行包健康 |
+| GET | `/api/v1/schema` | 产品、字段和目标协议契约 |
+| POST | `/api/v1/evaluate` | 单方案效能、可行性和轮廓评价 |
+| POST | `/api/v1/evaluate/batch` | 批量评价，最多 1000 条 |
+| POST | `/api/v1/improve` | 生成改进建议，取决于后端能力 |
+| GET | `/openapi.json` | OpenAPI 3.0 |
+| GET | `/docs` | 简易接口测试页 |
+
+效能服务优先读取 `services/effectiveness_service/model/current/effectiveness_runtime_manifest.json`，也支持显式提供原工程 `source-root + workbook + state` 或快照兼容模式。
+
+## 9. 配置与环境变量
+
+### 9.1 主应用
+
+| 环境变量 | 含义 | 默认值 |
+| --- | --- | --- |
+| `IPDEMO_HOST` | 主应用监听地址 | `127.0.0.1` |
+| `IPDEMO_PORT` | 首选端口 | `17891` |
+| `IPDEMO_PORT_SPAN` | 自动找空闲端口范围 | `10` |
+| `IPDEMO_OPEN_BROWSER` | 是否自动打开浏览器 | `1` |
+| `IPDEMO_AUTH_ENABLED` | 是否启用登录 | 开发入口默认关闭，标准 BAT 主动开启 |
+| `IPDEMO_AUTH_USERNAME` | 登录用户名 | `ab123` |
+| `IPDEMO_AUTH_PASSWORD` | 登录密码 | `ab123` |
+| `IPDEMO_AUTH_SECRET` | Cookie 签名密钥 | 未设置时本机生成 |
+| `IPDEMO_AUTH_TTL_SECONDS` | 登录有效期 | 8 小时 |
+| `IPDEMO_DEMO_READ_ONLY` | 禁止持久化写操作 | `0` |
+| `IPDEMO_DISABLE_ADMIN` | 禁用数据管理中心 | `0` |
+
+正式交付必须修改默认账号、密码和认证密钥，不应直接暴露到公网。
+
+### 9.2 模型服务
+
+| 环境变量 | 含义 |
+| --- | --- |
+| `IPDEMO_MODEL_EXECUTION_MODE` | `services` 或本地兼容模式 |
+| `IPDEMO_PRICE_SERVICE_URL` | 价格服务地址 |
+| `IPDEMO_EFFECT_SERVICE_URL` | 效能服务地址 |
+| `IPDEMO_MODEL_SERVICE_TIMEOUT` | HTTP 超时秒数 |
+| `IPDEMO_MODEL_SERVICE_FALLBACK` | 是否允许主应用本地回退 |
+| `IPDEMO_MODEL_SERVICE_BATCH_SIZE` | 主应用批量调用大小 |
+| `PRICE_NATIVE_BUNDLE` | 原生价格模型路径 |
+| `PRICE_ALLOW_MODEL_FALLBACK` | 价格模型 fallback，正式模式应为 `0` |
+| `EFFECT_RUNTIME_PACKAGE` | 效能运行清单路径 |
+| `EFFECT_SOURCE_ROOT` / `EFFECT_WORKBOOK` / `EFFECT_STATE` | 原效能工程路径 |
+
+## 10. 开发与测试
+
+项目测试多数是可直接执行的 Python 脚本，不依赖 pytest 收集器。
 
 ```bat
-RUN_VIRTUAL_FORMAL_PRODUCT_E2E_WIN7.bat
+python tests\v21_3_guided_diverse_generation_test.py
+python tests\v21_3_closure_hotfix_test.py
+python tests\v21_2_numeric_special_state_test.py
+python tests\scenario_frontend_backend_consistency_test.py
+python tests\scenario_state_closure_test.py
+python tests\v21_workflow_portal_workbench_test.py
 ```
 
-该测试在隔离目录内完成统一包安装、双模型HTTP服务、草稿激活、推荐生成、显式计算和回滚，不会替换当前项目的运行模型与数据库。当前为32项PASS，详细说明见`docs/VIRTUAL_FORMAL_PRODUCT_BASELINE.md`。
+生成算法重点回归：
 
-面向现场操作人员的启动、安装、草稿激活、回滚以及正式新成品配置流程，见`docs/操作人员手册_测试数据运行与成品更换.md`。
+```bat
+python tests\beam_multi_round_test.py
+python tests\fast_beam_multiround_test.py
+python tests\generation_budget_hard_cap_test.py
+python tests\generation_fingerprint_test.py
+python tests\joint_explicit_filter_conflict_test.py
+python tests\emergency_anchor_invariant_test.py
+python tests\constraint_projection_test.py
+python tests\coupling_pair_priority_test.py
+```
 
-## DataMaster
+服务验证运行 `CHECK_MODEL_SERVICES.bat`。该检查在服务健康之后继续执行 Schema 和真实 predict/evaluate，不把“端口已监听”等同于模型可用。
 
-项目内置：
+## 11. 离线部署与源码更新
+
+### 11.1 完整离线运行
+
+完全断网机器必须使用已准备好的 Python 3.8 runtime 和依赖。源码本身不能解决 sklearn、numpy、scipy 等二进制兼容问题。
+
+- `PREPARE_OFFLINE_WHEELHOUSE_PY38.bat`：联网环境准备离线依赖；
+- `BUILD_OFFLINE_DELIVERY_PY38.bat`：生成离线交付包；
+- `START_OFFLINE_WIN7.bat`：从包内运行时启动；
+- `BUILD_SOURCE_DEPLOYMENT_NO_WHEELS.bat`：构建不带依赖的源码包。
+
+价格模型如果由 sklearn 0.24.x 训练，价格服务必须使用实际 smoke 通过的兼容运行时。不要重新导出或自动 fallback 来掩盖 `_loss`、pickle 类型或自定义树节点加载问题。
+
+### 11.2 BuildKit 的 `source` 目录
 
 ```text
-data_master/DataMaster_Current.xlsx
-data_master/DataMaster_Template.xlsx
+IPDemo_Onedir_Offline_BuildKit/
+  runtime/     # 编译运行时，不随源码替换
+  wheels/      # 离线依赖，不随源码替换
+  tools/       # BuildKit 编译工具
+  source/      # 本仓库源码、配置、模型和业务基线
 ```
 
-V19.6工作簿包含10张表：
+更新业务代码时，可以替换 `source` 后重新执行 `BUILD_ONEDIR_WIN7.bat`。必须确认 source 来自确定的 Git 提交，不能把开发机未提交的模型或数据库改动混入现场包。
 
-```text
-填写说明
-字典_下拉项
-成品信息
-指标定义
-标签字典
-标签规则
-耦合关系
-约束规则
-历史协议
-模型字段绑定
-```
+### 11.3 运行安装的源码热更新
 
-所有固定类型字段提供Excel下拉；标签编号和指标编号等引用字段使用动态下拉。布尔字段的定义与取值明确分开：
+如果甲方已有可正常运行的完整源码安装，可以只替换 `app` 和 `run_app.py`，继续使用现场现有的 runtime、模型、数据库和配置。运行安装热更新和 BuildKit source 替换不能混用：
 
-```text
-指标定义：取值类型=布尔，搜索类型=布尔开关
-历史协议/规则条件：实际值填写有或无
-数据库内部：系统自动转换成1或0
-```
+| 场景 | 替换内容 | 后续动作 |
+| --- | --- | --- |
+| 已安装源码系统 | `app`、`run_app.py` | 重新启动三服务 |
+| 离线 BuildKit | 整个 `source` | 重新运行 `BUILD_ONEDIR_WIN7.bat` |
 
-模板保留当前模型必需的指标定义和字段绑定，可以直接填写业务主数据并回导。
+## 12. 安全与维护注意事项
 
-## 价格Notebook原生导出
+- 不要提交现场数据库、Portal 备份、日志、运行时或个人路径配置。
+- 不要把开发人员电脑的绝对 Python 路径写入仓库；使用 `runtime/service_runtime.local.bat`。
+- 修改数据库、模型和配置前先创建可恢复备份。
+- 不要把 DataMaster、Schema 或训练范围升级为隐式硬规则。
+- 不要让显示映射进入数据库值、生成值或模型值。
+- 不要绕过用户显式排序、冻结参数或技术条件。
+- 修改生成算法时同时验证 Branch、Family、Fingerprint、预算上限和三层输出语义。
+- 修改服务接口时同步更新 `/openapi.json`、Workbench 和本文档。
 
-使用：
+## 13. 延伸文档
 
-```text
-规范版价格预测_V19_6原生服务导出补丁.ipynb
-```
+- `docs/api/MODEL_SERVICES_API.md`：模型服务接口；
+- `docs/EFFECTIVENESS_ARTIFACT_CONSUMPTION_V11.md`：效能产物复用边界；
+- `docs/CLEAN_WIN7_DEPLOYMENT_V19_6_13.md`：Win7 clean 部署；
+- `docs/PRICE_TRAINING_AND_OFFLINE_ENVIRONMENT.md`：价格训练与离线环境；
+- `docs/DATABASE_ADMIN_GUIDE.md`：数据库管理；
+- `docs/DATAMASTER_GUIDE_V19_6.md`：DataMaster；
+- `docs/操作人员手册_测试数据运行与成品更换.md`：现场操作流程。
 
-在原Notebook全部模型和集成权重计算完成后运行最后一个单元格，即可生成：
-
-```text
-services/price_service/model/price_native_bundle.pkl
-```
-
-正式使用前必须核对价格单位和字段编号，并执行原Notebook预测与服务预测的一致性测试。
-
-## 效能原工程接入
-
-设置：
-
-```bat
-set EFFECT_SOURCE_ROOT=D:\effectiveness_project
-set EFFECT_WORKBOOK=D:\effectiveness_project\data\product.xlsx
-set EFFECT_STATE=D:\effectiveness_project\interactive_project\state_xxx.json
-```
-
-再运行`START_EFFECTIVENESS_SERVICE_WIN7.bat`。没有State时为Workbook基线，不应声称包含专家学习结果。
-
-## 智能推荐与生成
-
-V19.6保留此前功能：非阻塞生成、稳定批次、需求锚定、反向轮廓补偿、价格目标搜索、混合属性邻域、标签规则分支、探索方案、动态重评估，以及共享／效能专用／价格专用属性编辑。
-
-两个模型服务已经提供批量接口。V19.6.2在输出目标搜索的同一轮独立属性扫描中使用批量评价；依赖前一步结果的累计坐标下降和属性组合搜索仍保持顺序评价，以避免改变自适应搜索语义。批量接口缺少候选结果时会明确报错，不会把候选和结果错配。
-
-方案详情中的属性修改不会自动调用模型。界面会将当前结果标为“已过期”，只有点击“重新计算价格与效能”后才请求模型服务。保存专家方案时，后端会核对本次显式计算的参数哈希，禁止把旧结果绑定到已经修改的参数。
-
-## Python 3.8 离线模型与价格训练环境
-
-原价格 Notebook 的 Lasso、Ridge、SVR、GBDT、ExtraTrees、RandomForest、
-XGBoost 训练流程未被重写；当前改动集中在训练后原生 bundle 导出、严格加载和
-离线部署。
-
-断网运行机：
-
-```bat
-CREATE_MODEL_RUNTIME_ENV_WIN7.bat
-```
-
-价格训练开发机：
-
-```bat
-CREATE_PRICE_TRAINING_ENV_PY38.bat
-RUN_PRICE_TRAINING_ENV_TEST.bat
-RUN_PRICE_TRAINING_NOTEBOOK_PY38.bat
-```
-
-随包提供 Python 3.8/Win64 离线 wheelhouse、固定依赖清单和 SHA-256 Manifest。
-完整说明见 `docs/PRICE_TRAINING_AND_OFFLINE_ENVIRONMENT.md`。
-
-## 验证
-
-```bat
-RUN_FULL_PIPELINE_TEST.bat
-```
-
-专项测试：
-
-```bat
-python tests\v19_6_service_governance_test.py
-python tests\product_release_workspace_test.py
-python tests\product_delivery_test.py
-runtime\venvs\price_training38\Scripts\python.exe tests\price_training_environment_test.py
-```
-
-详细结果见：
-
-- `docs/V19_6_VALIDATION_REPORT.md`
-- `logs/full_pipeline_test_report.json`
-- `logs/v19_6_service_governance_report.json`
+如果代码行为与历史文档冲突，以当前代码、当前 API Schema 和本文“核心设计原则”为准；涉及模型工程结论时，以实际模型服务返回和经确认的工程硬规则为准。
