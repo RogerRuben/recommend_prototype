@@ -33,7 +33,7 @@
       <div class="requirements-subsection technical-requirements">
         <div class="subsection-heading"><div><b>技术条件</b><small>精确设置需要满足的指标</small></div><button id="addFilterBtn" class="button tiny secondary">＋ 添加条件</button></div>
         <div id="tagCoverageSummary" class="coverage-summary">当前标签尚未覆盖技术指标。</div>
-        <details class="filter-options"><summary>条件设置</summary><label class="coverage-toggle"><input id="hideCoveredParams" type="checkbox" checked> 隐藏标签已覆盖指标</label><div class="mode-row"><span>条件组合</span><select id="filterMode"><option value="all">需全部满足 AND</option><option value="any">任一满足即可 OR</option></select></div></details>
+        <div class="mode-row persistent-filter-mode"><span>条件组合</span><select id="filterMode"><option value="all">需全部满足 AND</option><option value="any">任一满足即可 OR</option></select></div><details class="filter-options"><summary>显示设置</summary><label class="coverage-toggle"><input id="hideCoveredParams" type="checkbox" checked> 隐藏标签已覆盖指标</label></details>
         <div id="indicatorFilters"></div>
       </div>
     </section>
@@ -64,7 +64,7 @@
 </article></div>
 
 <div id="fontOverlay" class="overlay hidden"><div class="modal small-modal"><header class="drawer-header"><h2>界面字体与密度</h2><button id="closeFont" class="icon-button">×</button></header><div class="modal-body"><div class="font-presets"><button data-scale="100">标准</button><button data-scale="115">大</button><button data-scale="130">特大</button><button data-scale="145">超大</button></div><label>自定义比例<input id="fontRange" type="range" min="90" max="170" step="5"><b id="fontValue"></b></label><button id="resetFont" class="button secondary full">恢复默认 115%</button></div></div></div>
-<div id="savedOverlay" class="overlay hidden"><div class="modal saved-modal"><header class="drawer-header"><h2>专家方案库</h2><button id="closeSaved" class="icon-button">×</button></header><div id="savedList" class="modal-body"></div></div></div>
+<div id="savedOverlay" class="overlay hidden"><div class="modal saved-modal"><header class="drawer-header"><h2>专家方案库</h2><button id="closeSaved" class="icon-button">×</button></header><div class="saved-toolbar"><label><input id="savedSelectAll" type="checkbox"> 全选当前结果</label><div class="saved-filters"><button class="saved-filter active" data-filter="all">全部</button><button class="saved-filter" data-filter="eligible">可参与推荐</button><button class="saved-filter" data-filter="training">训练候选</button></div><button id="exportSavedCsv" class="button secondary">导出 CSV</button><button id="exportSavedJsonl" class="button secondary">导出 JSONL</button></div><div id="savedList" class="modal-body"></div></div></div>
 <div id="tourOverlay" class="tour-overlay hidden"><div id="tourSpotlight" class="tour-spotlight"></div><div id="tourCard" class="tour-card"><div class="eyebrow">QUICK TOUR</div><h2 id="tourTitle">欢迎使用参数辅助设计系统</h2><p id="tourText">推荐流程只需要几个步骤，是否快速了解基本操作？</p><div><button id="tourSkip" class="button secondary">直接使用</button><button id="tourNext" class="button primary">开始引导</button></div></div></div>
 
 <div id="toast" class="toast hidden"></div><script src="/app.js"></script>
