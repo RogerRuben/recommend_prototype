@@ -33,6 +33,7 @@ from .anchor_feasibility import assess_explicit_filter_feasibility, validate_anc
 from .constraint_projection import active_parameter_set, project_constraints
 from .coupling_pairs import build_coupling_pairs, exploration_pairs
 from .demand_branch import compile_explicit_demand_branches, compile_conflict_core_branches, combine_generation_branches
+from .expert_scheme import ExpertSchemeService
 from .recommender import rank_agreements
 from .requirement_assessment import assess_requirements
 from .value_semantics import canonical_filter_value, canonicalize_parameter_value, is_special_value, nice_engineering_step, normal_numeric_values, normalize_boolean, normalize_numeric, special_value_keys, values_equal
@@ -1432,6 +1433,7 @@ class HistorySeededGenerator(object):
             "generation_trace": {
                 "method": "batched_directional_beam_search",
                 "seed_agreement_id": base["agreement_id"],
+                "seed_source": base.get("agreement_source") or base.get("seed_source") or "historical",
                 "locked_parameters": sorted(locked),
                 "anchor_conflicts": list(anchor_conflicts or []),
                 "explicit_repairs": [x for x in repairs if x],
@@ -1553,6 +1555,7 @@ class HistorySeededGenerator(object):
             "recommendation_warning": "模型评价不可用；该结果仅作为参数探索方案。",
             "generation_trace": {
                 "method": "exploratory_parameter_fallback", "seed_agreement_id": base.get("agreement_id"),
+                "seed_source": base.get("agreement_source") or base.get("seed_source") or "historical",
                 "locked_parameters": sorted(locked), "search_move": search_move,
                 "iteration": iteration, "attempt": attempt,
                 "node_id": "X%03d-%03d" % (int(iteration), int(attempt)), "parent_node_id": None,
@@ -2273,6 +2276,20 @@ class HistorySeededGenerator(object):
             history = self.store.historical_agreements(target_protocol=target_protocol)
         except TypeError:
             history = self.store.historical_agreements()
+        expert_service = ExpertSchemeService(
+            definitions, getattr(self.store, "current_product_code", lambda: "")(), self.runtime,
+        )
+        if hasattr(self.store, "list_saved") and hasattr(self.store, "get_saved"):
+            for saved in self.store.list_saved():
+                if not expert_service.compatibility(saved).get("recommendation_eligible_effective"):
+                    continue
+                try:
+                    expert = self.store.get_saved(saved["id"], recalculate=True)
+                except Exception:
+                    continue
+                if expert:
+                    expert["seed_source"] = "expert_saved"
+                    history.append(expert)
         seeds = self.select_seeds(request, max(8, min(16, len(history))), historical=history)
         if not seeds:
             raise ValueError("没有历史协议可作为生成种子")

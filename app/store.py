@@ -259,6 +259,14 @@ class Store(object):
                     ("constraint_rules", "template_metadata_json TEXT"),
                     ("agreements", "archived_at TEXT"),
                     ("saved_schemes", "product_code TEXT"),
+                    ("saved_schemes", "base_params_json TEXT"),
+                    ("saved_schemes", "delta_json TEXT"),
+                    ("saved_schemes", "changed_parameter_ids_json TEXT"),
+                    ("saved_schemes", "target_protocol TEXT"),
+                    ("saved_schemes", "schema_signature TEXT"),
+                    ("saved_schemes", "recommendation_eligible INTEGER NOT NULL DEFAULT 1"),
+                    ("saved_schemes", "training_candidate INTEGER NOT NULL DEFAULT 1"),
+                    ("saved_schemes", "enabled INTEGER NOT NULL DEFAULT 1"),
                 ]:
                     self._add_column(conn, table, definition)
                 # Bootstrap managed parameter groups from existing definitions.
@@ -886,17 +894,34 @@ class Store(object):
         item["tags"] = self.derive_tags(item["params"], evaluation, item.get("tags") or [])
         return item
 
-    def save_scheme(self, scheme_name, base_agreement_id, source_type, params, evaluation, risk_confirmed=False):
+    def save_scheme(self, scheme_name, base_agreement_id, source_type, params, evaluation,
+                    risk_confirmed=False, base_params=None, delta=None,
+                    changed_parameter_ids=None, target_protocol=None,
+                    schema_signature=None, recommendation_eligible=True,
+                    training_candidate=True):
         with self.lock:
             conn = self.connect()
             try:
                 cursor = conn.execute("""INSERT INTO saved_schemes
-                    (scheme_name,base_agreement_id,product_code,source_type,params_json,evaluation_json,risk_confirmed,created_at)
-                    VALUES(?,?,?,?,?,?,?,?)""", (
+                    (scheme_name,base_agreement_id,product_code,source_type,params_json,evaluation_json,risk_confirmed,created_at,
+                     base_params_json,delta_json,changed_parameter_ids_json,target_protocol,schema_signature,
+                     recommendation_eligible,training_candidate,enabled)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""", (
                     scheme_name, base_agreement_id, self.current_product_code(), source_type, json.dumps(params, ensure_ascii=False),
-                    json.dumps(evaluation, ensure_ascii=False), 1 if risk_confirmed else 0, now_iso()
+                    json.dumps(evaluation, ensure_ascii=False), 1 if risk_confirmed else 0, now_iso(),
+                    json.dumps(base_params, ensure_ascii=False) if base_params is not None else None,
+                    json.dumps(delta or {}, ensure_ascii=False),
+                    json.dumps(changed_parameter_ids or [], ensure_ascii=False), target_protocol, schema_signature,
+                    1 if recommendation_eligible else 0, 1 if training_candidate else 0,
                 ))
-                self._audit(conn, "create", "saved_scheme", str(cursor.lastrowid), {"name": scheme_name})
+                self._audit(conn, "create", "saved_scheme", str(cursor.lastrowid), {
+                    "scheme_name": scheme_name, "base_agreement_id": base_agreement_id,
+                    "changed_parameter_ids": list(changed_parameter_ids or []),
+                    "changed_count": len(changed_parameter_ids or []),
+                    "product_code": self.current_product_code(),
+                    "recommendation_eligible": bool(recommendation_eligible),
+                    "training_candidate": bool(training_candidate),
+                })
                 conn.commit(); return cursor.lastrowid
             finally: conn.close()
 
@@ -908,6 +933,9 @@ class Store(object):
                 item = dict(row)
                 item["params"] = _json_object(item.pop("params_json"))
                 item["evaluation"] = _json_object(item.pop("evaluation_json"))
+                item["base_params"] = _json_object(item.pop("base_params_json", None))
+                item["delta"] = _json_object(item.pop("delta_json", None))
+                item["changed_parameter_ids"] = _json_list(item.pop("changed_parameter_ids_json", None))
                 result.append(item)
             return result
         finally: conn.close()
@@ -921,6 +949,9 @@ class Store(object):
             item = dict(row)
             item["params"] = _json_object(item.pop("params_json"))
             item["saved_evaluation"] = _json_object(item.pop("evaluation_json"))
+            item["base_params"] = _json_object(item.pop("base_params_json", None))
+            item["delta"] = _json_object(item.pop("delta_json", None))
+            item["changed_parameter_ids"] = _json_list(item.pop("changed_parameter_ids_json", None))
             item["evaluation"] = self.runtime.evaluate(self.runtime_parameters(item["params"])) if recalculate else item["saved_evaluation"]
             if recalculate:
                 item["params"] = dict(item["evaluation"].get("parameters") or item["params"])
@@ -930,9 +961,51 @@ class Store(object):
             item["is_generated"] = False
             item["positioning"] = "专家保存方案"
             item["tags"] = self.derive_tags(item["params"], item["evaluation"])
+            item["predicted_price_wan"] = item["evaluation"].get("predicted_price_wan")
+            item["capability_score"] = item["evaluation"].get("capability_score")
+            item["conservative_capability_score"] = item["evaluation"].get("conservative_capability_score", item["capability_score"])
+            item["feasibility_probability"] = item["evaluation"].get("feasibility_probability")
+            item["cost_effectiveness"] = item["evaluation"].get("cost_effectiveness")
+            item["model_evaluation_available"] = bool(recalculate)
             return item
         finally:
             conn.close()
+
+    def set_saved_recommendation_eligibility(self, scheme_id, enabled):
+        with self.lock:
+            conn = self.connect()
+            try:
+                cursor = conn.execute(
+                    "UPDATE saved_schemes SET recommendation_eligible=? WHERE id=? AND enabled=1",
+                    (1 if enabled else 0, int(scheme_id)),
+                )
+                if not cursor.rowcount:
+                    raise ValueError("专家方案不存在或已停用。")
+                self._audit(conn, "recommendation_eligibility", "saved_scheme", str(scheme_id), {"enabled": bool(enabled)})
+                conn.commit()
+                return {"updated": True, "id": int(scheme_id), "recommendation_eligible": bool(enabled)}
+            finally:
+                conn.close()
+
+    def set_saved_training_candidate(self, scheme_id, enabled):
+        with self.lock:
+            conn = self.connect()
+            try:
+                cursor = conn.execute(
+                    "UPDATE saved_schemes SET training_candidate=? WHERE id=? AND enabled=1",
+                    (1 if enabled else 0, int(scheme_id)),
+                )
+                if not cursor.rowcount:
+                    raise ValueError("专家方案不存在或已停用。")
+                self._audit(conn, "training_candidate", "saved_scheme", str(scheme_id), {"enabled": bool(enabled)})
+                conn.commit()
+                return {"updated": True, "id": int(scheme_id), "training_candidate": bool(enabled)}
+            finally:
+                conn.close()
+
+    def saved_by_ids(self, scheme_ids):
+        wanted = set(int(value) for value in (scheme_ids or []))
+        return [item for item in self.list_saved() if int(item.get("id")) in wanted]
 
     def import_wide_rows(self, parsed_rows, overwrite=False, evaluate=True):
         valid = [entry["item"] for entry in parsed_rows if entry.get("valid")]

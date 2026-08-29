@@ -32,6 +32,7 @@ from .configuration import _boolean, load_model_service_config, load_service_por
 from .range_diagnostics import build_range_diagnostics
 from .scenario_policy import ScenarioPolicyService
 from .recommendation_explanation import annotate_candidate_recommendations
+from .expert_scheme import ExpertSchemeService
 
 
 class GeneratedSessions(object):
@@ -206,6 +207,9 @@ class Application(object):
         self.model_parameter_coverage = {}
         if not self.demo_read_only:
             self._refresh_model_data_readiness(raise_local=True)
+        self.expert_schemes = ExpertSchemeService(
+            self.store.parameter_map(), self.store.current_product_code(), self.runtime,
+        )
         self.sessions = GeneratedSessions()
         self.model_lock = threading.RLock()
         self.evaluation_lock = threading.RLock()
@@ -249,6 +253,9 @@ class Application(object):
         """
         self._sync_wire_product_code()
         readiness = self._refresh_model_data_readiness()
+        self.expert_schemes = ExpertSchemeService(
+            self.store.parameter_map(), self.store.current_product_code(), self.runtime,
+        )
         self._invalidate_runtime_caches()
         return readiness
 
@@ -257,6 +264,8 @@ class Application(object):
         self.runtime = runtime
         if hasattr(self, "store"):
             self.store.runtime = runtime
+        if hasattr(self, "expert_schemes"):
+            self.expert_schemes.runtime = runtime
         if hasattr(self, "data_master"):
             self.data_master.runtime = runtime
         if hasattr(self, "product_releases"):
@@ -1403,6 +1412,9 @@ class Application(object):
         historical_items = self.store.historical_agreements(
             target_protocol=target_protocol, recalculate=calculation_available
         )
+        expert_items = self.expert_recommendation_schemes(
+            target_protocol=target_protocol, recalculate=calculation_available,
+        )
         requested_batch_id = request.get("generation_batch_id")
         batch_metadata = self.sessions.batch_metadata(session_id, requested_batch_id) if requested_batch_id else None
         batch_request = self.generation_tasks.canonicalize_generation_controls(request)
@@ -1420,11 +1432,11 @@ class Application(object):
         if not calculation_available:
             source_mode = "historical"
         if source_mode == "historical":
-            candidates = historical_items
+            candidates = historical_items + expert_items
         elif source_mode == "generated":
             candidates = generated_items
         else:
-            candidates = historical_items + generated_items
+            candidates = historical_items + expert_items + generated_items
         ranking_request = dict(request)
         ranking_request["include_best_effort"] = source_mode in ("generated", "both")
         tag_weights = dict((item["tag_id"], item["weight"]) for item in self.bootstrap()["tags"])
@@ -1449,7 +1461,8 @@ class Application(object):
             "page_size": page_size,
             "pages": max(1, (len(ranked) + page_size - 1) // page_size),
             "source_mode": source_mode,
-            "historical_available": len(historical_items),
+            "historical_available": len(historical_items) + len(expert_items),
+            "expert_available": len(expert_items),
             "live_generated_available": len(generated_items),
             "generation_batch_stale": generation_batch_stale,
             "best_effort_count": best_effort_count,
@@ -1644,8 +1657,61 @@ class Application(object):
         )
         risk_confirmed = bool(request.get("risk_confirmed"))
         if has_risk and not risk_confirmed: return {"saved":False,"requires_risk_confirmation":True,"evaluation":evaluation}
-        scheme_id = self.store.save_scheme(request.get("scheme_name") or "专家修订方案", request.get("base_agreement_id"), request.get("source_type") or "expert_modified", evaluation["parameters"], evaluation, risk_confirmed)
-        return {"saved":True,"scheme_id":scheme_id,"evaluation":evaluation}
+        final_params = self.store.canonical_business_parameters(evaluation["parameters"])
+        base_params = self.store.canonical_business_parameters(request.get("base_parameters") or {})
+        delta = self.expert_schemes.build_delta(base_params, final_params)
+        recommendation_eligible = not has_risk
+        scheme_id = self.store.save_scheme(
+            request.get("scheme_name") or "专家修订方案", request.get("base_agreement_id"),
+            request.get("source_type") or "expert_modified", final_params, evaluation, risk_confirmed,
+            base_params=base_params, delta=delta, changed_parameter_ids=sorted(delta),
+            target_protocol=request.get("target_protocol"),
+            schema_signature=self.expert_schemes.schema_signature(),
+            recommendation_eligible=recommendation_eligible, training_candidate=True,
+        )
+        return {"saved":True,"scheme_id":scheme_id,"evaluation":evaluation,
+                "changed_parameter_ids":sorted(delta),
+                "recommendation_eligible":recommendation_eligible}
+
+    def saved_schemes(self):
+        items = self.store.list_saved()
+        for item in items:
+            item["compatibility"] = self.expert_schemes.compatibility(item)
+            item["changed_count"] = len(item.get("changed_parameter_ids") or [])
+        return items
+
+    def expert_recommendation_schemes(self, target_protocol=None, recalculate=True):
+        result = []
+        for saved in self.saved_schemes():
+            if not saved["compatibility"].get("recommendation_eligible_effective"):
+                continue
+            try:
+                item = self.store.get_saved(saved["id"], recalculate=recalculate)
+            except Exception:
+                continue
+            if item:
+                item["compatibility"] = saved["compatibility"]
+                result.append(item)
+        return result
+
+    def set_saved_recommendation_eligibility(self, scheme_id, enabled):
+        saved = next((item for item in self.saved_schemes() if int(item.get("id")) == int(scheme_id)), None)
+        if saved is None:
+            raise ValueError("专家方案不存在。")
+        if enabled:
+            probe = dict(saved)
+            probe["recommendation_eligible"] = 1
+            compatibility = self.expert_schemes.compatibility(probe)
+            if not compatibility.get("product_match") or not compatibility.get("schema_compatible"):
+                raise ValueError("当前专家方案与当前成品或字段定义不兼容，不能参与推荐。")
+        return self.store.set_saved_recommendation_eligibility(scheme_id, enabled)
+
+    def export_saved_schemes(self, scheme_ids):
+        items = self.store.saved_by_ids(scheme_ids)
+        return [self.expert_schemes.training_export_record(item) for item in items]
+
+    def set_saved_training_candidate(self, scheme_id, enabled):
+        return self.store.set_saved_training_candidate(scheme_id, enabled)
 
     def improve(self, request):
         self._require_product_ready()
@@ -1987,7 +2053,7 @@ class Handler(BaseHTTPRequestHandler):
                 task_id = unquote(path.split("/api/generation-tasks/",1)[1]); task = self.app.generation_tasks.get(task_id); self._json(task if task else {"error":"not_found"}, 200 if task else 404)
             elif path.startswith("/api/agreements/"):
                 agreement_id = unquote(path.split("/api/agreements/",1)[1]); item = self.app.agreement_detail(agreement_id,(query.get("session_id") or ["default"])[0],(query.get("protocol_id") or [None])[0]); self._json(item if item else {"error":"not_found"},200 if item else 404)
-            elif path == "/api/saved": self._json({"items":self.app.store.list_saved()})
+            elif path == "/api/saved": self._json({"items":self.app.saved_schemes()})
             elif path.startswith("/api/saved/"):
                 scheme_id = unquote(path.split("/api/saved/",1)[1]); item = self.app.saved_detail(scheme_id); self._json(item if item else {"error":"not_found"},200 if item else 404)
             elif path.startswith("/api/admin/") and self.app.disable_admin: self._admin_forbidden()
@@ -2062,6 +2128,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if self.app.demo_read_only and path in self.WRITE_PATHS:
                 self._demo_forbidden(); return
+            if self.app.demo_read_only and path.startswith("/api/saved/"):
+                self._demo_forbidden(); return
             if path == "/api/recommend": self._json(self.app.recommend(request))
             elif path == "/api/generation/request": self._json(self.app.request_generation(request))
             elif path == "/api/generate-live": self._json(self.app.generate_live(request))
@@ -2070,6 +2138,14 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/effectiveness-workbench/evaluate": self._json(self.app.effectiveness_workbench_evaluate(request))
             elif path == "/api/price-workbench/predict": self._json(self.app.price_workbench_predict(request))
             elif path == "/api/save-scheme": self._json(self.app.save(request))
+            elif path == "/api/saved/export":
+                self._json({"items": self.app.export_saved_schemes(request.get("scheme_ids") or [])})
+            elif path.startswith("/api/saved/") and path.endswith("/recommendation-eligibility"):
+                scheme_id = unquote(path.split("/api/saved/", 1)[1].split("/", 1)[0])
+                self._json(self.app.set_saved_recommendation_eligibility(scheme_id, _boolean(request.get("enabled"), False)))
+            elif path.startswith("/api/saved/") and path.endswith("/training-candidate"):
+                scheme_id = unquote(path.split("/api/saved/", 1)[1].split("/", 1)[0])
+                self._json(self.app.set_saved_training_candidate(scheme_id, _boolean(request.get("enabled"), False)))
             elif path == "/api/clear-live-generated":
                 session_id = request.get("session_id") or "default"
                 self.app.sessions.clear(session_id)
