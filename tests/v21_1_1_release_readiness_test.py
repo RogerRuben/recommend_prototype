@@ -110,7 +110,7 @@ def portal_contract():
         item = saved["config"]["services"]["advanced_price"]
         assert item["description"] == "保存后的说明"
         assert item["visible"] is False and item["enabled"] is False
-        assert saved["config"]["services"]["recommendation"]["label"] == "智能方案推荐"
+        assert saved["config"]["services"]["recommendation"]["label"] == "方案智能推荐"
 
 
 def presentation_contract():

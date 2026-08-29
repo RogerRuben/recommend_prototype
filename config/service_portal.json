@@ -2,7 +2,7 @@
   "title": "工业技术协议智能系统",
   "services": {
     "recommendation": {
-      "label": "智能方案推荐",
+      "label": "方案智能推荐",
       "description": "根据需求筛选、推荐并生成候选方案",
       "url": "/",
       "visible": true,
