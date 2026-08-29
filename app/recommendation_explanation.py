@@ -94,14 +94,19 @@ def _condition_text(condition, definitions=None):
     label = str(condition.get("label") or condition.get("key") or "当前要求")
     actual = condition.get("actual")
     target = condition.get("target")
-    gap = _number(condition.get("gap"))
+    # Never expose the normalised ranking gap as a physical-world distance.
+    # Older records without business_gap simply omit a numeric difference.
+    business_gap = _number(condition.get("business_gap"))
     if actual not in (None, "") and target not in (None, ""):
         definition = (definitions or {}).get(condition.get("parameter_id") or condition.get("key"))
         actual_text = business_display_value(actual, definition) if definition else str(actual)
         target_text = business_display_value(target, definition) if definition else str(target)
-        suffix = "当前值%s，目标%s" % (actual_text, target_text)
-        if gap is not None:
-            suffix += "，差距%.3g" % gap
+        unit = str(condition.get("unit") or ((definition or {}).get("unit") if definition else "") or "")
+        suffix = "当前值%s%s，目标%s%s" % (actual_text, unit, target_text, unit)
+        if business_gap is not None and business_gap > 0:
+            operator = condition.get("operator")
+            direction = "高于要求" if operator in ("lte", "lt") else "低于要求" if operator in ("gte", "gt") else "与要求相差"
+            suffix += "，%s%.3g%s" % (direction, business_gap, unit)
         return label, suffix + "。"
     return label, "该项尚未满足，其它条件仍按实际结果比较。"
 
@@ -122,7 +127,7 @@ def _non_strict_options(item, index, items, definitions=None):
     assessment = item.get("requirement_assessment") or {}
     unmet = [condition for condition in assessment.get("conditions") or [] if condition.get("status") == "unmatched"]
     if unmet:
-        closest = min(unmet, key=lambda condition: _number(condition.get("gap")) if _number(condition.get("gap")) is not None else 1e9)
+        closest = min(unmet, key=lambda condition: _number(condition.get("normalized_gap")) if _number(condition.get("normalized_gap")) is not None else (_number(condition.get("gap")) if _number(condition.get("gap")) is not None else 1e9))
         label, summary = _condition_text(closest, definitions)
         add(100, "closest_%s" % (closest.get("key") or index), "最接近%s" % label, summary)
         matched_count = int(assessment.get("matched_count") or 0)

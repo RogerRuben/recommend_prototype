@@ -56,6 +56,42 @@ def _rule_gap(params, rule, definition, matched):
     return 1.0
 
 
+def _business_gap(params, rule, definition, matched):
+    """Return the unmet distance in the parameter's original business unit.
+
+    This value is presentation evidence.  It must never be divided by a
+    DataMaster/Schema span.  Enum, boolean, text and special states have no
+    meaningful numeric distance and therefore return ``None``.
+    """
+    if matched:
+        return 0.0
+    definition = definition or {}
+    operator = rule.get("operator")
+    actual = params.get(rule.get("parameter_id"))
+    value_type = str(definition.get("value_type") or "").lower()
+    search_type = str(definition.get("search_type") or "").lower()
+    if (operator in ("boolean_is", "special_is", "text_equals", "text_contains")
+            or value_type in ("boolean", "bool", "enum", "text", "string")
+            or search_type in ("boolean", "unordered_enum")
+            or is_special_value(definition, actual)):
+        return None
+    a = _number(actual)
+    b1 = _number(rule.get("value1"))
+    b2 = _number(rule.get("value2"))
+    if a is None or b1 is None:
+        return None
+    if operator in ("lte", "lt"):
+        return max(0.0, a - b1)
+    if operator in ("gte", "gt"):
+        return max(0.0, b1 - a)
+    if operator == "eq":
+        return abs(a - b1)
+    if str(operator).startswith("range_") and b2 is not None:
+        lo, hi = min(b1, b2), max(b1, b2)
+        return max(0.0, lo - a) if a < lo else max(0.0, a - hi)
+    return None
+
+
 def assess_requirements(item, request, definitions=None, tag_map=None, constraint_rules=None):
     """Assess one candidate against the user's requirements.
 
@@ -110,7 +146,8 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
             penalty += 1.5 + gap / max(abs(target), 1.0)
         conditions.append({
             "kind": "price", "key": "max_price", "label": "价格 ≤ %.3f万元" % target,
-            "operator": "lte", "target": target, "actual": actual, "matched": status == "matched", "status": status, "gap": gap,
+            "operator": "lte", "target": target, "actual": actual, "matched": status == "matched", "status": status,
+            "gap": gap, "business_gap": gap, "normalized_gap": (round(gap / max(abs(target), 1.0), 6) if gap is not None else None), "unit": "万元",
         })
 
     capability = _number(item.get("capability_score"))
@@ -130,7 +167,8 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
             penalty += 1.5 + gap / max(abs(target), 1.0)
         conditions.append({
             "kind": "capability", "key": "min_capability", "label": "效能 ≥ %.3f" % target,
-            "operator": "gte", "target": target, "actual": capability, "matched": status == "matched", "status": status, "gap": gap,
+            "operator": "gte", "target": target, "actual": capability, "matched": status == "matched", "status": status,
+            "gap": gap, "business_gap": gap, "normalized_gap": (round(gap / max(abs(target), 1.0), 6) if gap is not None else None), "unit": "分",
         })
 
     # Technical indicator filters: each explicit filter is one counted condition;
@@ -140,6 +178,7 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
         params = item.get("params") or {}
         results = [filter_match(params, rule, definitions.get(rule.get("parameter_id"))) for rule in rules]
         gaps = [_rule_gap(params, rule, definitions.get(rule.get("parameter_id")), ok) for rule, ok in zip(rules, results)]
+        business_gaps = [_business_gap(params, rule, definitions.get(rule.get("parameter_id")), ok) for rule, ok in zip(rules, results)]
         # An inactive subordinate (-1 = 无该属性) is "not applicable", not a
         # continuous numeric distance: flatten its gap to a fixed 1.0.
         inactive_flags = {}
@@ -152,6 +191,7 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
                     inactive_flags[key] = meta
         if inactive_flags:
             gaps = [1.0 if rule.get("parameter_id") in inactive_flags else gap for rule, gap in zip(rules, gaps)]
+            business_gaps = [None if rule.get("parameter_id") in inactive_flags else gap for rule, gap in zip(rules, business_gaps)]
         mode = str(request.get("indicator_filter_mode") or "all")
         group_matched = any(results) if mode == "any" else all(results)
         if group_matched:
@@ -164,7 +204,7 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
             penalty += group_gap
         indicator_matched = 0
         indicator_unmatched = 0
-        for rule, ok, gap in zip(rules, results, gaps):
+        for rule, ok, gap, business_gap in zip(rules, results, gaps, business_gaps):
             key = rule.get("parameter_id")
             definition = definitions.get(key, {})
             label = definition.get("label", key)
@@ -182,7 +222,11 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
                 "label": label, "operator": operator,
                 "target": value1, "target2": value2, "actual": params.get(key),
                 "matched": bool(ok), "status": "matched" if ok else "unmatched",
-                "gap": round(gap, 6), "group": mode, "group_matched": group_matched,
+                # ``gap`` remains an alias for the historic normalised ranking
+                # distance.  User-facing explanations must use business_gap.
+                "gap": round(gap, 6), "normalized_gap": round(gap, 6),
+                "business_gap": (round(business_gap, 6) if business_gap is not None else None),
+                "unit": definition.get("unit") or "", "group": mode, "group_matched": group_matched,
             }
             if is_special_value(definition, params.get(key)) and operator != "special_is":
                 condition["actual_state"] = "special"
@@ -198,7 +242,7 @@ def assess_requirements(item, request, definitions=None, tag_map=None, constrain
         indicator_logic = {
             "mode": mode,
             "satisfied": group_matched,
-            "gap": round(group_gap, 6),
+            "gap": round(group_gap, 6), "normalized_gap": round(group_gap, 6),
             "matched_count": indicator_matched,
             "unmatched_count": indicator_unmatched,
             "total_count": len(rules),
