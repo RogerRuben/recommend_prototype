@@ -1969,7 +1969,7 @@ class Application(object):
             current = dict(item.get("saved_evaluation") or item.get("evaluation") or {})
             current["parameters"] = dict(item.get("params") or {})
             current["model_evaluation_available"] = False
-            current["evaluation_notice"] = "计算服务当前不可用；正在展示保存时的评价。"
+            current["evaluation_notice"] = "计算服务当前不可用；保存时评价已保留，但未作为当前评价结果展示。"
         else:
             try:
                 current = self._evaluate_with_rules(
@@ -1981,13 +1981,20 @@ class Application(object):
                 current = dict(item.get("saved_evaluation") or item.get("evaluation") or {})
                 current["parameters"] = dict(item.get("params") or {})
                 current["model_evaluation_available"] = False
-                current["evaluation_notice"] = "当前模型未能重新评价；正在展示保存时的评价：%s" % exc
+                current["evaluation_notice"] = "当前模型未能重新评价；保存时评价已保留，仅供历史追溯：%s" % exc
         item["current_model_evaluation"] = current
         item["model_evaluation_available"] = current.get("model_evaluation_available", True)
-        item["predicted_price_wan"] = current.get("predicted_price_wan")
-        item["capability_score"] = current.get("capability_score")
-        item["feasibility_probability"] = current.get("feasibility_probability")
-        item["cost_effectiveness"] = current.get("cost_effectiveness")
+        stale_unavailable = (
+            item["model_evaluation_available"] is False
+            and item.get("price_evaluation_contract", {}).get("stale") is True
+        )
+        # Top-level metrics always mean a currently usable evaluation.  The
+        # immutable historical values remain available under saved_evaluation
+        # and current_model_evaluation with model_evaluation_available=false.
+        item["predicted_price_wan"] = None if stale_unavailable else current.get("predicted_price_wan")
+        item["capability_score"] = None if stale_unavailable else current.get("capability_score")
+        item["feasibility_probability"] = None if stale_unavailable else current.get("feasibility_probability")
+        item["cost_effectiveness"] = None if stale_unavailable else current.get("cost_effectiveness")
         return item
 
     def wide_table_parser(self):

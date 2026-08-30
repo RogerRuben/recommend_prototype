@@ -54,6 +54,25 @@ class _GenerationApplication(object):
         return {"candidates": [{"candidate_id": "C-1"}], "count": 1}
 
 
+class _SavedStore(object):
+    def get_saved(self, scheme_id, recalculate=False):
+        return {
+            "id": scheme_id,
+            "params": {"x": 1},
+            "base_params": {"x": 0},
+            "evaluation": {
+                "predicted_price_wan": 120000,
+                "capability_score": 88,
+                "cost_effectiveness": 0.0007,
+            },
+        }
+
+
+class _ExpertSchemes(object):
+    def compatibility(self, item):
+        return {"schema_compatible": True}
+
+
 class V2152ClosureHotfixTest(unittest.TestCase):
     def test_legacy_saved_price_snapshot_is_stale_under_new_contract(self):
         app = Application.__new__(Application)
@@ -117,6 +136,30 @@ class V2152ClosureHotfixTest(unittest.TestCase):
         self.assertIn("保存时价格采用旧输出尺度，当前不作为万元价格展示", app_js)
         self.assertIn("保存时评价未作为当前结果展示", app_js)
         self.assertIn('"root_base_agreement_id","expert_revision_no","parent_saved_scheme_id"', app_js)
+
+    def test_cancelled_is_terminal_in_every_client_generation_entry(self):
+        app_js = (Path(__file__).resolve().parents[1] / "app/static/app.js").read_text(encoding="utf-8")
+        self.assertIn('status==="completed"||status==="failed"||status==="cancelled"', app_js)
+        self.assertGreaterEqual(app_js.count('status==="cancelled"'), 6)
+        self.assertIn("function handleCancelledGeneration(task)", app_js)
+        self.assertIn("state.userWaitingForGeneration=false", app_js)
+        self.assertIn("state.generationRetry=false", app_js)
+        self.assertIn("state.waitTimer=null", app_js)
+        self.assertIn("本次生成已作废", app_js)
+
+    def test_stale_saved_detail_has_no_top_level_current_metrics(self):
+        app = Application.__new__(Application)
+        app.store = _SavedStore()
+        app.expert_schemes = _ExpertSchemes()
+        app.model_gateway = ModelServiceGateway(price_output_config={"unit": "yuan", "scale": 1})
+        app.model_data_sync_error = "offline"
+        item = Application.saved_detail(app, 7)
+        self.assertFalse(item["model_evaluation_available"])
+        self.assertIsNone(item["predicted_price_wan"])
+        self.assertIsNone(item["capability_score"])
+        self.assertIsNone(item["cost_effectiveness"])
+        self.assertEqual(item["current_model_evaluation"]["predicted_price_wan"], 120000)
+        self.assertIn("未作为当前评价结果展示", item["current_model_evaluation"]["evaluation_notice"])
 
 
 if __name__ == "__main__":
