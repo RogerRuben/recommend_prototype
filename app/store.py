@@ -267,8 +267,12 @@ class Store(object):
                     ("saved_schemes", "recommendation_eligible INTEGER NOT NULL DEFAULT 1"),
                     ("saved_schemes", "training_candidate INTEGER NOT NULL DEFAULT 1"),
                     ("saved_schemes", "enabled INTEGER NOT NULL DEFAULT 1"),
+                    ("saved_schemes", "expert_revision_no INTEGER"),
+                    ("saved_schemes", "root_base_agreement_id TEXT"),
+                    ("saved_schemes", "parent_saved_scheme_id INTEGER"),
                 ]:
                     self._add_column(conn, table, definition)
+                self._migrate_saved_scheme_lineage(conn)
                 # Bootstrap managed parameter groups from existing definitions.
                 group_rows = conn.execute(
                     "SELECT parameter_group, MIN(display_order) AS ord FROM parameter_definitions "
@@ -279,6 +283,7 @@ class Store(object):
                         "INSERT OR IGNORE INTO parameter_groups(group_name, display_order, description, enabled, default_collapsed) "
                         "VALUES(?,?,?,1,0)", (row["parameter_group"], int(row["ord"] or 9999), "")
                     )
+
                 conn.execute(
                     "INSERT OR IGNORE INTO parameter_groups(group_name, display_order, description, enabled, default_collapsed) "
                     "VALUES('其他',9999,'',1,0)"
@@ -898,24 +903,66 @@ class Store(object):
                     risk_confirmed=False, base_params=None, delta=None,
                     changed_parameter_ids=None, target_protocol=None,
                     schema_signature=None, recommendation_eligible=True,
-                    training_candidate=True):
+                    training_candidate=True, base_scheme_name=None):
         with self.lock:
             conn = self.connect()
             try:
+                # Keep old customer databases and lightweight test fixtures
+                # forward-compatible with the V21.5.2 lineage fields.
+                self._add_column(conn, "saved_schemes", "expert_revision_no INTEGER")
+                self._add_column(conn, "saved_schemes", "root_base_agreement_id TEXT")
+                self._add_column(conn, "saved_schemes", "parent_saved_scheme_id INTEGER")
+                raw_base = str(base_agreement_id or "").strip()
+                parent_saved_scheme_id = None
+                root_base_agreement_id = raw_base
+                if raw_base.upper().startswith("SAVED-"):
+                    try:
+                        parent_saved_scheme_id = int(raw_base.split("-", 1)[1])
+                    except (TypeError, ValueError):
+                        parent_saved_scheme_id = None
+                if parent_saved_scheme_id is not None:
+                    parent = conn.execute(
+                        "SELECT root_base_agreement_id,base_agreement_id,scheme_name FROM saved_schemes WHERE id=?",
+                        (parent_saved_scheme_id,),
+                    ).fetchone()
+                    if parent:
+                        root_base_agreement_id = str(parent["root_base_agreement_id"] or parent["base_agreement_id"] or raw_base)
+                        if not base_scheme_name:
+                            base_scheme_name = parent["scheme_name"]
+                product_code = self.current_product_code()
+                revision_row = conn.execute(
+                    "SELECT COALESCE(MAX(expert_revision_no),0) FROM saved_schemes "
+                    "WHERE product_code=? AND root_base_agreement_id=?",
+                    (product_code, root_base_agreement_id),
+                ).fetchone()
+                expert_revision_no = int(revision_row[0] or 0) + 1
+                final_name = str(scheme_name or "").strip()
+                if not final_name:
+                    base_label = str(base_scheme_name or root_base_agreement_id or "专家方案").strip()
+                    # Continuing an expert scheme should retain its original
+                    # root label rather than stacking '-专家修订' repeatedly.
+                    marker = "-专家修订-"
+                    if marker in base_label:
+                        base_label = base_label.split(marker, 1)[0]
+                    final_name = "%s-专家修订-%02d" % (base_label, expert_revision_no)
                 cursor = conn.execute("""INSERT INTO saved_schemes
                     (scheme_name,base_agreement_id,product_code,source_type,params_json,evaluation_json,risk_confirmed,created_at,
                      base_params_json,delta_json,changed_parameter_ids_json,target_protocol,schema_signature,
-                     recommendation_eligible,training_candidate,enabled)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""", (
-                    scheme_name, base_agreement_id, self.current_product_code(), source_type, json.dumps(params, ensure_ascii=False),
+                     recommendation_eligible,training_candidate,enabled,expert_revision_no,root_base_agreement_id,parent_saved_scheme_id)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)""", (
+                    final_name, base_agreement_id, product_code, source_type, json.dumps(params, ensure_ascii=False),
                     json.dumps(evaluation, ensure_ascii=False), 1 if risk_confirmed else 0, now_iso(),
                     json.dumps(base_params, ensure_ascii=False) if base_params is not None else None,
                     json.dumps(delta or {}, ensure_ascii=False),
                     json.dumps(changed_parameter_ids or [], ensure_ascii=False), target_protocol, schema_signature,
                     1 if recommendation_eligible else 0, 1 if training_candidate else 0,
+                    expert_revision_no, root_base_agreement_id, parent_saved_scheme_id,
                 ))
                 self._audit(conn, "create", "saved_scheme", str(cursor.lastrowid), {
-                    "scheme_name": scheme_name, "base_agreement_id": base_agreement_id,
+                    "scheme_name": final_name, "base_agreement_id": base_agreement_id,
+                    "root_base_agreement_id": root_base_agreement_id,
+                    "parent_saved_scheme_id": parent_saved_scheme_id,
+                    "expert_revision_no": expert_revision_no,
                     "changed_parameter_ids": list(changed_parameter_ids or []),
                     "changed_count": len(changed_parameter_ids or []),
                     "product_code": self.current_product_code(),
@@ -997,6 +1044,36 @@ class Store(object):
             finally:
                 conn.close()
 
+    @staticmethod
+    def _migrate_saved_scheme_lineage(conn):
+        """Backfill stable lineage for databases created before V21.5.2."""
+        rows = conn.execute(
+            "SELECT id,product_code,base_agreement_id,root_base_agreement_id,"
+            "parent_saved_scheme_id,expert_revision_no FROM saved_schemes ORDER BY id"
+        ).fetchall()
+        roots, counters = {}, {}
+        for row in rows:
+            raw_base = str(row["base_agreement_id"] or "")
+            parent_id = row["parent_saved_scheme_id"]
+            if parent_id is None and raw_base.upper().startswith("SAVED-"):
+                try:
+                    parent_id = int(raw_base.split("-", 1)[1])
+                except (TypeError, ValueError):
+                    parent_id = None
+            root = str(row["root_base_agreement_id"] or "")
+            if not root:
+                root = roots.get(parent_id) or raw_base
+            key = (str(row["product_code"] or ""), root)
+            revision = row["expert_revision_no"]
+            if revision is None:
+                revision = counters.get(key, 0) + 1
+            counters[key] = max(counters.get(key, 0), int(revision))
+            roots[int(row["id"])] = root
+            conn.execute(
+                "UPDATE saved_schemes SET root_base_agreement_id=?,parent_saved_scheme_id=?,expert_revision_no=? WHERE id=?",
+                (root, parent_id, int(revision), int(row["id"])),
+            )
+
     def set_saved_training_candidate(self, scheme_id, enabled):
         with self.lock:
             conn = self.connect()
@@ -1010,6 +1087,15 @@ class Store(object):
                 self._audit(conn, "training_candidate", "saved_scheme", str(scheme_id), {"enabled": bool(enabled)})
                 conn.commit()
                 return {"updated": True, "id": int(scheme_id), "training_candidate": bool(enabled)}
+            finally:
+                conn.close()
+
+    def audit_event(self, action, object_type, object_id, detail=None):
+        with self.lock:
+            conn = self.connect()
+            try:
+                self._audit(conn, action, object_type, object_id, detail or {})
+                conn.commit()
             finally:
                 conn.close()
 
