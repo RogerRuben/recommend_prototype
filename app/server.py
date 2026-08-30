@@ -28,7 +28,8 @@ from .data_master import DataMasterService
 from .product_releases import ProductReleaseService
 from .local_generator import HistorySeededGenerator
 from .generation_tasks import GenerationTaskManager
-from .configuration import _boolean, load_model_service_config, load_service_portal_config, load_workbench_defaults
+from .configuration import (_boolean, load_model_service_config, load_service_portal_config,
+                            load_workbench_defaults, save_price_output_config)
 from .range_diagnostics import build_range_diagnostics
 from .scenario_policy import ScenarioPolicyService
 from .recommendation_explanation import annotate_candidate_recommendations
@@ -155,6 +156,7 @@ class Application(object):
                 effectiveness_url=self.model_config["effectiveness_service_url"],
                 timeout=self.model_config["timeout_seconds"],
                 fallback=self.model_config["local_fallback"],
+                price_output_config=self.model_config.get("price_output"),
             )
             try:
                 schemas = self.model_gateway.schemas()
@@ -462,6 +464,7 @@ class Application(object):
             "local_fallback_enabled": bool(self.model_config.get("local_fallback")),
             "price_service_url": self.model_config.get("price_service_url"),
             "effectiveness_service_url": self.model_config.get("effectiveness_service_url"),
+            "price_output": dict(self.model_config.get("price_output") or {}),
             "product_ready": not bool(self.model_data_sync_error),
             "calculation_available": not bool(self.model_data_sync_error),
             "historical_recommendation_available": True,
@@ -499,6 +502,7 @@ class Application(object):
             "local_fallback_enabled": bool(self.model_config.get("local_fallback")),
             "price_service_url": self.model_config.get("price_service_url"),
             "effectiveness_service_url": self.model_config.get("effectiveness_service_url"),
+            "price_output": self.price_output_settings(),
             "product_ready": not bool(self.model_data_sync_error),
             "model_data_sync_error": self.model_data_sync_error,
             "model_data_sync_warnings": list(self.model_data_sync_warnings),
@@ -697,7 +701,36 @@ class Application(object):
                 encoded, price_fields=price_fields, effect_fields=effect_fields
             ),
             "services": inspected, "request_examples": examples,
+            "price_output": self.price_output_settings(),
         }
+
+    def price_output_settings(self):
+        config = dict(self.model_config.get("price_output") or {})
+        description = (self.model_gateway.price_normalizer.describe()
+                       if self.model_gateway is not None else dict(config))
+        description.update({
+            "configured": dict(self.model_config.get("price_output_configured") or config),
+            "source": self.model_config.get("price_output_source", "default"),
+            "environment_override": bool(self.model_config.get("price_output_environment_override")),
+        })
+        return description
+
+    def save_model_service_settings(self, request):
+        if self.demo_read_only:
+            raise ValueError("当前为只读演示，不能修改模型服务设置。")
+        requested = request.get("price_output") or {}
+        saved = save_price_output_config(self.root, requested)
+        self.model_config = load_model_service_config(self.root)
+        if self.model_gateway is not None:
+            self.model_gateway.set_price_output_config(self.model_config.get("price_output"))
+        self._invalidate_runtime_caches()
+        self.store.audit_event("update", "model_service_settings", "price_output", {
+            "saved": saved.get("price_output"),
+            "effective": self.model_config.get("price_output"),
+            "source": self.model_config.get("price_output_source"),
+        })
+        return {"saved": True, "settings": self.price_output_settings(),
+                "backup_path": saved.get("backup_path"), "caches_invalidated": True}
 
     def effectiveness_workbench_schema(self):
         if self.model_gateway is None:
@@ -1666,16 +1699,22 @@ class Application(object):
         delta = self.expert_schemes.build_delta(base_params, final_params)
         recommendation_eligible = not has_risk
         scheme_id = self.store.save_scheme(
-            request.get("scheme_name") or "专家修订方案", request.get("base_agreement_id"),
+            request.get("scheme_name"), request.get("base_agreement_id"),
             request.get("source_type") or "expert_modified", final_params, evaluation, risk_confirmed,
             base_params=base_params, delta=delta, changed_parameter_ids=sorted(delta),
             target_protocol=request.get("target_protocol"),
             schema_signature=self.expert_schemes.schema_signature(),
             recommendation_eligible=recommendation_eligible, training_candidate=True,
+            base_scheme_name=request.get("base_agreement_name"),
         )
+        saved_item = next((item for item in self.store.list_saved() if int(item.get("id")) == int(scheme_id)), {})
         return {"saved":True,"scheme_id":scheme_id,"evaluation":evaluation,
                 "changed_parameter_ids":sorted(delta),
-                "recommendation_eligible":recommendation_eligible}
+                "recommendation_eligible":recommendation_eligible,
+                "scheme_name":saved_item.get("scheme_name"),
+                "expert_revision_no":saved_item.get("expert_revision_no"),
+                "root_base_agreement_id":saved_item.get("root_base_agreement_id"),
+                "parent_saved_scheme_id":saved_item.get("parent_saved_scheme_id")}
 
     def saved_schemes(self):
         items = self.store.list_saved()
@@ -1731,9 +1770,10 @@ class Application(object):
             return [self._expert_candidate(item, item.get("evaluation"), False) for item in eligible]
         result, pending, pending_keys = [], [], []
         protocol_key = str(target_protocol or "")
+        cache_identity = self._expert_evaluation_identity()
         for item in eligible:
             key = (int(item["id"]), item.get("canonical_parameter_signature"),
-                   self.expert_schemes.schema_signature(), protocol_key)
+                   self.expert_schemes.schema_signature(), protocol_key, cache_identity)
             with self.evaluation_lock:
                 cached = self.expert_evaluation_cache.get(key)
             if cached is not None:
@@ -1766,6 +1806,36 @@ class Application(object):
                     except Exception:
                         continue
         return result
+
+    def _expert_evaluation_identity(self):
+        runtime = getattr(self, "runtime", None)
+        manifest = runtime.manifest() if runtime is not None and hasattr(runtime, "manifest") else {}
+        price = manifest.get("price") or {}
+        effectiveness = manifest.get("effectiveness") or {}
+        price_version = price.get("model_version")
+        effect_version = effectiveness.get("model_version")
+        if getattr(self, "model_gateway", None) is not None:
+            try:
+                live_schemas = self.model_gateway.schemas()
+                price_version = (live_schemas.get("price") or {}).get("model_version") or price_version
+                effect_version = (live_schemas.get("effectiveness") or {}).get("model_version") or effect_version
+            except Exception:
+                # A service outage is handled by the existing degraded expert
+                # path; identity probing must not hide persisted snapshots.
+                pass
+        identity = {
+            "price_model_version": price_version,
+            "effectiveness_model_version": effect_version,
+            "price_output_contract": (
+                self.model_gateway.price_normalizer.signature()
+                if getattr(self, "model_gateway", None) is not None else "local-price-output"
+            ),
+        }
+        # Services that omit model_version cannot safely own an unbounded cache.
+        if not price_version or not effect_version:
+            identity["versionless_ttl_bucket"] = int(time.time() // 300)
+        raw = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def set_saved_recommendation_eligibility(self, scheme_id, enabled):
         saved = next((item for item in self.saved_schemes() if int(item.get("id")) == int(scheme_id)), None)
@@ -2000,7 +2070,7 @@ class Handler(BaseHTTPRequestHandler):
         "/api/admin/product-releases/module/stage", "/api/admin/product-releases/section/save",
         "/api/admin/product-releases/history/create", "/api/admin/product-releases/maintenance/import",
         "/api/admin/product-releases/validate", "/api/admin/product-releases/activate",
-        "/api/admin/portal-config",
+        "/api/admin/portal-config", "/api/admin/model-service-settings",
     }
 
     def log_message(self, fmt, *args): print("[%s] %s" % (self.log_date_time_string(), fmt % args))
@@ -2149,6 +2219,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path.startswith("/api/admin/") and self.app.disable_admin: self._admin_forbidden()
             elif path == "/api/admin/snapshot": self._json(self.app.admin_snapshot())
             elif path == "/api/admin/portal-config": self._json(self.app.portal_config)
+            elif path == "/api/admin/model-service-settings": self._json(self.app.price_output_settings())
             elif path == "/api/admin/backups": self._json({"items":self.app.store.list_backups()})
             elif path == "/api/admin/database/download": self._file(self.app.store.db_path, "protocol_demo.db")
             elif path == "/api/admin/export-json": self._json(self.app.store.export_json())
@@ -2247,6 +2318,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.app.on_business_data_changed()
                 self._json(result)
             elif path == "/api/admin/portal-config": self._json(self.app.save_portal_config(request))
+            elif path == "/api/admin/model-service-settings": self._json(self.app.save_model_service_settings(request))
             elif path == "/api/admin/conditional-constraint/upsert":
                 result = self.app.store.upsert_conditional_template(request.get("template") or {})
                 self.app.on_business_data_changed()

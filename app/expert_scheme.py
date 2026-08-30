@@ -45,6 +45,9 @@ class ExpertSchemeService(object):
                 "required": int(definition.get("required", 0) or 0),
                 "model_bound": int(definition.get("model_bound", 1) or 0),
                 "model_value_mapping_json": definition.get("model_value_mapping_json"),
+                "allowed_values_json": definition.get("allowed_values_json"),
+                "special_value_keys_json": definition.get("special_value_keys_json"),
+                "search_type": definition.get("search_type"),
             })
         encoded = json.dumps(rows, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()

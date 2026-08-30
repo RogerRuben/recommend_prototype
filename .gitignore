@@ -27,6 +27,7 @@ runtime_state/
 *.log
 *.tmp
 *.bak
+config/*.bak.json
 
 # Generated test/delivery outputs
 outputs/
