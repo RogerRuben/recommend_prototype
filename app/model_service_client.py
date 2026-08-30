@@ -15,6 +15,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
+from .price_output import PriceOutputNormalizer
+
 
 class ModelServiceUnavailable(RuntimeError):
     pass
@@ -65,16 +67,22 @@ def build_model_request(kind, business_parameters, request_id=None, target_proto
 
 
 class ModelServiceGateway(object):
-    def __init__(self, local_runtime=None, price_url=None, effectiveness_url=None, timeout=15.0, fallback=False):
+    def __init__(self, local_runtime=None, price_url=None, effectiveness_url=None, timeout=15.0,
+                 fallback=False, price_output_config=None):
         self.local_runtime = local_runtime
         self.price_url = (price_url or os.environ.get("IPDEMO_PRICE_SERVICE_URL") or "http://127.0.0.1:18101").rstrip("/")
         self.effectiveness_url = (effectiveness_url or os.environ.get("IPDEMO_EFFECT_SERVICE_URL") or "http://127.0.0.1:18102").rstrip("/")
         self.timeout = float(timeout)
         self.fallback = bool(fallback)
+        self.price_normalizer = PriceOutputNormalizer(price_output_config)
         if self.fallback and self.local_runtime is None:
             raise ValueError("启用本地回退时必须提供本地模型运行时")
         self.product_code = self.local_runtime.schema.get("product_code") if self.local_runtime is not None else None
         self.last_status = {"mode": "not_called", "price": None, "effectiveness": None}
+
+    def set_price_output_config(self, config):
+        self.price_normalizer = PriceOutputNormalizer(config)
+        return self.price_normalizer.describe()
 
     def health(self):
         def probe(name, url):
@@ -144,7 +152,8 @@ class ModelServiceGateway(object):
             product_code=product_code or self.product_code,
             scenario="operator_price_workbench", context_source="price_workbench",
         )
-        return _json_request(self.price_url + "/api/v1/predict", envelope, self.timeout)
+        response = _json_request(self.price_url + "/api/v1/predict", envelope, self.timeout)
+        return self.price_normalizer.normalize_response(response)
 
     def evaluate_effectiveness(self, params, target_protocol=None):
         """Evaluate one scheme without requiring the price service."""
@@ -337,9 +346,9 @@ class ModelServiceGateway(object):
             "model": response.get("model") or {},
         }
 
-    @staticmethod
-    def _merge(envelope, price, effect):
-        prediction = price.get("prediction") or {}
+    def _merge(self, envelope, price, effect):
+        normalized_price = self.price_normalizer.normalize_response(price)
+        prediction = normalized_price.get("prediction") or {}
         price_value = float(prediction.get("predicted_price_wan"))
         domain_warnings = list((price.get("domain_status") or {}).get("warnings") or [])
         filled_fields = (price.get("input_status") or {}).get("filled_fields", {})
@@ -357,6 +366,7 @@ class ModelServiceGateway(object):
             effect_parameters=effect.get("parameters") or {},
             price_filled_fields=filled_fields,
             price_source="predicted",
+            price_output_normalization=normalized_price.get("price_output_normalization"),
         )
 
     @staticmethod
@@ -388,7 +398,8 @@ class ModelServiceGateway(object):
     @staticmethod
     def _merge_core(envelope, effect, price_value, price_interval_wan, domain_warnings,
                      price_imputed_features, price_model, effect_parameters=None,
-                     price_filled_fields=None, price_source="predicted"):
+                     price_filled_fields=None, price_source="predicted",
+                     price_output_normalization=None):
         evaluation = effect.get("evaluation") or {}
         parameters = dict(envelope.get("parameters") or {})
         parameters.update(effect_parameters or effect.get("parameters") or {})
@@ -459,6 +470,7 @@ class ModelServiceGateway(object):
             "predicted_price_wan": price_value,
             "price_interval_wan": price_interval_wan or ([price_value, price_value] if price_value is not None else None),
             "price_source": price_source,
+            "price_output_normalization": price_output_normalization,
             "capability_score": score,
             "conservative_capability_score": conservative_score,
             "protocol_score_interval": interval,

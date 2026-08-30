@@ -7,8 +7,13 @@ from __future__ import print_function
 
 import json
 import os
+import shutil
+import tempfile
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
+
+from .price_output import validate_price_output_config
 
 
 DEFAULT_MODEL_SERVICE_CONFIG = {
@@ -18,6 +23,7 @@ DEFAULT_MODEL_SERVICE_CONFIG = {
     "timeout_seconds": 15.0,
     "local_fallback": False,
     "batch_size": 100,
+    "price_output": {"unit": "wan_yuan", "scale": 1.0},
 }
 
 DEFAULT_SERVICE_PORTAL_CONFIG = {
@@ -44,6 +50,7 @@ def load_model_service_config(root):
     root = Path(root)
     result = dict(DEFAULT_MODEL_SERVICE_CONFIG)
     path = root / "config" / "model_services.json"
+    raw = {}
     if path.is_file():
         raw = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
@@ -70,9 +77,54 @@ def load_model_service_config(root):
     result["timeout_seconds"] = float(result["timeout_seconds"])
     result["local_fallback"] = _boolean(result.get("local_fallback"), False)
     result["batch_size"] = max(1, int(result["batch_size"]))
+    price_output = dict(result.get("price_output") or {})
+    configured_price_output = validate_price_output_config(price_output)
+    price_output_source = "config_file" if path.is_file() and isinstance(raw.get("price_output"), dict) else "default"
+    if "IPDEMO_PRICE_OUTPUT_UNIT" in os.environ:
+        price_output["unit"] = os.environ["IPDEMO_PRICE_OUTPUT_UNIT"]
+        price_output_source = "environment"
+    if "IPDEMO_PRICE_OUTPUT_SCALE" in os.environ:
+        price_output["scale"] = os.environ["IPDEMO_PRICE_OUTPUT_SCALE"]
+        price_output_source = "environment"
+    result["price_output"] = validate_price_output_config(price_output)
+    result["price_output_configured"] = configured_price_output
+    result["price_output_source"] = price_output_source
+    result["price_output_environment_override"] = price_output_source == "environment"
     result["config_path"] = str(path)
     result["config_loaded"] = path.is_file()
     return result
+
+
+def save_price_output_config(root, price_output):
+    """Atomically merge only ``price_output`` into model_services.json."""
+    root = Path(root)
+    path = root / "config" / "model_services.json"
+    validated = validate_price_output_config(price_output)
+    raw = {}
+    if path.is_file():
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("config/model_services.json必须是JSON对象")
+    raw["price_output"] = validated
+    path.parent.mkdir(parents=True, exist_ok=True)
+    backup_path = None
+    if path.is_file():
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        backup_path = path.with_name("model_services.%s.bak.json" % stamp)
+        shutil.copy2(str(path), str(backup_path))
+    fd, temp_name = tempfile.mkstemp(prefix="model_services.", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(raw, handle, ensure_ascii=False, indent=2, allow_nan=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, str(path))
+    finally:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
+    return {"price_output": validated, "config_path": str(path),
+            "backup_path": str(backup_path) if backup_path else None}
 
 
 def _load_json_object(path, default, label):
