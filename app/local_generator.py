@@ -2278,17 +2278,59 @@ class HistorySeededGenerator(object):
             history = self.store.historical_agreements()
         expert_service = ExpertSchemeService(
             definitions, getattr(self.store, "current_product_code", lambda: "")(), self.runtime,
+            encode_parameters=getattr(self.store, "runtime_parameters", None),
         )
-        if hasattr(self.store, "list_saved") and hasattr(self.store, "get_saved"):
+        if hasattr(self.store, "list_saved"):
+            raw_experts, signatures = [], set()
             for saved in self.store.list_saved():
                 if not expert_service.compatibility(saved).get("recommendation_eligible_effective"):
                     continue
-                try:
-                    expert = self.store.get_saved(saved["id"], recalculate=True)
-                except Exception:
+                signature = expert_service.canonical_parameter_signature(saved.get("params") or {})
+                if signature in signatures:
                     continue
-                if expert:
-                    expert["seed_source"] = "expert_saved"
+                if any(self._normalized_distance(
+                    saved.get("params") or {}, prior.get("params") or {}, definitions,
+                ) < 0.018 for prior in raw_experts):
+                    continue
+                signatures.add(signature)
+                saved = dict(saved)
+                saved.update({
+                    "agreement_id": "SAVED-%s" % saved["id"],
+                    "agreement_name": saved.get("scheme_name"),
+                    "agreement_source": "expert_saved", "seed_source": "expert_saved",
+                    "tags": self.store.derive_tags(saved.get("params") or {}, saved.get("evaluation") or {}),
+                    "predicted_price_wan": (saved.get("evaluation") or {}).get("predicted_price_wan"),
+                    "capability_score": (saved.get("evaluation") or {}).get("capability_score"),
+                })
+                raw_experts.append(saved)
+            # Cheap requirement/distance screening happens on persisted business
+            # snapshots before any HTTP model evaluation.
+            potential_experts = self.select_seeds(
+                request, min(32, len(raw_experts)), historical=raw_experts,
+            ) if raw_experts else []
+            pending = [{
+                "candidate_id": item["agreement_id"], "parameters": item.get("params") or {},
+                "base_parameters": item.get("base_params") or item.get("params") or {},
+                "target_protocol": target_protocol,
+            } for item in potential_experts]
+            if pending:
+                try:
+                    evaluations = (
+                        self.evaluate_batch_callback(pending) if self.evaluate_batch_callback else
+                        [self.evaluate_callback(
+                            item["parameters"], item["base_parameters"], target_protocol=item.get("target_protocol"),
+                        ) for item in pending]
+                    )
+                except Exception:
+                    evaluations = []
+                for saved, evaluation in zip(potential_experts, evaluations):
+                    expert = dict(saved)
+                    expert["params"] = dict(evaluation.get("parameters") or saved.get("params") or {})
+                    expert["evaluation"] = evaluation
+                    for key in ("predicted_price_wan", "capability_score", "conservative_capability_score",
+                                "feasibility_probability", "cost_effectiveness"):
+                        expert[key] = evaluation.get(key)
+                    expert["tags"] = self.store.derive_tags(expert["params"], evaluation)
                     history.append(expert)
         seeds = self.select_seeds(request, max(8, min(16, len(history))), historical=history)
         if not seeds:

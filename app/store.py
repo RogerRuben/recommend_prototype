@@ -940,7 +940,7 @@ class Store(object):
             return result
         finally: conn.close()
 
-    def get_saved(self, scheme_id, recalculate=True):
+    def get_saved(self, scheme_id, recalculate=False, target_protocol=None):
         conn = self.connect()
         try:
             row = conn.execute("SELECT * FROM saved_schemes WHERE id=?", (int(scheme_id),)).fetchone()
@@ -952,9 +952,19 @@ class Store(object):
             item["base_params"] = _json_object(item.pop("base_params_json", None))
             item["delta"] = _json_object(item.pop("delta_json", None))
             item["changed_parameter_ids"] = _json_list(item.pop("changed_parameter_ids_json", None))
-            item["evaluation"] = self.runtime.evaluate(self.runtime_parameters(item["params"])) if recalculate else item["saved_evaluation"]
             if recalculate:
-                item["params"] = dict(item["evaluation"].get("parameters") or item["params"])
+                model_input = self.runtime_parameters(item["params"])
+                item["evaluation"] = (
+                    self.runtime.evaluate(model_input, target_protocol=target_protocol)
+                    if target_protocol not in (None, "") else self.runtime.evaluate(model_input)
+                )
+            else:
+                item["evaluation"] = item["saved_evaluation"]
+            if recalculate:
+                model_parameters = dict(item["evaluation"].get("parameters") or {})
+                item["evaluation"]["model_parameters"] = model_parameters
+                item["evaluation"]["parameters"] = self.business_parameters(model_parameters, item["params"])
+                item["params"] = dict(item["evaluation"]["parameters"])
             item["agreement_id"] = "SAVED-%s" % item["id"]
             item["agreement_name"] = item["scheme_name"]
             item["agreement_source"] = "expert_saved"

@@ -209,11 +209,13 @@ class Application(object):
             self._refresh_model_data_readiness(raise_local=True)
         self.expert_schemes = ExpertSchemeService(
             self.store.parameter_map(), self.store.current_product_code(), self.runtime,
+            encode_parameters=self.store.runtime_parameters,
         )
         self.sessions = GeneratedSessions()
         self.model_lock = threading.RLock()
         self.evaluation_lock = threading.RLock()
         self.evaluation_cache = {}
+        self.expert_evaluation_cache = {}
         self.generator = HistorySeededGenerator(
             self.store, self.runtime, self._evaluate_with_rules,
             self._evaluate_batch_with_rules if hasattr(self.runtime, "evaluate_batch") else None,
@@ -225,6 +227,7 @@ class Application(object):
         self.generation_tasks.invalidate_all()
         with self.evaluation_lock:
             self.evaluation_cache.clear()
+        self.expert_evaluation_cache.clear()
         self.generator = HistorySeededGenerator(
             self.store, self.runtime, self._evaluate_with_rules,
             self._evaluate_batch_with_rules if hasattr(self.runtime, "evaluate_batch") else None,
@@ -255,6 +258,7 @@ class Application(object):
         readiness = self._refresh_model_data_readiness()
         self.expert_schemes = ExpertSchemeService(
             self.store.parameter_map(), self.store.current_product_code(), self.runtime,
+            encode_parameters=self.store.runtime_parameters,
         )
         self._invalidate_runtime_caches()
         return readiness
@@ -1680,18 +1684,87 @@ class Application(object):
             item["changed_count"] = len(item.get("changed_parameter_ids") or [])
         return items
 
+    def _dedupe_expert_snapshots(self, items, near_threshold=0.018):
+        definitions = self.store.parameter_map()
+        kept, signatures = [], {}
+        for item in items:
+            signature = self.expert_schemes.canonical_parameter_signature(item.get("params") or {})
+            if signature in signatures:
+                signatures[signature]["expert_prior_count"] += 1
+                continue
+            near = next((existing for existing in kept if self.generator._normalized_distance(
+                item.get("params") or {}, existing.get("params") or {}, definitions,
+            ) < near_threshold), None)
+            if near is not None:
+                near["expert_prior_count"] += 1
+                continue
+            item = dict(item)
+            item["expert_prior_count"] = 1
+            item["canonical_parameter_signature"] = signature
+            kept.append(item)
+            signatures[signature] = item
+        return kept
+
+    def _expert_candidate(self, saved, evaluation, model_evaluation_available=True):
+        item = dict(saved)
+        business_params = dict((evaluation or {}).get("parameters") or saved.get("params") or {})
+        item["params"] = business_params
+        item["evaluation"] = dict(evaluation or saved.get("evaluation") or {})
+        item["saved_evaluation"] = dict(saved.get("evaluation") or saved.get("saved_evaluation") or {})
+        item["agreement_id"] = "SAVED-%s" % item["id"]
+        item["agreement_name"] = item["scheme_name"]
+        item["agreement_source"] = "expert_saved"
+        item["is_generated"] = False
+        item["positioning"] = "专家保存方案"
+        item["model_evaluation_available"] = bool(model_evaluation_available)
+        for key in ("predicted_price_wan", "capability_score", "conservative_capability_score",
+                    "feasibility_probability", "cost_effectiveness"):
+            item[key] = item["evaluation"].get(key)
+        item["tags"] = self.store.derive_tags(business_params, item["evaluation"])
+        return item
+
     def expert_recommendation_schemes(self, target_protocol=None, recalculate=True):
-        result = []
-        for saved in self.saved_schemes():
-            if not saved["compatibility"].get("recommendation_eligible_effective"):
-                continue
+        eligible = [item for item in self.saved_schemes()
+                    if item["compatibility"].get("recommendation_eligible_effective")]
+        eligible = self._dedupe_expert_snapshots(eligible)
+        if not recalculate:
+            return [self._expert_candidate(item, item.get("evaluation"), False) for item in eligible]
+        result, pending, pending_keys = [], [], []
+        protocol_key = str(target_protocol or "")
+        for item in eligible:
+            key = (int(item["id"]), item.get("canonical_parameter_signature"),
+                   self.expert_schemes.schema_signature(), protocol_key)
+            with self.evaluation_lock:
+                cached = self.expert_evaluation_cache.get(key)
+            if cached is not None:
+                result.append(self._expert_candidate(item, cached, True))
+            else:
+                pending.append({
+                    "candidate_id": "SAVED-%s" % item["id"], "parameters": item.get("params") or {},
+                    "base_parameters": item.get("base_params") or item.get("params") or {},
+                    "target_protocol": target_protocol, "saved": item,
+                })
+                pending_keys.append(key)
+        if pending:
             try:
-                item = self.store.get_saved(saved["id"], recalculate=recalculate)
+                evaluations = self._evaluate_batch_with_rules(pending)
+                for source, key, evaluation in zip(pending, pending_keys, evaluations):
+                    with self.evaluation_lock:
+                        self.expert_evaluation_cache[key] = evaluation
+                    result.append(self._expert_candidate(source["saved"], evaluation, True))
             except Exception:
-                continue
-            if item:
-                item["compatibility"] = saved["compatibility"]
-                result.append(item)
+                # Batch failure is isolated so one stale expert snapshot cannot
+                # hide the rest.  This slow path runs only for the failed batch.
+                for source, key in zip(pending, pending_keys):
+                    try:
+                        evaluation = self._evaluate_with_rules(
+                            source["parameters"], source["base_parameters"], target_protocol=target_protocol,
+                        )
+                        with self.evaluation_lock:
+                            self.expert_evaluation_cache[key] = evaluation
+                        result.append(self._expert_candidate(source["saved"], evaluation, True))
+                    except Exception:
+                        continue
         return result
 
     def set_saved_recommendation_eligibility(self, scheme_id, enabled):
@@ -1758,17 +1831,34 @@ class Application(object):
         result["improvement_plan"] = plan
         return result
 
-    def saved_detail(self, scheme_id):
-        self._require_product_ready()
-        item = self.store.get_saved(scheme_id, recalculate=True)
+    def saved_detail(self, scheme_id, target_protocol=None):
+        item = self.store.get_saved(scheme_id, recalculate=False)
         if item is None:
             return None
-        current = self._evaluate_with_rules(item["params"], item["params"])
+        item["compatibility"] = self.expert_schemes.compatibility(item)
+        if self.model_data_sync_error:
+            current = dict(item.get("saved_evaluation") or item.get("evaluation") or {})
+            current["parameters"] = dict(item.get("params") or {})
+            current["model_evaluation_available"] = False
+            current["evaluation_notice"] = "计算服务当前不可用；正在展示保存时的评价。"
+        else:
+            try:
+                current = self._evaluate_with_rules(
+                    item["params"], item.get("base_params") or item["params"],
+                    target_protocol=target_protocol,
+                )
+                current["model_evaluation_available"] = True
+            except Exception as exc:
+                current = dict(item.get("saved_evaluation") or item.get("evaluation") or {})
+                current["parameters"] = dict(item.get("params") or {})
+                current["model_evaluation_available"] = False
+                current["evaluation_notice"] = "当前模型未能重新评价；正在展示保存时的评价：%s" % exc
         item["current_model_evaluation"] = current
-        item["predicted_price_wan"] = current["predicted_price_wan"]
-        item["capability_score"] = current["capability_score"]
-        item["feasibility_probability"] = current["feasibility_probability"]
-        item["cost_effectiveness"] = current["cost_effectiveness"]
+        item["model_evaluation_available"] = current.get("model_evaluation_available", True)
+        item["predicted_price_wan"] = current.get("predicted_price_wan")
+        item["capability_score"] = current.get("capability_score")
+        item["feasibility_probability"] = current.get("feasibility_probability")
+        item["cost_effectiveness"] = current.get("cost_effectiveness")
         return item
 
     def wide_table_parser(self):
@@ -2055,7 +2145,7 @@ class Handler(BaseHTTPRequestHandler):
                 agreement_id = unquote(path.split("/api/agreements/",1)[1]); item = self.app.agreement_detail(agreement_id,(query.get("session_id") or ["default"])[0],(query.get("protocol_id") or [None])[0]); self._json(item if item else {"error":"not_found"},200 if item else 404)
             elif path == "/api/saved": self._json({"items":self.app.saved_schemes()})
             elif path.startswith("/api/saved/"):
-                scheme_id = unquote(path.split("/api/saved/",1)[1]); item = self.app.saved_detail(scheme_id); self._json(item if item else {"error":"not_found"},200 if item else 404)
+                scheme_id = unquote(path.split("/api/saved/",1)[1]); item = self.app.saved_detail(scheme_id,(query.get("protocol_id") or [None])[0]); self._json(item if item else {"error":"not_found"},200 if item else 404)
             elif path.startswith("/api/admin/") and self.app.disable_admin: self._admin_forbidden()
             elif path == "/api/admin/snapshot": self._json(self.app.admin_snapshot())
             elif path == "/api/admin/portal-config": self._json(self.app.portal_config)
