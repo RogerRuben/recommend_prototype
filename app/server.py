@@ -34,6 +34,7 @@ from .range_diagnostics import build_range_diagnostics
 from .scenario_policy import ScenarioPolicyService
 from .recommendation_explanation import annotate_candidate_recommendations
 from .expert_scheme import ExpertSchemeService
+from .price_output import PriceOutputNormalizer
 
 
 class GeneratedSessions(object):
@@ -225,8 +226,10 @@ class Application(object):
         self.generation_tasks = GenerationTaskManager(self)
 
     def _invalidate_runtime_caches(self):
-        self.sessions.clear_all()
+        # Cancel running workers before removing their session batches.  The
+        # generation manager and final add_batch use one epoch-protected commit.
         self.generation_tasks.invalidate_all()
+        self.sessions.clear_all()
         with self.evaluation_lock:
             self.evaluation_cache.clear()
         self.expert_evaluation_cache.clear()
@@ -1698,6 +1701,10 @@ class Application(object):
         base_params = self.store.canonical_business_parameters(request.get("base_parameters") or {})
         delta = self.expert_schemes.build_delta(base_params, final_params)
         recommendation_eligible = not has_risk
+        # Persist the output contract with the immutable evaluation snapshot.
+        # Adding this after save_scheme would only decorate the response object
+        # and leave evaluation_json without provenance.
+        evaluation["price_output_contract"] = self._current_price_output_contract()
         scheme_id = self.store.save_scheme(
             request.get("scheme_name"), request.get("base_agreement_id"),
             request.get("source_type") or "expert_modified", final_params, evaluation, risk_confirmed,
@@ -1721,7 +1728,58 @@ class Application(object):
         for item in items:
             item["compatibility"] = self.expert_schemes.compatibility(item)
             item["changed_count"] = len(item.get("changed_parameter_ids") or [])
+            self._annotate_saved_price_contract(item)
         return items
+
+    def _current_price_output_contract(self):
+        normalizer = (self.model_gateway.price_normalizer
+                      if getattr(self, "model_gateway", None) is not None
+                      else PriceOutputNormalizer())
+        return {
+            "signature": normalizer.signature(),
+            "unit": normalizer.config["unit"],
+            "scale": normalizer.config["scale"],
+            "normalized_unit": "wan_yuan",
+            "contract_version": normalizer.VERSION,
+        }
+
+    def _annotate_saved_price_contract(self, item):
+        evaluation = dict(item.get("evaluation") or item.get("saved_evaluation") or {})
+        saved_contract = dict(evaluation.get("price_output_contract") or {})
+        normalization = dict(evaluation.get("price_output_normalization") or {})
+        if not saved_contract and normalization:
+            saved_contract = {
+                "signature": normalization.get("signature"),
+                "unit": normalization.get("raw_unit"),
+                "scale": normalization.get("scale"),
+                "normalized_unit": normalization.get("normalized_unit") or "wan_yuan",
+                "contract_version": normalization.get("contract_version"),
+            }
+        # Records saved before V21.5.2 used the application's historical
+        # wan-yuan/scale-1 contract.  Preserve that provenance explicitly;
+        # never reinterpret the stored number using today's settings.
+        saved_contract.setdefault("unit", "wan_yuan")
+        saved_contract.setdefault("scale", 1.0)
+        saved_contract.setdefault("normalized_unit", "wan_yuan")
+        if not saved_contract.get("signature"):
+            try:
+                saved_contract["signature"] = PriceOutputNormalizer({
+                    "unit": saved_contract.get("unit") or "wan_yuan",
+                    "scale": saved_contract.get("scale", 1.0),
+                }).signature()
+            except ValueError:
+                saved_contract["signature"] = "invalid-saved-price-contract"
+        current = self._current_price_output_contract()
+        stale = saved_contract.get("signature") != current.get("signature")
+        item["price_evaluation_contract"] = {
+            "stale": stale,
+            "saved": saved_contract,
+            "current": current,
+            "display_source": "saved_snapshot_stale" if stale else "saved_snapshot_current_contract",
+            "message": ("保存时价格采用旧输出单位或尺度；该数值不再作为当前万元价格展示。"
+                        if stale else "保存时价格与当前输出契约一致。"),
+        }
+        return item
 
     def _dedupe_expert_snapshots(self, items, near_threshold=0.018):
         definitions = self.store.parameter_map()
@@ -1906,6 +1964,7 @@ class Application(object):
         if item is None:
             return None
         item["compatibility"] = self.expert_schemes.compatibility(item)
+        self._annotate_saved_price_contract(item)
         if self.model_data_sync_error:
             current = dict(item.get("saved_evaluation") or item.get("evaluation") or {})
             current["parameters"] = dict(item.get("params") or {})
@@ -2309,8 +2368,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.app.set_saved_training_candidate(scheme_id, _boolean(request.get("enabled"), False)))
             elif path == "/api/clear-live-generated":
                 session_id = request.get("session_id") or "default"
-                self.app.sessions.clear(session_id)
                 self.app.generation_tasks.invalidate_session(session_id)
+                self.app.sessions.clear(session_id)
                 self._json({"cleared":True})
             elif path.startswith("/api/admin/") and self.app.disable_admin: self._admin_forbidden()
             elif path == "/api/admin/upsert":

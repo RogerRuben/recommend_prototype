@@ -9,6 +9,10 @@ import traceback
 import uuid
 
 
+class GenerationTaskInvalidated(RuntimeError):
+    pass
+
+
 class GenerationTaskManager(object):
     def __init__(self, application, ttl_seconds=3600):
         self.app = application
@@ -16,6 +20,7 @@ class GenerationTaskManager(object):
         self.lock = threading.RLock()
         self.tasks = {}
         self.by_fingerprint = {}
+        self.epoch = 0
 
     def fingerprint(self, request):
         # sort_by / page / page_size / source_mode are presentation-only and must
@@ -102,6 +107,8 @@ class GenerationTaskManager(object):
                 "request": req,
                 "result": None,
                 "error": None,
+                "generation_epoch": self.epoch,
+                "invalidated": False,
             }
             self.tasks[task_id] = task
             self.by_fingerprint[fp] = task_id
@@ -112,8 +119,14 @@ class GenerationTaskManager(object):
 
     def _worker(self, task_id):
         with self.lock:
-            task = self.tasks[task_id]
+            task = self.tasks.get(task_id)
+            if not task or task.get("invalidated"):
+                return
             profile = task.get("search_profile") or {}
+            request = dict(task.get("request") or {})
+            session_id = task.get("session_id")
+            fingerprint = task.get("fingerprint")
+            task_epoch = task.get("generation_epoch")
             task.update(
                 status="running", progress=5 if profile.get("deep_exploration") else 8,
                 message=profile.get("warning") or "正在选择相似历史方案", updated_at=time.time(),
@@ -122,27 +135,52 @@ class GenerationTaskManager(object):
             def update(progress, message):
                 with self.lock:
                     task = self.tasks.get(task_id)
-                    if task:
-                        task.update(progress=int(progress), message=str(message), updated_at=time.time())
-            result = self.app._generate_sync(self.tasks[task_id]["request"], progress_callback=update)
-            session_id = self.tasks[task_id]["session_id"]
+                    if not task or task.get("invalidated") or task_epoch != self.epoch:
+                        raise GenerationTaskInvalidated("生成所依赖的运行契约已变化")
+                    task.update(progress=int(progress), message=str(message), updated_at=time.time())
+            result = self.app._generate_sync(request, progress_callback=update)
+            with self.lock:
+                task = self.tasks.get(task_id)
+                if not task or task.get("invalidated") or task_epoch != self.epoch:
+                    raise GenerationTaskInvalidated("生成所依赖的运行契约已变化")
             empty_result = not (result.get("candidates") or [])
             result["empty_result"] = empty_result
             if empty_result:
                 result["message"] = result.get("message") or "未找到任何满足条件的方案；此结果不会被缓存，再次生成会重新搜索。"
-            batch_id, prepared = self.app.sessions.add_batch(session_id, result.get("candidates", []), fingerprint=self.tasks[task_id].get("fingerprint"))
-            result["batch_id"] = batch_id
-            result["candidates"] = prepared
             with self.lock:
-                self.tasks[task_id].update(status="completed", progress=100, message=result.get("message") or "生成完成", result=result, batch_id=batch_id, updated_at=time.time())
+                task = self.tasks.get(task_id)
+                if not task or task.get("invalidated") or task_epoch != self.epoch:
+                    raise GenerationTaskInvalidated("生成所依赖的运行契约已变化")
+                # Keep the epoch check, session write and public task commit in
+                # one critical section. Runtime invalidation cannot interleave
+                # and leave a mixed-contract batch behind.
+                batch_id, prepared = self.app.sessions.add_batch(
+                    session_id, result.get("candidates", []), fingerprint=fingerprint
+                )
+                result["batch_id"] = batch_id
+                result["candidates"] = prepared
+                task.update(status="completed", progress=100, message=result.get("message") or "生成完成", result=result, batch_id=batch_id, updated_at=time.time())
                 if empty_result:
-                    fp = self.tasks[task_id].get("fingerprint")
+                    fp = task.get("fingerprint")
                     if self.by_fingerprint.get(fp) == task_id:
                         self.by_fingerprint.pop(fp, None)
-        except Exception as exc:
-            traceback.print_exc()
+        except GenerationTaskInvalidated:
             with self.lock:
-                self.tasks[task_id].update(status="failed", progress=100, message="生成失败", error={"type":type(exc).__name__,"message":str(exc)}, updated_at=time.time())
+                task = self.tasks.get(task_id)
+                if task:
+                    task.update(status="cancelled", progress=100,
+                                message="运行配置已变化，本次生成已作废，请重新生成。",
+                                invalidated=True, updated_at=time.time())
+        except Exception as exc:
+            with self.lock:
+                task = self.tasks.get(task_id)
+                if task and (task.get("invalidated") or task_epoch != self.epoch):
+                    task.update(status="cancelled", progress=100,
+                                message="运行配置已变化，本次生成已作废，请重新生成。",
+                                invalidated=True, updated_at=time.time())
+                elif task:
+                    traceback.print_exc()
+                    task.update(status="failed", progress=100, message="生成失败", error={"type":type(exc).__name__,"message":str(exc)}, updated_at=time.time())
 
     def get(self, task_id):
         with self.lock:
@@ -152,7 +190,7 @@ class GenerationTaskManager(object):
     def public(self, task):
         if not task:
             return None
-        payload = dict((key, task.get(key)) for key in ("task_id","status","progress","message","session_id","created_at","updated_at","error","fingerprint","batch_id","search_profile"))
+        payload = dict((key, task.get(key)) for key in ("task_id","status","progress","message","session_id","created_at","updated_at","error","fingerprint","batch_id","search_profile","invalidated"))
         if task.get("status") == "completed":
             result = task.get("result") or {}
             payload["result"] = dict((key,result.get(key)) for key in (
@@ -169,7 +207,14 @@ class GenerationTaskManager(object):
 
     def invalidate_all(self):
         with self.lock:
-            self.tasks.clear()
+            self.epoch += 1
+            for task_id, task in list(self.tasks.items()):
+                if task.get("status") in ("queued", "running"):
+                    task.update(status="cancelled", progress=100,
+                                message="运行配置已变化，本次生成已作废，请重新生成。",
+                                invalidated=True, updated_at=time.time())
+                else:
+                    self.tasks.pop(task_id, None)
             self.by_fingerprint.clear()
 
     def invalidate_session(self, session_id):
@@ -178,14 +223,19 @@ class GenerationTaskManager(object):
             targets = [key for key, value in self.tasks.items() if str(value.get("session_id")) == session_id]
             for key in targets:
                 fp = self.tasks[key].get("fingerprint")
-                self.tasks.pop(key, None)
+                if self.tasks[key].get("status") in ("queued", "running"):
+                    self.tasks[key].update(status="cancelled", progress=100,
+                                           message="当前生成会话已作废，请重新生成。",
+                                           invalidated=True, updated_at=time.time())
+                else:
+                    self.tasks.pop(key, None)
                 if self.by_fingerprint.get(fp) == key:
                     self.by_fingerprint.pop(fp, None)
 
     def cleanup(self):
         cutoff = time.time() - self.ttl
         with self.lock:
-            stale = [key for key,value in self.tasks.items() if value.get("updated_at",0)<cutoff and value.get("status") in ("completed","failed")]
+            stale = [key for key,value in self.tasks.items() if value.get("updated_at",0)<cutoff and value.get("status") in ("completed","failed","cancelled")]
             for key in stale:
                 fp = self.tasks[key].get("fingerprint")
                 self.tasks.pop(key,None)

@@ -67,6 +67,7 @@ class PriceOutputNormalizer(object):
     def metadata(self, raw_value, normalized_value, raw_interval=None, normalized_interval=None):
         result = {
             "contract_version": self.VERSION,
+            "signature": self.signature(),
             "raw_value": raw_value,
             "raw_unit": self.config["unit"],
             "raw_unit_label": UNIT_LABELS[self.config["unit"]],
