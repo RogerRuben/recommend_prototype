@@ -24,8 +24,8 @@ def _condition_map(item):
 def annotate_ranking_explanations(items, request, definitions=None):
     definitions = definitions or {}
     result = list(items or [])
-    scenario = str((request or {}).get("scenario") or "balanced")
     for index, item in enumerate(result):
+        trace = item.get("ranking_trace") or {}
         if index + 1 >= len(result):
             item["ranking_explanation"] = {
                 "rank": index + 1, "compared_to": None,
@@ -69,10 +69,16 @@ def annotate_ranking_explanations(items, request, definitions=None):
             factors.append({"kind": "capability", "advantage": cap_a > cap_b,
                             "text": "效能%s %s 分" % ("高" if cap_a > cap_b else "低", _fmt(abs(cap_a-cap_b))),
                             "business_delta": abs(cap_a-cap_b), "unit": "分"})
-        precedence = "当前排序首先考虑需求满足程度"
-        if strict_a == strict_b:
-            precedence = {"cost": "当前采用成本优先", "performance": "当前采用性能优先"}.get(
-                scenario, "当前采用综合优化")
+        fit_a, fit_b = _num(item.get("fit_penalty")), _num(other.get("fit_penalty"))
+        if strict_a != strict_b:
+            precedence = "当前排序首先考虑需求是否完整满足"
+        elif fit_a is not None and fit_b is not None and abs(fit_a-fit_b) > 1e-9:
+            precedence = "需求满足程度相同时，当前方案与需求的总体差距更小"
+        else:
+            direction = "从低到高" if trace.get("sort_direction") == "asc" else "从高到低"
+            source = "（用户调整）" if trace.get("sort_source") == "user_override" else ""
+            precedence = "当前按%s%s%s排序" % (
+                trace.get("sort_display_name") or "综合推荐", direction, source)
         item["ranking_explanation"] = {
             "rank": index + 1,
             "compared_to": other.get("agreement_id") or other.get("id"),

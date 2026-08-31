@@ -199,6 +199,41 @@ def compute_tag_match(item, selected_tags, tag_weights):
     return 100.0 * numerator / max(denominator, 1e-9)
 
 
+def ranking_trace(request):
+    """Describe the comparator actually used by both ranking paths.
+
+    This trace is a response contract.  Explanations must consume it rather
+    than infer a comparator from the optimization scenario.
+    """
+    request = request or {}
+    sort_by = str(request.get("sort_by") or "comprehensive")
+    key_map = {
+        "comprehensive": "comprehensive_score", "price": "predicted_price_wan",
+        "capability": "capability_score", "cost_effectiveness": "cost_effectiveness",
+        "tag_match": "tag_match_score", "feasibility": "feasibility_probability",
+    }
+    display_map = {
+        "comprehensive": "综合推荐", "price": "价格", "capability": "效能",
+        "cost_effectiveness": "效费比", "tag_match": "功能偏好匹配",
+        "feasibility": "可行性",
+    }
+    sort_order = str(request.get("sort_order") or "").strip().lower()
+    if sort_order not in ("asc", "desc"):
+        sort_order = "asc" if sort_by == "price" else "desc"
+    source = str(request.get("sort_source") or
+                 ((request.get("_scenario_policy") or {}).get("applied_ranking") or {}).get("source") or
+                 "system_default")
+    return {
+        "stages": ["strict_satisfaction", "demand_penalty", "selected_sort"],
+        "sort_key": sort_by,
+        "value_field": key_map.get(sort_by, "comprehensive_score"),
+        "sort_direction": sort_order,
+        "sort_display_name": display_map.get(sort_by, "综合推荐"),
+        "sort_source": source,
+        "sort_source_display_name": "用户调整" if source == "user_override" else "场景默认",
+    }
+
+
 def rank_agreements(items, request, tag_weights, definitions=None, tag_map=None, constraint_rules=None):
     from .requirement_assessment import assess_requirements
     allow_best_effort = bool(request.get("include_best_effort"))
@@ -292,23 +327,9 @@ def rank_agreements(items, request, tag_weights, definitions=None, tag_map=None,
         if item.get("best_effort"):
             base_score -= min(35.0, 4.0 * float(item.get("fit_penalty", 0) or 0))
         item["comprehensive_score"] = round(base_score, 3)
-    sort_by = request.get("sort_by", "comprehensive")
-    key_map = {
-        "comprehensive": "comprehensive_score",
-        "price": "predicted_price_wan",
-        "capability": "capability_score",
-        "cost_effectiveness": "cost_effectiveness",
-        "tag_match": "tag_match_score",
-        "feasibility": "feasibility_probability",
-    }
-    key = key_map.get(sort_by, "comprehensive_score")
-    sort_order = str(request.get("sort_order") or "").strip().lower()
-    if sort_order in ("asc", "desc"):
-        reverse = sort_order == "desc"
-    elif sort_by == "price":
-        reverse = False  # price defaults to low-to-high
-    else:
-        reverse = True  # scores default to high-to-low
+    trace = ranking_trace(request)
+    key = trace["value_field"]
+    reverse = trace["sort_direction"] == "desc"
     def _sort_value(item):
         # Fully-satisfied candidates rank first; within each satisfaction class the
         # demand gap (fit_penalty) decides, then the user's sort key, with missing
@@ -326,6 +347,7 @@ def rank_agreements(items, request, tag_weights, definitions=None, tag_map=None,
     candidates.sort(key=_sort_value)
     for index, item in enumerate(candidates, 1):
         item["rank"] = index
+        item["ranking_trace"] = dict(trace)
     return candidates
 
 
@@ -380,20 +402,9 @@ def rank_historical_products(items, request, tag_weights, definitions=None, tag_
             item["scenario_weighted_score"] = item["comprehensive_score"]
         else:
             item["comprehensive_score"] = round(0.70 * item["tag_match_score"] + 0.30 * price_score, 3)
-    sort_by = str(request.get("sort_by") or "comprehensive")
-    sort_order = str(request.get("sort_order") or "").strip().lower()
-    key_map = {
-        "comprehensive": "comprehensive_score", "price": "predicted_price_wan",
-        "capability": "capability_score", "cost_effectiveness": "cost_effectiveness",
-        "tag_match": "tag_match_score", "feasibility": "feasibility_probability",
-    }
-    key = key_map.get(sort_by, "comprehensive_score")
-    if sort_order in ("asc", "desc"):
-        reverse = sort_order == "desc"
-    elif sort_by == "price":
-        reverse = False
-    else:
-        reverse = True
+    trace = ranking_trace(request)
+    key = trace["value_field"]
+    reverse = trace["sort_direction"] == "desc"
     def _sort_value(item):
         # Fully-satisfied rows first; within each class the demand gap decides,
         # then the sort key, with missing values always last regardless of direction.
@@ -410,4 +421,5 @@ def rank_historical_products(items, request, tag_weights, definitions=None, tag_
     candidates.sort(key=_sort_value)
     for index, item in enumerate(candidates, 1):
         item["rank"] = index
+        item["ranking_trace"] = dict(trace)
     return candidates

@@ -200,7 +200,9 @@ class Application(object):
         self.semantic_snapshot = SemanticSnapshotService(
             self.store, self.data_master, self._semantic_runtime_contract
         )
-        self.product_releases = ProductReleaseService(self.store, self.runtime)
+        self.product_releases = ProductReleaseService(
+            self.store, self.runtime, self.data_master, self._semantic_runtime_contract,
+        )
         self._sync_wire_product_code()
         # A newly created installation is initialized from an operator-visible
         # DataMaster workbook, never from product-specific Python constants.
@@ -1541,6 +1543,14 @@ class Application(object):
         ranked = annotate_ranking_explanations(ranked, request, definitions=definitions)
         for item in ranked:
             item["scenario"] = scenario_policy["scenario"]
+        analysis_fields = (
+            "agreement_id", "agreement_name", "agreement_source", "rank", "params",
+            "predicted_price_wan", "capability_score", "cost_effectiveness",
+            "strict_filter_satisfied", "model_evaluation_available", "is_generated",
+            "engineering_conflicts", "ranking_trace",
+        )
+        analysis_items = [dict((key, item.get(key)) for key in analysis_fields)
+                          for item in ranked[:100]]
         page, page_size = max(1, int(request.get("page", 1))), max(1, min(int(request.get("page_size", 12)), 50))
         start = (page - 1) * page_size
         best_effort_count = sum(1 for item in ranked if item.get("best_effort"))
@@ -1550,6 +1560,7 @@ class Application(object):
         ) if ranked and not any(item.get("strict_filter_satisfied") for item in ranked) else []
         return {
             "items": ranked[start:start + page_size],
+            "analysis_items": analysis_items,
             "total": len(ranked),
             "page": page,
             "page_size": page_size,
@@ -1572,6 +1583,7 @@ class Application(object):
             "scenario": scenario_policy["scenario"],
             "scenario_policy": scenario_policy,
             "applied_ranking": scenario_policy["applied_ranking"],
+            "ranking_trace": ranked[0].get("ranking_trace") if ranked else None,
             "requirement_version": requirement_version,
             "relaxation_suggestions": relaxation_suggestions,
         }
@@ -1857,9 +1869,13 @@ class Application(object):
         }
 
     def save_final_decision(self, request):
-        snapshot = dict(request.get("scheme_snapshot") or {})
-        if not snapshot:
-            scheme_id = str(request.get("scheme_id") or "")
+        # Final decisions are audit records: always resolve the authoritative
+        # server-side scheme by id and never trust a client supplied snapshot.
+        scheme_id = str(request.get("scheme_id") or "").strip()
+        snapshot = self.sessions.find(request.get("session_id") or "default", scheme_id)
+        if snapshot is None and scheme_id.upper().startswith("SAVED-"):
+            snapshot = self.saved_detail(scheme_id.split("-", 1)[1], request.get("target_protocol"))
+        if snapshot is None:
             snapshot = self.agreement_detail(
                 scheme_id, request.get("session_id") or "default",
                 request.get("target_protocol"),
@@ -1870,10 +1886,17 @@ class Application(object):
         with self.store.lock:
             conn = self.store.connect()
             try:
+                if version_id not in (None, ""):
+                    version = conn.execute(
+                        "SELECT id FROM requirement_versions WHERE id=? AND product_code=?",
+                        (int(version_id), self.store.current_product_code()),
+                    ).fetchone()
+                    if not version:
+                        raise ValueError("需求版本不属于当前成品。")
                 cur = conn.execute(
                     "INSERT INTO final_decisions(scheme_id,scheme_snapshot_json,source,"
                     "demand_version_id,product_code,created_at) VALUES(?,?,?,?,?,?)",
-                    (str(request.get("scheme_id") or snapshot.get("agreement_id") or ""),
+                    (scheme_id or str(snapshot.get("agreement_id") or ""),
                      json.dumps(snapshot, ensure_ascii=False),
                      str(request.get("source") or snapshot.get("agreement_source") or "unknown"),
                      int(version_id) if version_id not in (None, "") else None,

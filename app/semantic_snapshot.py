@@ -96,6 +96,7 @@ class SemanticSnapshotService(object):
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "semantic_signature": semantic["semantic_signature"],
             "parameter_count": len(semantic.get("parameters") or []),
+            "model_bound_semantics": "derived_from_model_input_bindings",
         }
         output = io.BytesIO()
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:

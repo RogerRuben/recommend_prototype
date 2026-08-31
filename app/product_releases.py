@@ -35,6 +35,7 @@ from .store import safe_id
 from .historical_onboarding import HistoricalProductOnboarding
 from .wide_import import WideTableParser, parse_bool, read_table_bytes
 from .xlsx_utils import read_workbook_bytes
+from .semantic_snapshot import SEMANTIC_SCHEMA_VERSION, semantic_signature
 
 
 SECTIONS = ("products", "parameters", "parameter_groups", "tags", "tag_rules", "couplings", "constraints", "agreements")
@@ -210,7 +211,8 @@ CSV_COLUMNS = {
     ),
 }
 
-PACKAGE_FORMAT = "industrial-product-release-1.0"
+PACKAGE_FORMAT = "industrial-product-release-1.1"
+LEGACY_PACKAGE_FORMAT = "industrial-product-release-1.0"
 
 
 def _header_key(value):
@@ -222,9 +224,11 @@ def _bool(value, default=1):
 
 
 class ProductReleaseService(object):
-    def __init__(self, store, runtime):
+    def __init__(self, store, runtime, data_master=None, runtime_contract_provider=None):
         self.store = store
         self.runtime = runtime
+        self.data_master = data_master
+        self.runtime_contract_provider = runtime_contract_provider
         self.historical_onboarding = HistoricalProductOnboarding()
 
     def analyze_history(self, filename, raw, product_code, product_name, missing_tokens=None):
@@ -262,6 +266,28 @@ class ProductReleaseService(object):
             raise
 
     def _import_maintenance_workbook(self, release_id, filename, raw, skip_invalid=False):
+        if self.data_master is not None:
+            report = self.data_master.parse(filename, raw)
+            if not report.get("valid"):
+                raise ValueError("DataMaster校验未通过：%s" % "；".join(report.get("errors") or []))
+            release = self.get(release_id)
+            parsed_data = report.get("data") or {}
+            data = dict(release.get("data") or {})
+            for section in SECTIONS:
+                if section in parsed_data:
+                    data[section] = parsed_data[section]
+            products = data.get("products") or []
+            product_code = clean(products[0].get("product_code")) if len(products) == 1 else release.get("product_code")
+            product_name = clean(products[0].get("product_name")) if len(products) == 1 else release.get("product_name")
+            self.store.update_product_release(
+                release_id, data, product_code=product_code, product_name=product_name,
+                status="draft", validation=report,
+            )
+            return {
+                "release": self.get(release_id), "datamaster_report": report,
+                "modules": [{"section": section, "status": "imported",
+                             "valid_count": len(data.get(section) or [])} for section in SECTIONS],
+            }
         if not clean(filename).lower().endswith(".xlsx"):
             raise ValueError("维护工作簿仅支持.xlsx文件。")
         workbook = read_workbook_bytes(raw)
@@ -381,10 +407,15 @@ class ProductReleaseService(object):
 
     def export_package(self, release_id):
         release = self.get(release_id)
+        semantic = semantic_signature(release["data"])
         core = {
             "format": PACKAGE_FORMAT,
             "product_code": release["product_code"],
             "product_name": release["product_name"],
+            "semantic_schema_version": SEMANTIC_SCHEMA_VERSION,
+            "semantic_signature": semantic,
+            "runtime_contract": self.runtime_contract_provider() if self.runtime_contract_provider else {},
+            "semantic_contract": {"model_bound": "derived_from_model_input_bindings"},
             "data": release["data"],
         }
         package = dict(core)
@@ -401,7 +432,8 @@ class ProductReleaseService(object):
             package = json.loads(raw.decode("utf-8-sig"))
         except Exception as exc:
             raise ValueError("离线发布包不是有效UTF-8 JSON：%s" % exc)
-        if package.get("format") != PACKAGE_FORMAT:
+        package_format = package.get("format")
+        if package_format not in (PACKAGE_FORMAT, LEGACY_PACKAGE_FORMAT):
             raise ValueError("不支持的离线发布包格式：%s" % package.get("format"))
         transport_data = package.get("data")
         if not isinstance(transport_data, dict):
@@ -413,14 +445,26 @@ class ProductReleaseService(object):
         # Older packages legitimately omit the optional parameter_groups section;
         # we only add it after the hash has been confirmed.
         core = {
-            "format": PACKAGE_FORMAT,
+            "format": package_format,
             "product_code": clean(package.get("product_code")),
             "product_name": clean(package.get("product_name")),
             "data": transport_data,
         }
+        if package_format == PACKAGE_FORMAT:
+            core.update({
+                "semantic_schema_version": package.get("semantic_schema_version"),
+                "semantic_signature": package.get("semantic_signature"),
+                "runtime_contract": package.get("runtime_contract") or {},
+                "semantic_contract": package.get("semantic_contract") or {},
+            })
         expected = hashlib.sha256(self._canonical_json(core).encode("utf-8")).hexdigest()
         if clean(package.get("payload_sha256")) != expected:
             raise ValueError("离线发布包完整性校验失败，文件可能不完整或已被修改。")
+        if package_format == PACKAGE_FORMAT:
+            if str(package.get("semantic_schema_version") or "") != str(SEMANTIC_SCHEMA_VERSION):
+                raise ValueError("离线发布包业务语义版本不受支持。")
+            if clean(package.get("semantic_signature")) != semantic_signature(transport_data):
+                raise ValueError("离线发布包业务语义签名校验失败。")
         data = dict(transport_data)
         data.setdefault("parameter_groups", [])
         products = data.get("products") or []

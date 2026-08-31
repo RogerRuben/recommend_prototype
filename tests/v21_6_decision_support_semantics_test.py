@@ -8,10 +8,12 @@ import threading
 from app.generation_profiles import apply_generation_profile
 from app.generation_tasks import GenerationTaskManager
 from app.ranking_explanation import annotate_ranking_explanations
+from app.recommender import rank_agreements
 from app.relaxation_advisor import build_relaxation_suggestions
 from app.requirement_versions import RequirementVersionService, canonical_demand, demand_fingerprint
 from app.semantic_snapshot import canonicalize_snapshot, semantic_signature
 from app.data_master import DataMasterService
+from app.product_releases import ProductReleaseService
 from app.store import Store
 
 
@@ -118,6 +120,23 @@ def test_relative_ranking_explanation_uses_display_mapping_for_special_state():
     assert "1 vs -1" not in factor_text
 
 
+def test_ranking_explanation_uses_actual_user_override_trace():
+    request = {"sort_by": "price", "sort_order": "asc", "sort_source": "user_override"}
+    items = [
+        {"agreement_id": "A", "agreement_source": "historical", "historical_price_wan": 10,
+         "predicted_price_wan": 10, "capability_score": 80, "params": {}, "tags": []},
+        {"agreement_id": "B", "agreement_source": "historical", "historical_price_wan": 12,
+         "predicted_price_wan": 12, "capability_score": 100, "params": {}, "tags": []},
+    ]
+    ranked = rank_agreements(items, request, {}, definitions={}, tag_map={}, constraint_rules=[])
+    annotate_ranking_explanations(ranked, request, {})
+    trace = ranked[0]["ranking_trace"]
+    assert trace["sort_key"] == "price" and trace["sort_source"] == "user_override"
+    summary = ranked[0]["ranking_explanation"]["summary"]
+    assert "价格" in summary and "用户调整" in summary
+    assert "性能优先" not in summary
+
+
 def test_relaxation_is_structured_and_bound_to_demand():
     request = {"max_price": 10, "indicator_filters": [], "selected_tags": []}
     candidates = [{"predicted_price_wan": 12, "capability_score": 80, "params": {}, "tags": []}]
@@ -128,6 +147,31 @@ def test_relaxation_is_structured_and_bound_to_demand():
     assert suggestions[0]["business_delta"] == 2
     assert suggestions[0]["demand_version_id"] == 4
     assert suggestions[0]["apply_patch"] == {"max_price": 12}
+
+
+def test_relaxation_skips_nearest_threshold_that_still_has_no_strict_result():
+    request = {"max_price": 10, "min_capability": 90,
+               "indicator_filters": [], "selected_tags": []}
+    candidates = [
+        {"predicted_price_wan": 12, "capability_score": 80, "params": {}, "tags": []},
+        {"predicted_price_wan": 14, "capability_score": 100, "params": {}, "tags": []},
+    ]
+    suggestions = build_relaxation_suggestions(request, candidates, {}, {}, [])
+    price = next(item for item in suggestions if item["condition_id"] == "max_price")
+    assert price["after"] == 14
+    assert price["current_pool_new_strict_count"] == 1
+
+
+def test_relaxation_strict_less_than_uses_display_precision_step():
+    definitions = {"weight": {"label": "重量", "unit": "kg", "value_type": "number",
+                               "search_type": "continuous", "decimal_places": 3}}
+    request = {"indicator_filters": [{"parameter_id": "weight", "operator": "lt", "value1": 3.5}],
+               "selected_tags": []}
+    candidates = [{"params": {"weight": 4.2}, "tags": []}]
+    suggestions = build_relaxation_suggestions(request, candidates, definitions, {}, [])
+    suggestion = next(item for item in suggestions if item["condition_id"] == "weight")
+    assert abs(suggestion["after"] - 4.201) < 1e-9
+    assert suggestion["current_pool_new_strict_count"] == 1
 
 
 def test_semantic_signature_preserves_three_layer_value_semantics():
@@ -177,3 +221,30 @@ def test_datamaster_value_mappings_sheet_roundtrip(tmp_path):
     assert semantic_signature(report["data"]) == signature_before, (
         canonicalize_snapshot(store.admin_snapshot()), canonicalize_snapshot(report["data"])
     )
+    releases = ProductReleaseService(store, Runtime(), service, lambda: {"price_output": {"unit": "wan_yuan"}})
+    draft = releases.clone_current()
+    imported = releases.import_maintenance_workbook(
+        draft["release_id"], "maintenance.xlsx", service.export_current())
+    released_parameter = imported["release"]["data"]["parameters"][0]
+    assert json.loads(released_parameter["display_value_mapping_json"])["-1"] == "无该属性"
+    assert json.loads(released_parameter["model_value_mapping_json"])["01"] == "M01"
+    package = json.loads(releases.export_package(draft["release_id"]).decode("utf-8"))
+    assert package["format"] == "industrial-product-release-1.1"
+    assert package["semantic_schema_version"] == "2"
+    assert package["semantic_signature"]
+    assert package["runtime_contract"]["price_output"]["unit"] == "wan_yuan"
+    assert package["semantic_contract"]["model_bound"] == "derived_from_model_input_bindings"
+
+
+def test_full_ranked_analysis_and_authoritative_final_decision_contracts_are_wired():
+    server = open("app/server.py", "r", encoding="utf-8").read()
+    client = open("app/static/app.js", "r", encoding="utf-8").read()
+    assert '"analysis_items": analysis_items' in server
+    assert "for item in ranked[:100]" in server
+    assert "state.analysisItems=data.analysis_items||data.items||[]" in client
+    assert "var items=state.analysisItems.filter" in client
+    assert "comparisonItemCache" in client
+    final_client = client[client.index("async function markFinalDecision"):client.index("function setFont")]
+    assert "scheme_snapshot" not in final_client
+    assert "never trust a client supplied snapshot" in server
+    assert "需求版本不属于当前成品" in server

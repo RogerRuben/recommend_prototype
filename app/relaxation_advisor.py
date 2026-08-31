@@ -17,6 +17,29 @@ def _count_strict(candidates, request, definitions, tag_map, constraints):
         item, request, definitions, tag_map, constraints).get("strict_satisfied"))
 
 
+def _step(definition):
+    search_type = str((definition or {}).get("search_type") or "").lower()
+    if search_type in ("integer", "ip_grade"):
+        return 1.0
+    try:
+        places = max(0, min(int((definition or {}).get("decimal_places", 3)), 9))
+    except (TypeError, ValueError):
+        places = 3
+    return 10.0 ** (-places)
+
+
+def _inclusive_threshold(actual, operator, definition):
+    """Smallest displayed threshold that admits actual under a strict operator."""
+    places = max(0, int((definition or {}).get("decimal_places", 3) or 0))
+    if str((definition or {}).get("search_type") or "").lower() in ("integer", "ip_grade"):
+        places = 0
+    if operator == "lt":
+        return round(float(actual) + _step(definition), places)
+    if operator == "gt":
+        return round(float(actual) - _step(definition), places)
+    return round(float(actual), places)
+
+
 def build_relaxation_suggestions(request, candidates, definitions, tag_map,
                                  constraints, requirement_version=None, limit=5):
     """Suggest only changes to explicit user demand, never engineering rules."""
@@ -30,7 +53,7 @@ def build_relaxation_suggestions(request, candidates, definitions, tag_map,
         changed.update(patch)
         count = _count_strict(candidates, changed, definitions, tag_map, constraints)
         if count <= 0:
-            return
+            return False
         delta = None
         if _num(before) is not None and _num(after) is not None:
             delta = abs(float(after) - float(before))
@@ -42,6 +65,7 @@ def build_relaxation_suggestions(request, candidates, definitions, tag_map,
             "demand_version_id": version.get("id"),
             "demand_fingerprint": version.get("demand_fingerprint"),
         })
+        return True
 
     max_price = _num(request.get("max_price"))
     if max_price is not None:
@@ -49,18 +73,18 @@ def build_relaxation_suggestions(request, candidates, definitions, tag_map,
                             if _num(item.get("predicted_price_wan")) is not None))
         for value in values:
             if value > max_price:
-                add("numeric_threshold", "最高价格", max_price, value, "万元",
-                    {"max_price": value}, "max_price")
-                break
+                if add("numeric_threshold", "最高价格", max_price, value, "万元",
+                       {"max_price": value}, "max_price"):
+                    break
     min_capability = _num(request.get("min_capability"))
     if min_capability is not None:
         values = sorted(set(_num(item.get("capability_score")) for item in candidates
                             if _num(item.get("capability_score")) is not None), reverse=True)
         for value in values:
             if value < min_capability:
-                add("numeric_threshold", "最低效能", min_capability, value, "分",
-                    {"min_capability": value}, "min_capability")
-                break
+                if add("numeric_threshold", "最低效能", min_capability, value, "分",
+                       {"min_capability": value}, "min_capability"):
+                    break
 
     filters = list(request.get("indicator_filters") or [])
     for index, rule in enumerate(filters):
@@ -73,11 +97,29 @@ def build_relaxation_suggestions(request, candidates, definitions, tag_map,
         if before is not None and operator in ("lte", "lt", "gte", "gt"):
             possible = [v for v in actuals if v > before] if operator in ("lte", "lt") else [v for v in reversed(actuals) if v < before]
             for value in possible:
+                threshold = _inclusive_threshold(value, operator, definition)
                 patched_filters = [dict(item) for item in filters]
-                patched_filters[index]["value1"] = value
-                add("numeric_threshold", definition.get("label") or key, before, value,
-                    definition.get("unit"), {"indicator_filters": patched_filters}, key)
-                if suggestions and suggestions[-1].get("condition_id") == key:
+                patched_filters[index]["value1"] = threshold
+                if add("numeric_threshold", definition.get("label") or key, before, threshold,
+                       definition.get("unit"), {"indicator_filters": patched_filters}, key):
+                    break
+        elif operator in ("between", "range_inside"):
+            low, high = _num(rule.get("value1")), _num(rule.get("value2"))
+            changes = []
+            if low is not None and high is not None:
+                for value in actuals:
+                    if value < low:
+                        changes.append((low-value, value, high))
+                    elif value > high:
+                        changes.append((value-high, low, value))
+            for _delta, new_low, new_high in sorted(changes):
+                patched_filters = [dict(item) for item in filters]
+                patched_filters[index]["value1"] = new_low
+                patched_filters[index]["value2"] = new_high
+                if add("numeric_range", definition.get("label") or key,
+                       "%s～%s" % (rule.get("value1"), rule.get("value2")),
+                       "%s～%s" % (new_low, new_high), definition.get("unit"),
+                       {"indicator_filters": patched_filters}, key):
                     break
         else:
             patched_filters = [dict(item) for pos, item in enumerate(filters) if pos != index]
