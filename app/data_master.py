@@ -13,7 +13,8 @@ from .display_mapping import dump_display_mapping, normalize_display_mapping
 
 SHEETS = OrderedDict([
     ("成品信息", ["成品代号", "成品名称", "成品说明", "是否启用"]),
-    ("指标定义", ["指标编号", "指标名称", "指标分组", "单位", "取值类型", "搜索类型", "工程下限", "工程上限", "效能方向", "指标说明", "调整提示", "允许值", "是否必填", "允许自动调整", "显示小数位", "显示顺序", "是否启用", "模型取值映射(JSON)", "前端显示映射(JSON)", "特殊业务状态值(JSON数组)"]),
+    ("指标定义", ["指标编号", "指标名称", "指标分组", "单位", "取值类型", "搜索类型", "工程下限", "工程上限", "效能方向", "指标说明", "调整提示", "允许值", "是否必填", "允许自动调整", "显示小数位", "显示顺序", "是否启用", "模型取值映射(JSON)", "前端显示映射(JSON)", "特殊业务状态值(JSON数组)", "历史观测下限", "历史观测上限"]),
+    ("ValueMappings", ["parameter_id", "business_value", "display_value", "model_value", "allowed", "special"]),
     ("指标分组", ["分组名称", "显示顺序", "说明", "是否启用", "默认折叠"]),
     ("标签字典", ["标签编号", "标签名称", "标签分组", "匹配权重", "生成判定方式", "标签说明", "是否启用"]),
     ("标签规则", ["规则编号", "标签编号", "指标编号", "比较关系", "条件值1", "条件值2", "规则组", "是否启用"]),
@@ -24,7 +25,7 @@ SHEETS = OrderedDict([
 ])
 
 # Sheets that older workbooks may omit; they are derived from existing data.
-OPTIONAL_SHEETS = {"指标分组"}
+OPTIONAL_SHEETS = {"指标分组", "ValueMappings"}
 
 
 def clean(value):
@@ -41,6 +42,24 @@ def integer(value, default=0):
     if clean(value) == "":
         return int(default)
     return int(float(value))
+
+
+def _json_scalar(value):
+    """Decode JSON scalars so numeric-looking strings remain distinguishable."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    try:
+        parsed = json.loads(text)
+        return parsed if not isinstance(parsed, (list, dict)) else value
+    except Exception:
+        return value
+
+
+def _dump_scalar(value):
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
 def normalize_operator(value):
@@ -332,7 +351,11 @@ def validate_business_data(data):
         raw_display_mapping = item.get("display_value_mapping_json")
         if raw_display_mapping not in (None, ""):
             try:
-                normalize_display_mapping(raw_display_mapping, _json_allowed(item.get("allowed_values_json")))
+                normalize_display_mapping(
+                    raw_display_mapping,
+                    _json_allowed(item.get("allowed_values_json")) +
+                    _json_allowed(item.get("special_value_keys_json")),
+                )
             except ValueError as exc:
                 errors.append("指标%s：%s" % (pid, exc))
         raw_special = item.get("special_value_keys_json")
@@ -557,8 +580,34 @@ class DataMasterService(object):
         rows.append(("成品信息", [SHEETS["成品信息"], [product.get("product_code"), product.get("product_name"), product.get("product_description"), display_bool(product.get("enabled", 1))]]))
         params = []
         for p in snap["parameters"]:
-            params.append([p.get("parameter_id"), p.get("label"), p.get("parameter_group", "其他"), p.get("unit"), display_value_type(p.get("value_type")), display_search_type(p.get("search_type", "auto")), p.get("min_value"), p.get("max_value"), display_preference(p.get("preference")), p.get("description"), p.get("adjustment_hint"), "、".join(str(x) for x in _json_allowed(p.get("allowed_values_json"))), display_bool(p.get("required", 1)), display_bool(p.get("auto_adjustable", 1)), p.get("decimal_places", 3), p.get("display_order"), display_bool(p.get("enabled", 1)), p.get("model_value_mapping_json") or "", p.get("display_value_mapping_json") or "", p.get("special_value_keys_json") or ""])
+            params.append([p.get("parameter_id"), p.get("label"), p.get("parameter_group", "其他"), p.get("unit"), display_value_type(p.get("value_type")), display_search_type(p.get("search_type", "auto")), p.get("min_value"), p.get("max_value"), display_preference(p.get("preference")), p.get("description"), p.get("adjustment_hint"), "、".join(str(x) for x in _json_allowed(p.get("allowed_values_json"))), display_bool(p.get("required", 1)), display_bool(p.get("auto_adjustable", 1)), p.get("decimal_places", 3), p.get("display_order"), display_bool(p.get("enabled", 1)), p.get("model_value_mapping_json") or "", p.get("display_value_mapping_json") or "", p.get("special_value_keys_json") or "", p.get("observed_min"), p.get("observed_max")])
         rows.append(("指标定义", [SHEETS["指标定义"]] + params))
+        mapping_rows = []
+        for p in snap["parameters"]:
+            allowed = _json_allowed(p.get("allowed_values_json"))
+            special = _json_allowed(p.get("special_value_keys_json"))
+            try:
+                display_mapping = json.loads(p.get("display_value_mapping_json") or "{}")
+            except Exception:
+                display_mapping = {}
+            try:
+                model_mapping = json.loads(p.get("model_value_mapping_json") or "{}")
+            except Exception:
+                model_mapping = {}
+            ordered = []
+            for value in allowed + special + list(display_mapping.keys()) + list(model_mapping.keys()):
+                marker = str(value)
+                if marker not in [str(x) for x in ordered]:
+                    ordered.append(value)
+            for value in ordered:
+                key = str(value)
+                mapping_rows.append([
+                    p.get("parameter_id"), _dump_scalar(value), display_mapping.get(key, ""),
+                    _dump_scalar(model_mapping[key]) if key in model_mapping else "",
+                    1 if any(str(x) == key for x in allowed) else 0,
+                    1 if any(str(x) == key for x in special) else 0,
+                ])
+        rows.append(("ValueMappings", [SHEETS["ValueMappings"]] + ([] if empty else mapping_rows)))
         groups = []
         for g in snap.get("parameter_groups", []):
             groups.append([g.get("group_name"), g.get("display_order"), g.get("description"), display_bool(g.get("enabled", 1)), display_bool(g.get("default_collapsed", 0))])
@@ -667,24 +716,28 @@ class DataMasterService(object):
                     if not isinstance(parsed_mapping, dict):
                         raise ValueError("指标%s的模型取值映射必须是JSON对象。" % clean(r.get("指标编号")))
                     mapping = json.dumps(parsed_mapping, ensure_ascii=False)
-                display_mapping_text = clean(r.get("前端显示映射(JSON)"))
-                display_mapping = None
-                if display_mapping_text:
-                    try:
-                        display_mapping = dump_display_mapping(display_mapping_text, _json_allowed(allowed))
-                    except ValueError as exc:
-                        raise ValueError("指标%s：%s" % (clean(r.get("指标编号")), exc))
                 special_text = clean(r.get("特殊业务状态值(JSON数组)"))
                 special_keys = None
+                parsed_special = []
                 if special_text:
                     parsed_special = json.loads(special_text)
                     if not isinstance(parsed_special, list):
                         raise ValueError("指标%s的特殊业务状态值必须是JSON数组。" % clean(r.get("指标编号")))
                     special_keys = json.dumps([str(value) for value in parsed_special], ensure_ascii=False)
+                display_mapping_text = clean(r.get("前端显示映射(JSON)"))
+                display_mapping = None
+                if display_mapping_text:
+                    try:
+                        display_mapping = dump_display_mapping(
+                            display_mapping_text, _json_allowed(allowed) + parsed_special
+                        )
+                    except ValueError as exc:
+                        raise ValueError("指标%s：%s" % (clean(r.get("指标编号")), exc))
                 parameters.append({
                     "parameter_id": clean(r.get("指标编号")), "label": clean(r.get("指标名称")),
                     "parameter_group": clean(r.get("指标分组")) or "其他", "unit": clean(r.get("单位")),
                     "value_type": value_type, "search_type": search_type, "min_value": num(r.get("工程下限")), "max_value": num(r.get("工程上限")),
+                    "observed_min": num(r.get("历史观测下限")), "observed_max": num(r.get("历史观测上限")),
                     "preference": normalize_preference(r.get("效能方向")), "description": clean(r.get("指标说明")), "adjustment_hint": clean(r.get("调整提示")),
                     "allowed_values_json": allowed or None, "model_value_mapping_json": mapping,
                     "display_value_mapping_json": display_mapping,
@@ -709,6 +762,37 @@ class DataMasterService(object):
                 # services are active; it is not a DataMaster validation input.
                 parameter["model_bound"] = 0
             report["data"]["parameters"] = parameters
+
+            # A readable ValueMappings sheet is authoritative when present.
+            # Legacy JSON columns remain fully supported when it is absent.
+            if "ValueMappings" in workbook:
+                grouped = {}
+                for row in parsed["ValueMappings"]:
+                    parameter_id = clean(row.get("parameter_id"))
+                    if not parameter_id:
+                        continue
+                    grouped.setdefault(parameter_id, []).append(row)
+                for parameter_id, mapping_rows in grouped.items():
+                    parameter = param_by_key.get(parameter_id)
+                    if parameter is None:
+                        report["errors"].append("ValueMappings引用了不存在的指标：%s" % parameter_id)
+                        continue
+                    allowed, special, display_mapping, model_mapping = [], [], {}, {}
+                    for row in mapping_rows:
+                        business_value = _json_scalar(row.get("business_value"))
+                        key = str(business_value)
+                        if parse_bool(row.get("allowed", 0)):
+                            allowed.append(business_value)
+                        if parse_bool(row.get("special", 0)):
+                            special.append(key)
+                        if row.get("display_value") not in (None, ""):
+                            display_mapping[key] = str(row.get("display_value"))
+                        if row.get("model_value") not in (None, ""):
+                            model_mapping[key] = _json_scalar(row.get("model_value"))
+                    parameter["allowed_values_json"] = json.dumps(allowed, ensure_ascii=False) if allowed else None
+                    parameter["special_value_keys_json"] = json.dumps(special, ensure_ascii=False) if special else None
+                    parameter["display_value_mapping_json"] = json.dumps(display_mapping, ensure_ascii=False) if display_mapping else None
+                    parameter["model_value_mapping_json"] = json.dumps(model_mapping, ensure_ascii=False) if model_mapping else None
 
             group_items = []
             if "指标分组" in workbook:

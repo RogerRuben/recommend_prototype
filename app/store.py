@@ -227,6 +227,22 @@ class Store(object):
                     validation_json TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
                     activated_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS requirement_versions(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, product_code TEXT NOT NULL,
+                    version_no INTEGER NOT NULL, parent_version_id INTEGER,
+                    demand_json TEXT NOT NULL, demand_fingerprint TEXT NOT NULL,
+                    change_summary_json TEXT NOT NULL, target_protocol TEXT,
+                    created_at TEXT NOT NULL, created_by TEXT,
+                    UNIQUE(product_code, version_no)
+                );
+                CREATE INDEX IF NOT EXISTS idx_requirement_versions_product
+                    ON requirement_versions(product_code, version_no DESC);
+                CREATE TABLE IF NOT EXISTS final_decisions(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, scheme_id TEXT,
+                    scheme_snapshot_json TEXT NOT NULL, source TEXT,
+                    demand_version_id INTEGER, product_code TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
                 """)
                 for table, definition in [
                     ("products", "enabled INTEGER NOT NULL DEFAULT 1"),
@@ -1173,9 +1189,10 @@ class Store(object):
                 for item in data.get("products", []):
                     conn.execute("INSERT INTO products(product_code,product_name,product_description,enabled) VALUES(?,?,?,?)", (item["product_code"],item["product_name"],item.get("product_description"),int(item.get("enabled",1))))
                 for item in data.get("parameters", []):
+                    special_values = _json_list(item.get("special_value_keys_json"))
                     display_mapping = dump_display_mapping(
                         item.get("display_value_mapping_json"),
-                        _json_list(item.get("allowed_values_json")),
+                        _json_list(item.get("allowed_values_json")) + special_values,
                     )
                     special_keys = item.get("special_value_keys_json")
                     if isinstance(special_keys, (list, tuple)):
@@ -1702,14 +1719,16 @@ class Store(object):
                 raise ValueError("业务值到模型值的映射必须是JSON对象。")
             data["allowed_values_json"] = json.dumps(allowed, ensure_ascii=False) if allowed else None
             data["model_value_mapping_json"] = json.dumps(mapping, ensure_ascii=False) if mapping else None
-            display_mapping = normalize_display_mapping(data.get("display_value_mapping_json"), allowed)
-            data["display_value_mapping_json"] = json.dumps(display_mapping, ensure_ascii=False) if display_mapping else None
             try:
                 special_keys = json.loads(data.get("special_value_keys_json") or "[]")
             except (TypeError, ValueError):
                 raise ValueError("特殊业务状态值必须是JSON数组，例如：[\"-1\"]")
             if not isinstance(special_keys, list):
                 raise ValueError("特殊业务状态值必须是JSON数组。")
+            display_mapping = normalize_display_mapping(
+                data.get("display_value_mapping_json"), allowed + special_keys
+            )
+            data["display_value_mapping_json"] = json.dumps(display_mapping, ensure_ascii=False) if display_mapping else None
             value_type = str(data.get("value_type") or "number").lower()
             if value_type in ("number", "float", "integer", "ip_grade", "boolean", "bool"):
                 invalid = [value for value in special_keys if normalize_numeric(value) is None]

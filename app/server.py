@@ -35,6 +35,11 @@ from .scenario_policy import ScenarioPolicyService
 from .recommendation_explanation import annotate_candidate_recommendations
 from .expert_scheme import ExpertSchemeService
 from .price_output import PriceOutputNormalizer
+from .semantic_snapshot import SemanticSnapshotService
+from .requirement_versions import RequirementVersionService, demand_fingerprint
+from .generation_profiles import public_profiles
+from .ranking_explanation import annotate_ranking_explanations
+from .relaxation_advisor import build_relaxation_suggestions
 
 
 class GeneratedSessions(object):
@@ -191,6 +196,10 @@ class Application(object):
             read_only=self.demo_read_only,
         )
         self.data_master = DataMasterService(self.store, self.runtime)
+        self.requirement_versions = RequirementVersionService(self.store)
+        self.semantic_snapshot = SemanticSnapshotService(
+            self.store, self.data_master, self._semantic_runtime_contract
+        )
         self.product_releases = ProductReleaseService(self.store, self.runtime)
         self._sync_wire_product_code()
         # A newly created installation is initialized from an operator-visible
@@ -224,6 +233,27 @@ class Application(object):
             self._evaluate_batch_with_rules if hasattr(self.runtime, "evaluate_batch") else None,
         )
         self.generation_tasks = GenerationTaskManager(self)
+
+    def _semantic_runtime_contract(self):
+        manifest = self.runtime.manifest()
+        return {
+            "product_code": self.store.current_product_code(),
+            "price_output": self._current_price_output_contract(),
+            "model_versions": manifest.get("model_versions") or {
+                "price": (manifest.get("price") or {}).get("model_version"),
+                "effectiveness": (manifest.get("effectiveness") or {}).get("model_version"),
+            },
+            "schemas": {
+                "price": (manifest.get("price") or {}).get("schema_version"),
+                "effectiveness": (manifest.get("effectiveness") or {}).get("schema_version"),
+            },
+        }
+
+    def capture_requirement_version(self, request, source):
+        if self.demo_read_only:
+            return {"id": None, "version_no": None,
+                    "demand_fingerprint": demand_fingerprint(request), "read_only": True}
+        return self.requirement_versions.capture(request, created_by="operator", change_source=source)
 
     def _invalidate_runtime_caches(self):
         # Cancel running workers before removing their session batches.  The
@@ -487,6 +517,8 @@ class Application(object):
         payload["active_protocol"] = effect_manifest.get("active_protocol")
         payload["optimization_scenarios"] = self.scenario_policy.catalog()
         payload["scenario_policy"] = self.scenario_policy.resolve({"scenario": self.scenario_policy.config["default_scenario"]})
+        payload["generation_profiles"] = public_profiles()
+        payload["semantic_signature"] = self.semantic_snapshot.build().get("semantic_signature")
         coverage = {}
         for rule in self.store.tag_rule_rows():
             key = str(rule.get("parameter_id") or "")
@@ -1302,8 +1334,15 @@ class Application(object):
         session_id = str(req.get("session_id") or "default")
         count = req["count"]
         search_profile = dict(req.get("search_profile") or self.generation_search_profile(req))
+        search_profile.update({
+            "exploration_profile": req.get("exploration_profile"),
+            "effective_exploration_profile": req.get("effective_exploration_profile"),
+            "profile_definition": req.get("exploration_profile_definition") or {},
+        })
         req["search_profile"] = search_profile
         search_mode = search_profile.get("mode") or "fast"
+        if req.get("exploration_profile") == "deep" and search_mode != "deep_extrapolation":
+            search_mode = "deep"
         if req.get("min_feasibility") not in (None, ""):
             req["min_feasibility"] = max(float(req.get("min_feasibility")), 0.0)
         if progress_callback:
@@ -1347,6 +1386,8 @@ class Application(object):
             "model_versions": self.runtime.manifest(),
             "generation_method": result.get("generation_method", "batched_directional_beam_search"),
             "search_profile": search_profile,
+            "exploration_profile": req.get("exploration_profile"),
+            "effective_exploration_profile": req.get("effective_exploration_profile"),
             "search_warning": search_profile.get("warning") or "",
             "scenario": scenario_policy["scenario"],
             "scenario_policy": scenario_policy,
@@ -1360,6 +1401,7 @@ class Application(object):
         """Backward-compatible synchronous generation endpoint."""
         prepared_request, _policy = self.scenario_policy.apply(request)
         prepared_request = self.generation_tasks.canonicalize_generation_controls(prepared_request)
+        requirement_version = self.capture_requirement_version(prepared_request, "generate")
         fingerprint = self.generation_tasks.fingerprint(prepared_request)
         result = self._generate_sync(prepared_request)
         batch_id, prepared = self.sessions.add_batch(
@@ -1368,14 +1410,20 @@ class Application(object):
         )
         result["batch_id"] = batch_id
         result["candidates"] = prepared
+        result["requirement_version"] = requirement_version
         return result
 
     def request_generation(self, request):
         self._require_product_ready()
         req, _policy = self.scenario_policy.apply(request)
         req = self.generation_tasks.canonicalize_generation_controls(req)
+        requirement_version = self.capture_requirement_version(req, "generate")
+        req["requirement_version_id"] = requirement_version.get("id")
+        req["demand_fingerprint"] = requirement_version.get("demand_fingerprint")
         req["search_profile"] = self.generation_search_profile(req)
-        return self.generation_tasks.start(req, force=bool(req.get("force_regenerate")))
+        result = self.generation_tasks.start(req, force=bool(req.get("force_regenerate")))
+        result["requirement_version"] = requirement_version
+        return result
 
     def _refresh_candidates_for_protocol(self, candidates, request):
         target_protocol = request.get("target_protocol")
@@ -1432,6 +1480,7 @@ class Application(object):
 
     def recommend(self, request):
         request, scenario_policy = self.scenario_policy.apply(request)
+        requirement_version = self.capture_requirement_version(request, "recommend")
         self._try_restore_model_services()
         calculation_available = not bool(self.model_data_sync_error)
         session_id = str(request.get("session_id") or "default")
@@ -1489,11 +1538,16 @@ class Application(object):
             rank_historical_products(candidates, ranking_request, tag_weights, definitions=definitions, tag_map=tag_map, constraint_rules=constraint_rules)
         )
         ranked = annotate_candidate_recommendations(ranked, scenario_policy, definitions=definitions)
+        ranked = annotate_ranking_explanations(ranked, request, definitions=definitions)
         for item in ranked:
             item["scenario"] = scenario_policy["scenario"]
         page, page_size = max(1, int(request.get("page", 1))), max(1, min(int(request.get("page_size", 12)), 50))
         start = (page - 1) * page_size
         best_effort_count = sum(1 for item in ranked if item.get("best_effort"))
+        relaxation_suggestions = build_relaxation_suggestions(
+            request, candidates, definitions, tag_map, constraint_rules,
+            requirement_version=requirement_version,
+        ) if ranked and not any(item.get("strict_filter_satisfied") for item in ranked) else []
         return {
             "items": ranked[start:start + page_size],
             "total": len(ranked),
@@ -1518,6 +1572,8 @@ class Application(object):
             "scenario": scenario_policy["scenario"],
             "scenario_policy": scenario_policy,
             "applied_ranking": scenario_policy["applied_ranking"],
+            "requirement_version": requirement_version,
+            "relaxation_suggestions": relaxation_suggestions,
         }
 
     def agreement_detail(self, agreement_id, session_id, target_protocol=None):
@@ -1780,6 +1836,69 @@ class Application(object):
                         if stale else "保存时价格与当前输出契约一致。"),
         }
         return item
+
+    def relaxation_suggestions(self, request):
+        version = self.capture_requirement_version(request, "relaxation")
+        calculation_available = not bool(self.model_data_sync_error)
+        candidates = self.store.historical_agreements(
+            target_protocol=request.get("target_protocol"), recalculate=calculation_available
+        ) + self.expert_recommendation_schemes(
+            target_protocol=request.get("target_protocol"), recalculate=calculation_available
+        )
+        batch_id = request.get("generation_batch_id")
+        if batch_id:
+            candidates += self.sessions.get(str(request.get("session_id") or "default"), batch_id)
+        return {
+            "requirement_version": version,
+            "items": build_relaxation_suggestions(
+                request, candidates, self.store.parameter_map(), self.store.tag_map(),
+                self.store.constraint_rows(), requirement_version=version,
+            ),
+        }
+
+    def save_final_decision(self, request):
+        snapshot = dict(request.get("scheme_snapshot") or {})
+        if not snapshot:
+            scheme_id = str(request.get("scheme_id") or "")
+            snapshot = self.agreement_detail(
+                scheme_id, request.get("session_id") or "default",
+                request.get("target_protocol"),
+            ) or {}
+        if not snapshot:
+            raise ValueError("未找到要标记的方案。")
+        version_id = request.get("demand_version_id")
+        with self.store.lock:
+            conn = self.store.connect()
+            try:
+                cur = conn.execute(
+                    "INSERT INTO final_decisions(scheme_id,scheme_snapshot_json,source,"
+                    "demand_version_id,product_code,created_at) VALUES(?,?,?,?,?,?)",
+                    (str(request.get("scheme_id") or snapshot.get("agreement_id") or ""),
+                     json.dumps(snapshot, ensure_ascii=False),
+                     str(request.get("source") or snapshot.get("agreement_source") or "unknown"),
+                     int(version_id) if version_id not in (None, "") else None,
+                     self.store.current_product_code(), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                )
+                conn.commit()
+                return {"id": cur.lastrowid, "saved": True, "demand_version_id": version_id}
+            finally:
+                conn.close()
+
+    def final_decisions(self, limit=100):
+        conn = self.store.connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM final_decisions WHERE product_code=? ORDER BY id DESC LIMIT ?",
+                (self.store.current_product_code(), max(1, min(int(limit), 500)))
+            ).fetchall()
+            items = []
+            for row in rows:
+                item = dict(row)
+                item["scheme_snapshot"] = json.loads(item.pop("scheme_snapshot_json") or "{}")
+                items.append(item)
+            return items
+        finally:
+            conn.close()
 
     def _dedupe_expert_snapshots(self, items, near_threshold=0.018):
         definitions = self.store.parameter_map()
@@ -2137,6 +2256,7 @@ class Handler(BaseHTTPRequestHandler):
         "/api/admin/product-releases/history/create", "/api/admin/product-releases/maintenance/import",
         "/api/admin/product-releases/validate", "/api/admin/product-releases/activate",
         "/api/admin/portal-config", "/api/admin/model-service-settings",
+        "/api/requirements/version", "/api/requirements/restore", "/api/final-decisions",
     }
 
     def log_message(self, fmt, *args): print("[%s] %s" % (self.log_date_time_string(), fmt % args))
@@ -2280,6 +2400,8 @@ class Handler(BaseHTTPRequestHandler):
             elif path.startswith("/api/agreements/"):
                 agreement_id = unquote(path.split("/api/agreements/",1)[1]); item = self.app.agreement_detail(agreement_id,(query.get("session_id") or ["default"])[0],(query.get("protocol_id") or [None])[0]); self._json(item if item else {"error":"not_found"},200 if item else 404)
             elif path == "/api/saved": self._json({"items":self.app.saved_schemes()})
+            elif path == "/api/requirements/versions": self._json({"items":self.app.requirement_versions.list(int((query.get("limit") or [50])[0]))})
+            elif path == "/api/final-decisions": self._json({"items":self.app.final_decisions(int((query.get("limit") or [100])[0]))})
             elif path.startswith("/api/saved/"):
                 scheme_id = unquote(path.split("/api/saved/",1)[1]); item = self.app.saved_detail(scheme_id,(query.get("protocol_id") or [None])[0]); self._json(item if item else {"error":"not_found"},200 if item else 404)
             elif path.startswith("/api/admin/") and self.app.disable_admin: self._admin_forbidden()
@@ -2313,6 +2435,9 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/admin/wide-import/template": self._bytes(self.app.wide_table_parser().template_csv(), "text/csv; charset=utf-8", "protocol_wide_table_template.csv")
             elif path == "/api/admin/datamaster/template": self._bytes(self.app.data_master.template(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "DataMaster_Template.xlsx")
             elif path == "/api/admin/datamaster/current": self._bytes(self.app.data_master.export_current(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "DataMaster_Current.xlsx")
+            elif path == "/api/admin/semantic-package":
+                package, filename = self.app.semantic_snapshot.package()
+                self._bytes(package, "application/zip", filename)
             elif path.startswith("/api/"): self._json({"error":"not_found","path":path},404)
             else: self._static(path)
         except Exception as exc: traceback.print_exc(); self._json({"error":type(exc).__name__,"message":str(exc)},500)
@@ -2365,6 +2490,10 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/effectiveness-workbench/evaluate": self._json(self.app.effectiveness_workbench_evaluate(request))
             elif path == "/api/price-workbench/predict": self._json(self.app.price_workbench_predict(request))
             elif path == "/api/save-scheme": self._json(self.app.save(request))
+            elif path == "/api/requirements/version": self._json(self.app.capture_requirement_version(request, "manual"))
+            elif path == "/api/requirements/restore": self._json(self.app.requirement_versions.restore(request.get("version_id"), created_by="operator"))
+            elif path == "/api/final-decisions": self._json(self.app.save_final_decision(request))
+            elif path == "/api/relaxation-suggestions": self._json(self.app.relaxation_suggestions(request))
             elif path == "/api/saved/export":
                 self._json({"items": self.app.export_saved_schemes(request.get("scheme_ids") or [])})
             elif path.startswith("/api/saved/") and path.endswith("/recommendation-eligibility"):

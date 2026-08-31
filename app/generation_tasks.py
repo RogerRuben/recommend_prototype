@@ -8,6 +8,8 @@ import time
 import traceback
 import uuid
 
+from .generation_profiles import apply_generation_profile
+
 
 class GenerationTaskInvalidated(RuntimeError):
     pass
@@ -37,6 +39,11 @@ class GenerationTaskManager(object):
         # in the fingerprint.
         relevant["generation_budget"] = request.get("generation_budget")
         relevant["generation_rounds"] = request.get("generation_rounds")
+        relevant["exploration_profile"] = request.get("exploration_profile")
+        relevant["effective_exploration_profile"] = request.get("effective_exploration_profile")
+        relevant["time_budget_seconds"] = request.get("time_budget_seconds")
+        relevant["beam_width"] = request.get("beam_width")
+        relevant["seed_count"] = request.get("seed_count")
         relevant["product_code"] = self.app.runtime.schema["product_code"]
         semantic_fingerprint = getattr(self.app.store, "generation_semantics_fingerprint", None)
         relevant["master_data_semantics"] = (
@@ -51,7 +58,7 @@ class GenerationTaskManager(object):
 
     def canonicalize_generation_controls(self, request):
         """Return the single canonical representation used by generation and batch identity."""
-        req = dict(request or {})
+        req = apply_generation_profile(request)
         req["count"] = max(1, min(int(req.get("count") or req.get("generation_count") or 5), 30))
         if req.get("generation_budget") not in (None, ""):
             req["generation_budget"] = max(
@@ -65,6 +72,9 @@ class GenerationTaskManager(object):
             )
         else:
             req["generation_rounds"] = None
+        req["time_budget_seconds"] = max(1, min(int(req.get("time_budget_seconds") or 35), 600))
+        req["beam_width"] = max(2, min(int(req.get("beam_width") or 10), 40))
+        req["seed_count"] = max(2, min(int(req.get("seed_count") or 12), 40))
         return req
 
     def start(self, request, force=False):

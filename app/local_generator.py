@@ -2266,7 +2266,7 @@ class HistorySeededGenerator(object):
 
     def generate(self, request, count=5, seed=None, budget=1200, search_mode="fast", progress_callback=None):
         rng = random.Random(seed if seed is not None else int(time.time() * 1000) % 2147483647)
-        deep_search = str(search_mode or "fast") == "deep_extrapolation"
+        deep_search = str(search_mode or "fast") in ("deep_extrapolation", "deep")
         definitions = self._parameter_definitions()
         explicit_feasibility = assess_explicit_filter_feasibility(
             request.get("indicator_filters"), definitions, request.get("indicator_filter_mode", "all")
@@ -2332,7 +2332,8 @@ class HistorySeededGenerator(object):
                         expert[key] = evaluation.get(key)
                     expert["tags"] = self.store.derive_tags(expert["params"], evaluation)
                     history.append(expert)
-        seeds = self.select_seeds(request, max(8, min(16, len(history))), historical=history)
+        seed_count = max(2, min(int(request.get("seed_count") or 12), 40))
+        seeds = self.select_seeds(request, min(seed_count, len(history)), historical=history)
         if not seeds:
             raise ValueError("没有历史协议可作为生成种子")
         numeric, _means, stds, lower = self._local_statistics(seeds, definitions)
@@ -2369,6 +2370,9 @@ class HistorySeededGenerator(object):
         evaluations = 0
         attempted_evaluations = 0
         max_evaluations = max(1, int(budget))
+        time_budget_seconds = max(1, int(request.get("time_budget_seconds") or 35))
+        deadline = time.monotonic() + time_budget_seconds
+        stopped_for_time = False
         beam = []
 
         def record_rejection(stage, candidate_id, exc):
@@ -2504,7 +2508,7 @@ class HistorySeededGenerator(object):
             self._attach_lineage(record, item["base"], item["branch_info"])
             all_records.append(record)
             beam.append(record)
-        beam_width = 14 if deep_search else 10
+        beam_width = max(2, min(int(request.get("beam_width") or (14 if deep_search else 10)), 40))
         initial_beam_pool = list(beam)
         beam = self._beam_select(
             beam, definitions, width=min(beam_width, max(4, len(beam))), branch_effort=branch_effort
@@ -2520,6 +2524,9 @@ class HistorySeededGenerator(object):
         stopped_for_count = False
         pending = []
         while beam and attempted_evaluations < max_evaluations and iteration < len(step_schedule):
+            if time.monotonic() >= deadline:
+                stopped_for_time = True
+                break
             iteration += 1
             for branch_id in active_demand_branch_ids:
                 if branch_effort_row(branch_id).get("selected_beam_centers", 0) > 0:
@@ -2885,6 +2892,8 @@ class HistorySeededGenerator(object):
 
         if stopped_for_count:
             stopping_reason = "requested_count_met"
+        elif stopped_for_time:
+            stopping_reason = "time_budget_exhausted"
         elif attempted_evaluations >= max_evaluations:
             stopping_reason = "budget_exhausted"
         elif iteration >= len(step_schedule):
@@ -2911,6 +2920,7 @@ class HistorySeededGenerator(object):
             "rejection_details": rejection_details,
             "preflight": preflight,
             "generation_budget": max_evaluations,
+            "time_budget_seconds": time_budget_seconds,
             "actual_budget_used": attempted_evaluations,
             "max_rounds": max_rounds,
             "actual_rounds": iteration,
@@ -2921,11 +2931,12 @@ class HistorySeededGenerator(object):
             "bounds": branch_bounds,
             "relaxation_suggestions": suggestions,
             "generation_method": (
-                "deep_extrapolation_multistage_beam_search"
-                if deep_search else "batched_directional_beam_search"
+                "deep_extrapolation_multistage_beam_search" if str(search_mode) == "deep_extrapolation"
+                else "deep_diversity_beam_search" if deep_search
+                else "batched_directional_beam_search"
             ),
             "search_iterations": iteration,
-            "search_mode": "deep_extrapolation" if deep_search else "fast",
+            "search_mode": str(search_mode or "fast"),
             "explicit_filter_feasibility": explicit_feasibility,
             "branch_search_states": self._branch_search_states(
                 all_records, active_demand_branch_ids, iteration, branch_effort=branch_effort
