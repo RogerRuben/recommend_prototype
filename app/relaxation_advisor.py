@@ -2,6 +2,8 @@
 """Current-pool, demand-bound minimal relaxation suggestions."""
 from __future__ import print_function
 
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
+
 from .requirement_assessment import assess_requirements
 
 
@@ -33,11 +35,23 @@ def _inclusive_threshold(actual, operator, definition):
     places = max(0, int((definition or {}).get("decimal_places", 3) or 0))
     if str((definition or {}).get("search_type") or "").lower() in ("integer", "ip_grade"):
         places = 0
-    if operator == "lt":
-        return round(float(actual) + _step(definition), places)
-    if operator == "gt":
-        return round(float(actual) - _step(definition), places)
-    return round(float(actual), places)
+    step = Decimal(str(_step(definition)))
+    value = Decimal(str(actual))
+    quotient = value / step
+    floor_grid = quotient.to_integral_value(rounding=ROUND_FLOOR) * step
+    ceil_grid = quotient.to_integral_value(rounding=ROUND_CEILING) * step
+    on_grid = value == floor_grid
+    if operator == "lte":
+        threshold = ceil_grid
+    elif operator == "lt":
+        threshold = floor_grid + step
+    elif operator == "gte":
+        threshold = floor_grid
+    elif operator == "gt":
+        threshold = ceil_grid - step if on_grid else floor_grid
+    else:
+        threshold = value
+    return round(float(threshold), places)
 
 
 def build_relaxation_suggestions(request, candidates, definitions, tag_map,

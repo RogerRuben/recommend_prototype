@@ -15,6 +15,7 @@ from app.semantic_snapshot import canonicalize_snapshot, semantic_signature
 from app.data_master import DataMasterService
 from app.product_releases import ProductReleaseService
 from app.store import Store
+from app.xlsx_utils import read_workbook_bytes, write_workbook_bytes
 
 
 class VersionStore(object):
@@ -235,6 +236,44 @@ def test_datamaster_value_mappings_sheet_roundtrip(tmp_path):
     assert package["runtime_contract"]["price_output"]["unit"] == "wan_yuan"
     assert package["semantic_contract"]["model_bound"] == "derived_from_model_input_bindings"
 
+    workbook = read_workbook_bytes(service.export_current())
+    partial = write_workbook_bytes([
+        ("指标定义", workbook["指标定义"]),
+        ("ValueMappings", workbook["ValueMappings"]),
+    ])
+    partial_result = releases.import_maintenance_workbook(
+        draft["release_id"], "partial-maintenance.xlsx", partial)
+    assert partial_result["release"]["data"]["parameter_groups"][0]["group_name"] == "其他"
+    partial_parameter = partial_result["release"]["data"]["parameters"][0]
+    assert json.loads(partial_parameter["special_value_keys_json"]) == ["-1"]
+    assert json.loads(partial_parameter["display_value_mapping_json"])["01"] == "编号01"
+
+
+def test_relaxation_quantizes_non_grid_values_in_the_safe_direction():
+    definition = {"label": "重量", "value_type": "number",
+                  "search_type": "continuous", "decimal_places": 3}
+    candidates = [{"params": {"weight": 4.2004}, "tags": []}]
+    expected = {"lte": 4.201, "lt": 4.201, "gte": 4.2, "gt": 4.2}
+    starts = {"lte": 3.5, "lt": 3.5, "gte": 5.0, "gt": 5.0}
+    for operator, threshold in expected.items():
+        request = {"indicator_filters": [{"parameter_id": "weight", "operator": operator,
+                                            "value1": starts[operator]}], "selected_tags": []}
+        suggestions = build_relaxation_suggestions(
+            request, candidates, {"weight": definition}, {}, [])
+        suggestion = next(item for item in suggestions if item["condition_id"] == "weight")
+        assert abs(suggestion["after"] - threshold) < 1e-9
+        assert suggestion["current_pool_new_strict_count"] == 1
+
+    integer_definition = dict(definition, search_type="integer", decimal_places=0)
+    integer_candidates = [{"params": {"weight": 4}, "tags": []}]
+    for operator, threshold in {"lte": 4, "lt": 5, "gte": 4, "gt": 3}.items():
+        request = {"indicator_filters": [{"parameter_id": "weight", "operator": operator,
+                                            "value1": 3 if operator in ("lte", "lt") else 5}],
+                   "selected_tags": []}
+        suggestion = build_relaxation_suggestions(
+            request, integer_candidates, {"weight": integer_definition}, {}, [])[0]
+        assert suggestion["after"] == threshold
+
 
 def test_full_ranked_analysis_and_authoritative_final_decision_contracts_are_wired():
     server = open("app/server.py", "r", encoding="utf-8").read()
@@ -248,3 +287,7 @@ def test_full_ranked_analysis_and_authoritative_final_decision_contracts_are_wir
     assert "scheme_snapshot" not in final_client
     assert "never trust a client supplied snapshot" in server
     assert "需求版本不属于当前成品" in server
+    assert "schemeDirty=false" in client
+    assert "state.schemeDirty=true" in client
+    assert "if(state.schemeDirty)return toast" in client
+    assert "state.evaluationDirty=false;renderEvaluation" in client

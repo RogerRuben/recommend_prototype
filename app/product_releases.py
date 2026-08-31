@@ -16,7 +16,10 @@ import re
 from datetime import datetime
 
 from .data_master import (
+    SHEETS as DATAMASTER_SHEETS,
+    OPTIONAL_SHEETS as DATAMASTER_OPTIONAL_SHEETS,
     _json_allowed,
+    apply_value_mappings,
     clean,
     integer,
     normalize_coupling_type,
@@ -27,6 +30,7 @@ from .data_master import (
     normalize_severity,
     normalize_value_type,
     num,
+    rows_to_dicts,
     validate_business_data,
 )
 from .display_mapping import dump_display_mapping
@@ -266,7 +270,13 @@ class ProductReleaseService(object):
             raise
 
     def _import_maintenance_workbook(self, release_id, filename, raw, skip_invalid=False):
-        if self.data_master is not None:
+        if not clean(filename).lower().endswith(".xlsx"):
+            raise ValueError("维护工作簿仅支持.xlsx文件。")
+        workbook = read_workbook_bytes(raw)
+        required_datamaster_sheets = [name for name in DATAMASTER_SHEETS
+                                      if name not in DATAMASTER_OPTIONAL_SHEETS]
+        is_full_datamaster = all(name in workbook for name in required_datamaster_sheets)
+        if self.data_master is not None and is_full_datamaster:
             report = self.data_master.parse(filename, raw)
             if not report.get("valid"):
                 raise ValueError("DataMaster校验未通过：%s" % "；".join(report.get("errors") or []))
@@ -288,15 +298,12 @@ class ProductReleaseService(object):
                 "modules": [{"section": section, "status": "imported",
                              "valid_count": len(data.get(section) or [])} for section in SECTIONS],
             }
-        if not clean(filename).lower().endswith(".xlsx"):
-            raise ValueError("维护工作簿仅支持.xlsx文件。")
-        workbook = read_workbook_bytes(raw)
         sheet_sections = (
             ("成品信息", "products"), ("指标定义", "parameters"), ("指标分组", "parameter_groups"),
             ("标签字典", "tags"), ("标签规则", "tag_rules"), ("耦合关系", "couplings"),
             ("约束规则", "constraints"), ("历史协议", "agreements"),
         )
-        if not any(sheet in workbook for sheet, _section in sheet_sections):
+        if not any(sheet in workbook for sheet, _section in sheet_sections) and "ValueMappings" not in workbook:
             raise ValueError("工作簿中没有可识别的DataMaster数据工作表。")
         reports = []
         for sheet, section in sheet_sections:
@@ -323,6 +330,20 @@ class ProductReleaseService(object):
                 "sheet": sheet, "section": section, "status": status,
                 "valid_count": report.get("valid_count", 0), "invalid_count": report.get("invalid_count", 0),
                 "warnings": report.get("global_warnings") or [],
+            })
+        if "ValueMappings" in workbook:
+            release = self.get(release_id)
+            parameters = [dict(item) for item in release["data"].get("parameters") or []]
+            mapping_errors = []
+            apply_value_mappings(
+                parameters, rows_to_dicts(workbook["ValueMappings"]), mapping_errors,
+            )
+            if mapping_errors:
+                raise ValueError("；".join(mapping_errors))
+            self.set_section(release_id, "parameters", parameters)
+            reports.append({
+                "sheet": "ValueMappings", "section": "parameters",
+                "status": "merged", "valid_count": len(parameters), "invalid_count": 0,
             })
         return {"release": self.get(release_id), "modules": reports}
 
@@ -648,18 +669,19 @@ class ProductReleaseService(object):
             mapping = clean(row.get("model_value_mapping_json"))
             display_mapping = clean(row.get("display_value_mapping_json"))
             special_keys = clean(row.get("special_value_keys_json"))
+            parsed_special = []
             if mapping:
                 parsed_mapping = json.loads(mapping)
                 if not isinstance(parsed_mapping, dict):
                     raise ValueError("模型取值映射必须是JSON对象")
                 mapping = json.dumps(parsed_mapping, ensure_ascii=False)
-            if display_mapping:
-                display_mapping = dump_display_mapping(display_mapping, allowed)
             if special_keys:
                 parsed_special = json.loads(special_keys)
                 if not isinstance(parsed_special, list):
                     raise ValueError("特殊业务状态值必须是JSON数组")
                 special_keys = json.dumps([str(value) for value in parsed_special], ensure_ascii=False)
+            if display_mapping:
+                display_mapping = dump_display_mapping(display_mapping, allowed + parsed_special)
             return {
                 "parameter_id": clean(row.get("parameter_id")), "label": clean(row.get("label")),
                 "parameter_group": clean(row.get("parameter_group")) or "其他",

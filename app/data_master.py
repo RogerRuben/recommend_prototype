@@ -215,6 +215,44 @@ def rows_to_dicts(rows):
     return result
 
 
+def apply_value_mappings(parameters, mapping_rows, errors=None):
+    """Apply the authoritative three-layer mapping sheet to parameter rows.
+
+    Shared by full DataMaster imports and partial Product Release maintenance
+    workbooks so the two ingestion paths cannot drift semantically.
+    """
+    errors = errors if errors is not None else []
+    param_by_key = dict((clean(item.get("parameter_id")), item)
+                        for item in parameters or [] if clean(item.get("parameter_id")))
+    grouped = {}
+    for row in mapping_rows or []:
+        parameter_id = clean(row.get("parameter_id"))
+        if parameter_id:
+            grouped.setdefault(parameter_id, []).append(row)
+    for parameter_id, rows in grouped.items():
+        parameter = param_by_key.get(parameter_id)
+        if parameter is None:
+            errors.append("ValueMappings引用了不存在的指标：%s" % parameter_id)
+            continue
+        allowed, special, display_mapping, model_mapping = [], [], {}, {}
+        for row in rows:
+            business_value = _json_scalar(row.get("business_value"))
+            key = str(business_value)
+            if parse_bool(row.get("allowed", 0)):
+                allowed.append(business_value)
+            if parse_bool(row.get("special", 0)):
+                special.append(key)
+            if row.get("display_value") not in (None, ""):
+                display_mapping[key] = str(row.get("display_value"))
+            if row.get("model_value") not in (None, ""):
+                model_mapping[key] = _json_scalar(row.get("model_value"))
+        parameter["allowed_values_json"] = json.dumps(allowed, ensure_ascii=False) if allowed else None
+        parameter["special_value_keys_json"] = json.dumps(special, ensure_ascii=False) if special else None
+        parameter["display_value_mapping_json"] = json.dumps(display_mapping, ensure_ascii=False) if display_mapping else None
+        parameter["model_value_mapping_json"] = json.dumps(model_mapping, ensure_ascii=False) if model_mapping else None
+    return parameters
+
+
 SUPPORTED_VALUE_TYPES = ("number", "boolean", "ip_grade", "enum", "text")
 SUPPORTED_SEARCH_TYPES = ("auto", "continuous", "integer", "ordered_discrete", "unordered_enum", "boolean")
 SUPPORTED_OPERATORS = ("gte", "gt", "lte", "lt", "eq", "boolean_is", "special_is", "text_equals", "text_contains", "range_inside", "range_overlap")
@@ -756,7 +794,6 @@ class DataMasterService(object):
                     report["errors"].append("指标%s只有布尔取值类型才能使用布尔开关搜索。" % p.get("parameter_id"))
                 if p.get("search_type") in ("continuous", "integer", "ordered_discrete") and p.get("value_type") not in ("number", "ip_grade"):
                     report["errors"].append("指标%s的搜索类型与取值类型不匹配。" % p.get("parameter_id"))
-            param_by_key = dict((x["parameter_id"], x) for x in parameters)
             for parameter in parameters:
                 # Model-bound status is synchronized later from whichever HTTP
                 # services are active; it is not a DataMaster validation input.
@@ -766,33 +803,7 @@ class DataMasterService(object):
             # A readable ValueMappings sheet is authoritative when present.
             # Legacy JSON columns remain fully supported when it is absent.
             if "ValueMappings" in workbook:
-                grouped = {}
-                for row in parsed["ValueMappings"]:
-                    parameter_id = clean(row.get("parameter_id"))
-                    if not parameter_id:
-                        continue
-                    grouped.setdefault(parameter_id, []).append(row)
-                for parameter_id, mapping_rows in grouped.items():
-                    parameter = param_by_key.get(parameter_id)
-                    if parameter is None:
-                        report["errors"].append("ValueMappings引用了不存在的指标：%s" % parameter_id)
-                        continue
-                    allowed, special, display_mapping, model_mapping = [], [], {}, {}
-                    for row in mapping_rows:
-                        business_value = _json_scalar(row.get("business_value"))
-                        key = str(business_value)
-                        if parse_bool(row.get("allowed", 0)):
-                            allowed.append(business_value)
-                        if parse_bool(row.get("special", 0)):
-                            special.append(key)
-                        if row.get("display_value") not in (None, ""):
-                            display_mapping[key] = str(row.get("display_value"))
-                        if row.get("model_value") not in (None, ""):
-                            model_mapping[key] = _json_scalar(row.get("model_value"))
-                    parameter["allowed_values_json"] = json.dumps(allowed, ensure_ascii=False) if allowed else None
-                    parameter["special_value_keys_json"] = json.dumps(special, ensure_ascii=False) if special else None
-                    parameter["display_value_mapping_json"] = json.dumps(display_mapping, ensure_ascii=False) if display_mapping else None
-                    parameter["model_value_mapping_json"] = json.dumps(model_mapping, ensure_ascii=False) if model_mapping else None
+                apply_value_mappings(parameters, parsed["ValueMappings"], report["errors"])
 
             group_items = []
             if "指标分组" in workbook:
