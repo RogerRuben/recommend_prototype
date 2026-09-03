@@ -61,7 +61,7 @@ def static_contracts():
 def portal_and_login_contracts():
     portal = load_service_portal_config(ROOT)
     models = load_model_service_config(ROOT)
-    assert list(portal["services"]) == ["recommendation", "quick_price", "advanced_price", "effectiveness", "cost_effectiveness_analysis", "admin"]
+    assert list(portal["services"]) == ["recommendation", "quick_price", "cost_effectiveness_analysis", "advanced_price", "effectiveness", "admin"]
     assert portal["services"]["advanced_price"]["url"] == ""
     assert portal["services"]["advanced_price"]["enabled"] is False
     assert portal["services"]["advanced_price"]["visible"] is True
