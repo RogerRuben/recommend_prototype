@@ -29,6 +29,14 @@
       "visible": true,
       "enabled": true
     },
+    "cost_effectiveness_analysis": {
+      "label": "效费比分析",
+      "description": "对已有方案进行价格、效能与 Pareto 权衡分析",
+      "url": "http://127.0.0.1:17000",
+      "visible": true,
+      "enabled": true,
+      "open_new_window": true
+    },
     "admin": {
       "label": "数据管理中心",
       "description": "维护成品数据、指标、规则与系统设置",

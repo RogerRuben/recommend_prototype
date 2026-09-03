@@ -1,6 +1,6 @@
 param(
     [string]$OutputDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) "deliverables\source_no_wheels"),
-    [string]$PackageName = "IndustrialProtocolDemo_V19_6_14_Clean_WIN7_Source_NoWheels_20260814"
+    [string]$PackageName = "IndustrialProtocolDemo_V22_CostEffectiveness_WIN7_Source_NoWheels_20260903"
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,7 +18,7 @@ New-Item -ItemType Directory -Force -Path $stage | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $stage "runtime") | Out-Null
 Set-Content -LiteralPath (Join-Path $stage "runtime\.keep") -Value "Runtime workspace; no virtual environment is included." -Encoding ASCII
 
-$directories = @("app", "config", "data", "data_master", "deploy", "docs", "models", "services", "tests", "tools")
+$directories = @("app", "config", "cost_effectiveness_analysis", "data", "data_master", "deploy", "docs", "models", "services", "tests", "tools")
 foreach ($relative in $directories) {
     $source = Join-Path $root $relative
     if (Test-Path -LiteralPath $source) {
@@ -26,7 +26,7 @@ foreach ($relative in $directories) {
         New-Item -ItemType Directory -Force -Path $destination | Out-Null
         & robocopy $source $destination /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS `
             /XD node_modules wheelhouse_win7 runtime_state __pycache__ .pytest_cache venv .venv model_conversion_v19_5 original_runtime_demo original_demo frozen_effect_v11_v2_inspection frozen_v11_v2_installed_smoke `
-            /XF *.whl *.pyc *.pyo *.log *.rar | Out-Null
+            /XF *.whl *.pyc *.pyo *.log *.rar *.db-wal *.db-shm | Out-Null
         if ($LASTEXITCODE -gt 7) {
             throw "Failed to copy source directory $relative (robocopy exit code $LASTEXITCODE)."
         }
@@ -41,6 +41,7 @@ $allowedDocs = @(
     "MODEL_FIELD_MAPPING.md", "MODEL_SERVICE_DEPLOYMENT_WIN7.md",
     "MODEL_SERVICE_OUTAGE_AND_DATA_CENTER.md", "PORT_AND_STARTUP.md",
     "PRICE_NATIVE_MODEL_DYNAMIC_DEPLOYMENT.md", "PRICE_TRAINING_AND_OFFLINE_ENVIRONMENT.md",
+    "COST_EFFECTIVENESS_ANALYSIS.md",
     "CLEAN_WIN7_DEPLOYMENT_V19_6_13.md", "V19_6_14_COMPLETE_PARAMETER_PAYLOAD_AND_ADMIN_SAVE.md",
     "V19_6_11_FROZEN_EFFECT_CHANGELOG.md", "V19_6_12_RELAXED_HTTP_READINESS.md",
     "操作人员手册_测试数据运行与成品更换.md", "效能模型成品代号修改与重新打包.md",
@@ -84,7 +85,8 @@ $rootFiles = @(
     "START_PRICE_SERVICE_WIN7.bat", "START_EFFECTIVENESS_SERVICE_WIN7.bat", "START_ALL_SERVICES_WIN7.bat",
     "START_RECOMMENDATION_WITH_SERVICES_WIN7.bat", "START_ALL_NO_BROWSER.bat",
     "RUN_PRICE_TRAINING_NOTEBOOK_PY38.bat", "CREATE_PRICE_TRAINING_ENV_PY38.bat",
-    "VERIFY_MODEL_ENVIRONMENTS.bat", "BUILD_SOURCE_DEPLOYMENT_NO_WHEELS.bat"
+    "VERIFY_MODEL_ENVIRONMENTS.bat", "BUILD_SOURCE_DEPLOYMENT_NO_WHEELS.bat",
+    "START_COST_EFFECTIVENESS_ANALYSIS_WIN7.bat"
 )
 Get-ChildItem -LiteralPath $root -File | Where-Object { $rootFiles -contains $_.Name } | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $stage $_.Name) -Force
@@ -124,7 +126,7 @@ Get-ChildItem -LiteralPath $stage -Directory -Recurse | Where-Object {
     Remove-Item -LiteralPath $_.FullName -Recurse -Force
 }
 
-$excludedExtensions = @(".whl", ".pyc", ".pyo", ".log", ".rar")
+$excludedExtensions = @(".whl", ".pyc", ".pyo", ".log", ".rar", ".db-wal", ".db-shm")
 Get-ChildItem -LiteralPath $stage -File -Recurse | Where-Object {
     $excludedExtensions -contains $_.Extension.ToLowerInvariant()
 } | Remove-Item -Force
@@ -141,6 +143,8 @@ $manifest = [ordered]@{
     effectiveness_model_install = "INSTALL_FROZEN_EFFECTIVENESS_MODEL_WIN7.bat (recommended frozen ZIP) or PACKAGE_EFFECTIVENESS_SERVICE_MODEL_WIN7.bat (legacy compatible)"
     effectiveness_workbench = "http://127.0.0.1:17891/effectiveness"
     price_workbench = "http://127.0.0.1:17891/price"
+    cost_effectiveness_workbench = "http://127.0.0.1:17000"
+    cost_effectiveness_start_script = "START_COST_EFFECTIVENESS_ANALYSIS_WIN7.bat"
     install_script = "INSTALL_SOURCE_DEPENDENCIES_WIN7.bat"
     start_script = "START_ALL_SERVICES_WIN7.bat"
     excluded = @("wheelhouse_win7", "runtime/venvs", "backups", "logs", "*.whl", "*.pyc", "*.log", "handoff archives", "historical upgrade docs", "experimental generators", "legacy demo runtimes")
@@ -162,7 +166,8 @@ $guideLines = @(
     "8. A business/model mismatch pauses model calculations only; it does not block data maintenance, switching, or historical-product recommendation.",
     "9. Open the single *V19_6*.ipynb file in the package. Set only PRODUCT_CODE in the final cell; any fitted model subset is accepted and installed directly as price_native_bundle.pkl.",
     "10. The data center model page reads HTTP health/schema and produces example JSON. It does not load local model files in service mode.",
-    "11. Use examples/final_acceptance for the encoded English-field workbook, V10/V11 expert-state JSON, and matching virtual model artifacts.",
+    "11. Run START_COST_EFFECTIVENESS_ANALYSIS_WIN7.bat to open the independent read-only cost-effectiveness workbench at http://127.0.0.1:17000. It requires :18101 and :18102 but not :17891.",
+    "12. Use examples/final_acceptance for the encoded English-field workbook, V10/V11 expert-state JSON, and matching virtual model artifacts.",
     "",
     "Online effectiveness learning is external. Prefer INSTALL_FROZEN_EFFECTIVENESS_MODEL_WIN7.bat for effectiveness_model_*.zip exported by the final V11 expert software.",
     "The legacy source + Workbook + State path remains available through PACKAGE_EFFECTIVENESS_SERVICE_MODEL_WIN7.bat."

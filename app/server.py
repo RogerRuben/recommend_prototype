@@ -906,7 +906,7 @@ class Application(object):
             if not item.get("visible", True) or (key == "admin" and self.disable_admin):
                 continue
             item["key"] = key
-            item["external"] = bool(item.get("enabled") and urlparse(str(item.get("url") or "")).scheme in ("http", "https"))
+            item["external"] = bool(item.get("enabled") and item.get("open_new_window", urlparse(str(item.get("url") or "")).scheme in ("http", "https")))
             services.append(item)
         return {"title": self.portal_config.get("title") or "工业技术协议智能系统",
                 "services": services, "config_path": self.portal_config.get("config_path")}
@@ -928,6 +928,7 @@ class Application(object):
             item["url"] = str(item.get("url") or "").strip()
             item["visible"] = _boolean(item.get("visible"), True)
             item["enabled"] = _boolean(item.get("enabled"), True)
+            item["open_new_window"] = _boolean(item.get("open_new_window"), bool(urlparse(item["url"]).scheme))
             if item["url"]:
                 parsed = urlparse(item["url"])
                 local = item["url"].startswith("/") and not item["url"].startswith("//") and not parsed.scheme and not parsed.netloc

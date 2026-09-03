@@ -1,0 +1,16 @@
+{
+  "host": "127.0.0.1",
+  "port": 17000,
+  "database": {
+    "path": "data/protocol_demo.db"
+  },
+  "services": {
+    "price": {
+      "url": "http://127.0.0.1:18101"
+    },
+    "effectiveness": {
+      "url": "http://127.0.0.1:18102"
+    }
+  },
+  "timeout_seconds": 30
+}

@@ -61,10 +61,12 @@ def static_contracts():
 def portal_and_login_contracts():
     portal = load_service_portal_config(ROOT)
     models = load_model_service_config(ROOT)
-    assert list(portal["services"]) == ["recommendation", "quick_price", "advanced_price", "effectiveness", "admin"]
+    assert list(portal["services"]) == ["recommendation", "quick_price", "advanced_price", "effectiveness", "cost_effectiveness_analysis", "admin"]
     assert portal["services"]["advanced_price"]["url"] == ""
     assert portal["services"]["advanced_price"]["enabled"] is False
     assert portal["services"]["advanced_price"]["visible"] is True
+    assert portal["services"]["cost_effectiveness_analysis"]["url"].endswith(":17000")
+    assert portal["services"]["cost_effectiveness_analysis"]["open_new_window"] is True
     assert "advanced_price" not in models
     assert models["price_service_url"].endswith(":18101")
     assert models["effectiveness_service_url"].endswith(":18102")
@@ -86,7 +88,7 @@ def portal_and_login_contracts():
         }
         path.write_text(json.dumps({"services": allowed}), encoding="utf-8")
         loaded = load_service_portal_config(folder)["services"]
-        assert set(loaded) == set(allowed) | {"recommendation", "quick_price", "advanced_price", "effectiveness", "admin"}
+        assert set(loaded) == set(allowed) | {"recommendation", "quick_price", "advanced_price", "effectiveness", "cost_effectiveness_analysis", "admin"}
         assert loaded["recommendation"]["url"] == "/"
         for unsafe in ("javascript:alert(1)", "data:text/html,x", "file:///tmp/x", "vbscript:x", "//evil.test/x", "\\\\evil.test\\x", ""):
             path.write_text(json.dumps({"services": {"bad": {"url": unsafe, "enabled": True}}}), encoding="utf-8")
