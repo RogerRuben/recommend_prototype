@@ -30,6 +30,7 @@ class CostEffectivenessApplication(object):
             self.config["services"]["price"]["url"],
             self.config["services"]["effectiveness"]["url"],
             self.config["timeout_seconds"],
+            self.config.get("price_output"),
         )
         self.static_dir = Path(__file__).resolve().parent / "static"
 
@@ -47,6 +48,7 @@ class CostEffectivenessApplication(object):
             "price_service": (services.get("price") or {}).get("status", "unavailable"),
             "effectiveness_service": (services.get("effectiveness") or {}).get("status", "unavailable"),
             "services": services,
+            "price_output": self.config.get("price_output"),
         }
 
     def list_schemes(self, source=None, search=None):
@@ -89,6 +91,7 @@ class CostEffectivenessApplication(object):
             "pareto_scheme_ids": frontier, "models": evaluated["models"],
             "target_protocol": evaluated["target_protocol"],
             "analysis_time": evaluated["analysis_time"],
+            "price_output": evaluated.get("price_output") or self.config.get("price_output"),
             "service_errors": evaluated["service_errors"],
         }
 

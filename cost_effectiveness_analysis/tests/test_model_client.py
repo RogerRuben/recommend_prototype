@@ -29,3 +29,24 @@ def test_failed_batch_is_bisected_and_only_bad_scheme_fails(monkeypatch):
     assert rows["bad"]["predicted_price_wan"] is None
     assert "attr_006" in rows["bad"]["price_error"]
     assert calls[0][1] == ["good-a", "bad", "good-b"]
+
+
+def test_price_output_uses_independent_unit_and_scale(monkeypatch):
+    def fake_request(url, payload=None, timeout=1):
+        candidate_id = payload["items"][0]["candidate_id"]
+        if "predict" in url:
+            return {"items": [{"candidate_id": candidate_id, "success": True,
+                               "prediction": {"predicted_price_wan": 250000}}]}
+        return {"items": [{"candidate_id": candidate_id, "success": True,
+                           "evaluation": {"capability_score": 100}}]}
+
+    monkeypatch.setattr(model_client_module, "_json_request", fake_request)
+    client = CostEffectivenessModelClient(
+        "http://price", "http://effect", 1, {"unit": "yuan", "scale": 2}
+    )
+    result = client.evaluate_batch([{"scheme_id": "S1", "model_parameters": {}}])
+    row = result["items"][0]
+    assert row["predicted_price_wan"] == 50
+    assert row["price_output_normalization"]["raw_value"] == 250000
+    assert result["price_output"]["unit"] == "yuan"
+    assert result["price_output"]["sample_wan"] == 24

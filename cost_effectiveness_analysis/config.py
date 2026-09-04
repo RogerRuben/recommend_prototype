@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 
+from app.price_output import validate_price_output_config
+
 
 DEFAULTS = {
     "host": "127.0.0.1",
@@ -14,6 +16,7 @@ DEFAULTS = {
         "price": {"url": "http://127.0.0.1:18101"},
         "effectiveness": {"url": "http://127.0.0.1:18102"},
     },
+    "price_output": {"unit": "wan_yuan", "scale": 1.0},
     "timeout_seconds": 30.0,
 }
 
@@ -48,6 +51,12 @@ def load_config(root):
     result["services"]["effectiveness"]["url"] = os.environ.get(
         "COST_EFFECTIVENESS_EFFECTIVENESS_URL", result["services"]["effectiveness"]["url"]
     ).rstrip("/")
+    price_output = dict(result.get("price_output") or {})
+    if "COST_EFFECTIVENESS_PRICE_OUTPUT_UNIT" in os.environ:
+        price_output["unit"] = os.environ["COST_EFFECTIVENESS_PRICE_OUTPUT_UNIT"]
+    if "COST_EFFECTIVENESS_PRICE_OUTPUT_SCALE" in os.environ:
+        price_output["scale"] = os.environ["COST_EFFECTIVENESS_PRICE_OUTPUT_SCALE"]
+    result["price_output"] = validate_price_output_config(price_output)
     result["timeout_seconds"] = float(os.environ.get(
         "COST_EFFECTIVENESS_TIMEOUT_SECONDS", result["timeout_seconds"]
     ))

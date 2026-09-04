@@ -20,11 +20,28 @@ python -m cost_effectiveness_analysis.app --port 17000
 
 推荐服务 `:17891` 不需要启动。浏览器只访问 `:17000`，由后端批量调用两个模型服务，不会直连模型端口。
 
-环境变量 `COST_EFFECTIVENESS_HOST`、`COST_EFFECTIVENESS_PORT`、`COST_EFFECTIVENESS_DATABASE`、`COST_EFFECTIVENESS_PRICE_URL`、`COST_EFFECTIVENESS_EFFECTIVENESS_URL` 和 `COST_EFFECTIVENESS_TIMEOUT_SECONDS` 可覆盖默认值。
+启动脚本只使用现场 `runtime` 包，不再回退到系统 `python`。解释器按 `COST_EFFECTIVENESS_PYTHON`、`MAIN_APP_PYTHON`、`runtime\python38\python.exe`、`runtime\venvs\model_runtime38\Scripts\python.exe`、`runtime\python.exe` 的顺序解析；启动前会预检效费比模块和价格换算模块能否导入。可在不提交 Git 的 `runtime\service_runtime.local.bat` 中单独配置：
+
+```bat
+set "COST_EFFECTIVENESS_PYTHON=C:\path\to\accepted-runtime\python.exe"
+```
+
+环境变量 `COST_EFFECTIVENESS_HOST`、`COST_EFFECTIVENESS_PORT`、`COST_EFFECTIVENESS_DATABASE`、`COST_EFFECTIVENESS_PRICE_URL`、`COST_EFFECTIVENESS_EFFECTIVENESS_URL`、`COST_EFFECTIVENESS_TIMEOUT_SECONDS`、`COST_EFFECTIVENESS_PRICE_OUTPUT_UNIT` 和 `COST_EFFECTIVENESS_PRICE_OUTPUT_SCALE` 可覆盖默认值。
 
 ## 配置
 
-独立配置位于 `config/cost_effectiveness_analysis.json`。数据库路径、页面监听地址与两个模型 API 地址都在这里维护，不使用 Portal URL 或 `model_services.json` 作为本服务配置。
+独立配置位于 `config/cost_effectiveness_analysis.json`。数据库路径、页面监听地址、两个模型 API 地址和价格输出换算都在这里维护，不使用 Portal URL 或 `model_services.json` 作为本服务配置。
+
+价格服务的原始数值必须在 `price_output` 中声明单位和附加尺度，例如价格服务返回“元”时：
+
+```json
+"price_output": {
+  "unit": "yuan",
+  "scale": 1.0
+}
+```
+
+允许的 `unit` 为 `yuan`、`thousand_yuan`、`wan_yuan`、`million_yuan`。换算规则与推荐系统一致：`服务返回值 × scale × 单位换算系数 = 万元价格`。但效费比工作台读取自己的配置，修改 `model_services.json` 不会隐式改变本页面。默认值 `wan_yuan / 1.0` 保持现有模型无需换算时的行为。配置非法、尺度非有限或不大于零时，服务会拒绝启动，避免产生静默错价。
 
 SQLite 数据库始终通过 URI `mode=ro` 打开，并额外启用 `PRAGMA query_only=ON`。服务不提供保存、修改或删除接口；分析结果仅驻留在当前页面内存中，刷新后消失。
 
@@ -35,7 +52,7 @@ SQLite 数据库始终通过 URI `mode=ro` 打开，并额外启用 `PRAGMA quer
 - `GET /api/schemes/{scheme_id}`：读取方案及业务参数。
 - `POST /api/analyze`：接收 2–30 个 `scheme_ids` 和可选 `target_protocol`，批量重新计算并返回 CE、Pareto、KPI 与模型版本。
 
-效费比定义为 `capability_score / predicted_price_wan`。价格小于等于零时效费比为 `null`。价格或效能任一计算失败的方案仍在结果中展示，但不参与效费比和 Pareto 判断。
+价格先按上述独立配置统一换算成万元，再计算 `capability_score / predicted_price_wan`。价格小于等于零时效费比为 `null`。价格或效能任一计算失败的方案仍在结果中展示，但不参与效费比和 Pareto 判断。API 的 `price_output` 和每个方案的 `price_output_normalization` 会返回本次换算规则与原始值，页面“技术信息”也会显示生效单位和尺度。
 
 模型调用首先发送一个批量请求。如果模型服务因为某个旧方案缺少必填字段而拒绝整批请求，工作台会递归拆分批次以定位异常方案；完整方案仍返回计算结果，只有真正异常的方案显示失败原因。模型服务整体不可连接时不会进行拆分重试。
 

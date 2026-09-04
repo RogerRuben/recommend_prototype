@@ -6,13 +6,15 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 from app.model_service_client import _json_request
+from app.price_output import PriceOutputNormalizer
 
 
 class CostEffectivenessModelClient(object):
-    def __init__(self, price_url, effectiveness_url, timeout=30.0):
+    def __init__(self, price_url, effectiveness_url, timeout=30.0, price_output_config=None):
         self.price_url = price_url.rstrip("/")
         self.effectiveness_url = effectiveness_url.rstrip("/")
         self.timeout = float(timeout)
+        self.price_normalizer = PriceOutputNormalizer(price_output_config)
 
     def health(self):
         def probe(name, url):
@@ -113,9 +115,16 @@ class CostEffectivenessModelClient(object):
             price_error = calls["price"]["item_errors"].get(scheme_id)
             effect_error = calls["effectiveness"]["item_errors"].get(scheme_id)
             if price_item and price_item.get("success", True):
-                predicted = (price_item.get("prediction") or {}).get("predicted_price_wan")
+                try:
+                    normalized_price = self.price_normalizer.normalize_response(price_item)
+                    prediction = normalized_price.get("prediction") or {}
+                    predicted = prediction.get("predicted_price_wan")
+                    price_normalization = prediction.get("price_output_normalization")
+                except (TypeError, ValueError) as exc:
+                    predicted, price_normalization = None, None
+                    price_error = "价格服务输出无法换算：%s" % exc
             else:
-                predicted = None
+                predicted, price_normalization = None, None
                 price_error = price_error or (price_item or {}).get("message") or "价格服务未返回该方案"
             if effect_item and effect_item.get("success", True):
                 evaluation = effect_item.get("evaluation") or {}
@@ -125,6 +134,7 @@ class CostEffectivenessModelClient(object):
                 effect_error = effect_error or (effect_item or {}).get("message") or "效能服务未返回该方案"
             results.append({
                 "scheme_id": scheme_id, "predicted_price_wan": predicted,
+                "price_output_normalization": price_normalization,
                 "capability_score": capability,
                 "feasibility_probability": evaluation.get("feasibility_probability"),
                 "physical_gate": (effect_item or {}).get("physical_gate"),
@@ -141,5 +151,6 @@ class CostEffectivenessModelClient(object):
             "models": {"price_model_version": price_model.get("model_version"),
                        "effectiveness_model_version": effect_model.get("model_version")},
             "target_protocol": protocol, "analysis_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "price_output": self.price_normalizer.describe(),
             "service_errors": {k: v["error"] for k, v in calls.items() if v["error"]},
         }
