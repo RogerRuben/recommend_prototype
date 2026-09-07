@@ -27,6 +27,7 @@
     "a": {
       "field_label": "钩锁力-1",
       "dtype": "number",
+      "required": false,
       "unit": "请填写真实单位",
       "generation_min": null,
       "generation_max": null,
@@ -37,6 +38,7 @@
     "b": {
       "field_label": "钩锁力-2",
       "dtype": "number",
+      "required": false,
       "unit": "请填写真实单位",
       "generation_min": null,
       "generation_max": null,
@@ -47,6 +49,7 @@
     "c": {
       "field_label": "钩锁刚度-1",
       "dtype": "number",
+      "required": false,
       "unit": "请填写真实单位",
       "generation_min": null,
       "generation_max": null,
@@ -57,6 +60,7 @@
     "d": {
       "field_label": "钩锁刚度-2",
       "dtype": "number",
+      "required": false,
       "unit": "请填写真实单位",
       "generation_min": null,
       "generation_max": null,

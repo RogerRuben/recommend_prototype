@@ -76,6 +76,8 @@ services/effectiveness_service/config/lock_v17_adapter.json
 3. 填写真实单位、数据类型、生成上下限和偏好方向。
 4. 只有确认了真实搜索范围后，才将 `participates_generation` 和 `improvement.enabled` 改为 `true`。
 
+四个派生源字段的公共 Schema 固定为 `required=false`。这是“条件必需”而非“全局必需”：一整组可以合法缺失，但只填写组内一个字段会由 Adapter 明确拒绝。
+
 示例配置故意将改进搜索关闭并把范围留空，防止现场用猜测范围生成参数。
 
 启动时会验证：四个源字段唯一、每组恰好两个字段、`target_field` 存在于冻结模型、缺失组规则为归零、partial 规则为拒绝、物理兼容占位为 `0.65`。
@@ -106,6 +108,7 @@ services/effectiveness_service/START_EFFECTIVENESS_LOCK_V17_WIN7.bat
 - `fields` 包含四个真实业务源字段和其它直接模型输入
 - `fields` 不包含 `e`
 - `derived_features` 描述 `e` 的公式、依赖和缺失归零规则
+- `active_protocol` 和 `protocol_profiles` 只公开基准编号、名称、分数和摘要，不公开包含 `e` 的内部 `reference_values`
 - `capabilities.physical_feasibility=false`
 - `capabilities.counterfactual_improvement` 取决于适配配置
 
@@ -130,9 +133,11 @@ V17 不评价物理可行性。为兼容当前推荐主线，接口固定返回�
 
 `0.65` 不是模型预测概率。V17 的 `not_reusable` 也不会转成物理拒绝；复用结论保存在 `reuse_assessment`。
 
+对接方不能只根据 `physical_gate.passed=true` 显示“物理可行”。必须首先读取 `physical_feasibility_evaluated`：当它为 `false` 时，真实业务状态只能显示为“物理可行性未评价”。这里的 `passed=true` 只是为了让当前主线兼容放行，不是物理评价结论。
+
 ## 8. 目标协议
 
-只接受冻结模型 `evaluation_baselines` 中存在的 `profile_id`。请求可以只传 ID，也可以附带 `reference_values`；附带值必须与冻结基准字段和值完全一致，否则返回 400。
+只接受冻结模型 `evaluation_baselines` 中存在的 `profile_id`。公共接口不接受 `reference_values`，也不将内部基准参数返回给调用方。
 
 不支持请求时动态构造新的 V17 基准协议。
 
@@ -146,7 +151,22 @@ V17 不评价物理可行性。为兼容当前推荐主线，接口固定返回�
 - 如果任一派生属性组不存在，四个源字段全部锁定，避免自动创造不存在的结构。
 - 没有达到 `min_gain` 时返回 `no_better_local_candidate`。
 
-## 10. 上线检查
+该搜索是 **effectiveness-only local improvement**：价格不参与 V17 服务内部的候选生成和选择。Gateway 在改进参数返回后可以重新评价价格，但不会回到 V17 候选池中按价格重选。如果业务按钮承诺“价格与效能综合优化”，不能直接把本接口结果解释成综合最优。
+
+## 10. 正式冻结包真实 Smoke
+
+专项单元测试使用可控 runtime 验证 Adapter 和输出映射。最终含派生字段的生产冻结包到位后，还必须运行非 stub smoke：
+
+```powershell
+$env:LOCK_V17_REAL_PACKAGE_MANIFEST="D:\models\lock_v17_current\lock_v17_runtime_manifest.json"
+$env:LOCK_V17_REAL_ADAPTER_CONFIG="D:\recommend_prototype\services\effectiveness_service\config\lock_v17_adapter.json"
+$env:LOCK_V17_REAL_BUSINESS_PARAMS_JSON='{"真实字段A":10,"真实字段B":6,"真实字段C":8,"真实字段D":5,"其它必填字段":1}'
+python -m unittest tests.lock_v17_special_backend_test.LockV17RealFrozenPackageSmokeTest
+```
+
+该测试会使用运行包中的真实 `FrozenLockReuseRuntime`，检查 Schema、单条评价、批量评价，以及启用时的局部改进。未设置三个环境变量时测试会明确标记为 skipped，不会用 stub 冒充真实 E2E 已通过。
+
+## 11. 上线检查
 
 ```text
 GET  /health
