@@ -137,6 +137,10 @@ class CostEffectivenessModelClient(object):
                 "price_output_normalization": price_normalization,
                 "capability_score": capability,
                 "feasibility_probability": evaluation.get("feasibility_probability"),
+                "physical_feasibility_evaluated": (effect_item or {}).get(
+                    "physical_feasibility_evaluated",
+                    evaluation.get("physical_feasibility_evaluated"),
+                ),
                 "physical_gate": (effect_item or {}).get("physical_gate"),
                 "risk_contributors": (effect_item or {}).get("risk_contributors") or [],
                 "capability_contributors": (effect_item or {}).get("capability_contributors") or [],

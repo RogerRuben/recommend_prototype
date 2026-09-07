@@ -424,6 +424,11 @@ class ModelServiceGateway(object):
             detail.setdefault("source", "effectiveness_service")
             hard_details.append(detail)
         physical_gate = dict(effect.get("physical_gate") or {})
+        physical_feasibility_evaluated = effect.get("physical_feasibility_evaluated")
+        if physical_feasibility_evaluated is None:
+            physical_feasibility_evaluated = evaluation.get("physical_feasibility_evaluated")
+        if physical_feasibility_evaluated is None:
+            physical_feasibility_evaluated = physical_gate.get("decision") != "pass_not_evaluated"
         if not physical_gate:
             physical_gate = {
                 "passed": not hard and feasibility >= 0.65,
@@ -485,6 +490,7 @@ class ModelServiceGateway(object):
             "center_cost_effectiveness": center_cost_effectiveness,
             "feasibility_probability": feasibility,
             "feasibility_status": evaluation.get("feasibility_status"),
+            "physical_feasibility_evaluated": bool(physical_feasibility_evaluated),
             "physical_gate": physical_gate,
             "prediction_confidence": confidence,
             "anomaly_assessment": {"status": combined_status, "is_anomaly": combined_status != "in_domain", "score": 1.0 - feasibility, "items": experience, "price_feature_anomalies": domain_warnings, "message": "模型服务评价完成。" if combined_status == "in_domain" else "至少一个模型服务报告边界、外推或硬风险。"},

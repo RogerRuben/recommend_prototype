@@ -1017,6 +1017,7 @@ class Application(object):
                 "success": True,
                 "parameters": evaluated.get("parameters") or model_params,
                 "evaluation": evaluated,
+                "physical_feasibility_evaluated": evaluated.get("physical_feasibility_evaluated"),
                 "physical_gate": evaluated.get("physical_gate") or {},
                 "risk_contributors": evaluated.get("risk_contributors") or [],
                 "hard_violations": evaluated.get("hard_violations") or [],
@@ -1465,6 +1466,7 @@ class Application(object):
                 "support_at_100": evaluation.get("support_at_100"),
                 "score_uncertainty_width": evaluation.get("score_uncertainty_width"),
                 "feasibility_probability": evaluation.get("feasibility_probability"),
+                "physical_feasibility_evaluated": evaluation.get("physical_feasibility_evaluated"),
                 "physical_gate": evaluation.get("physical_gate") or {},
                 "cost_effectiveness": evaluation.get("cost_effectiveness"),
             })

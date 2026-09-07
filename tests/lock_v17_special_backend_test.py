@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from app.model_service_client import ModelServiceGateway
 from services.effectiveness_service.app import (
     EffectivenessService,
     FrozenRuntimeBackend,
@@ -385,6 +386,17 @@ class LockV17SpecialBackendTest(unittest.TestCase):
         self.assertEqual(response["derived_features"]["e"]["value"], 12)
         self.assertNotIn("e", response["parameters"])
         self.assertFalse(response["physical_feasibility_evaluated"])
+
+    def test_gateway_preserves_not_evaluated_physical_feasibility(self):
+        service = EffectivenessService(self.backend())
+        response = service._one({"parameters": {"a": 10, "b": 6, "c": 8, "d": 5, "quality": 10}})
+        merged = ModelServiceGateway._merge_core(
+            {"parameters": response["parameters"]}, response,
+            price_value=10.0, price_interval_wan=[10.0, 10.0],
+            domain_warnings=[], price_imputed_features=[], price_model=None,
+        )
+        self.assertFalse(merged["physical_feasibility_evaluated"])
+        self.assertEqual(merged["physical_gate"]["decision"], "pass_not_evaluated")
 
     def test_service_maps_partial_group_to_http_400_contract(self):
         service = EffectivenessService(self.backend())

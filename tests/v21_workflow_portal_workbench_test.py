@@ -46,6 +46,9 @@ def static_contracts():
     assert 'req.get("count") or req.get("generation_count") or 5' in generation_tasks
     assert "self.generation_tasks.canonicalize_generation_controls" in server
     assert 'required=field.required===false?"":" required"' in effectiveness_js
+    assert "physical_feasibility_evaluated" in effectiveness_js
+    assert "物理可行性未评价" in effectiveness_js
+    assert ".effect-gate.neutral" in css
     assert 'required=f.required===false?"":" required"' in price_js
     assert "historical_incompatible_fallback" in effectiveness_js and "historical_incompatible_fallback" in price_js
     assert "恢复默认" in html and "评价协议已恢复默认" in js
