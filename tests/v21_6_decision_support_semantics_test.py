@@ -249,6 +249,64 @@ def test_datamaster_value_mappings_sheet_roundtrip(tmp_path):
     assert json.loads(partial_parameter["display_value_mapping_json"])["01"] == "编号01"
 
 
+def test_legacy_datamaster_applies_value_mappings_before_enum_and_rule_validation(tmp_path):
+    class Runtime(object):
+        schema = {"product_code": "P", "product_name": "P"}
+        def manifest(self): return {"calculation_available": False}
+        def feature_roles(self): return {"shared_features": [], "effectiveness_only_features": [], "price_only_features": []}
+        def all_feature_specs(self): return []
+
+    runtime = Runtime()
+    store = Store(tmp_path / "legacy-dm.db", tmp_path / "missing.csv", runtime)
+    store.replace_from_datamaster({
+        "products": [{"product_code": "P", "product_name": "P"}],
+        "parameters": [
+            {"parameter_id": "state", "label": "状态", "value_type": "enum",
+             "search_type": "unordered_enum", "allowed_values_json": '["A","B"]'},
+            {"parameter_id": "x", "label": "数值", "value_type": "number",
+             "search_type": "continuous"},
+        ],
+        "parameter_groups": [{"group_name": "其他"}],
+        "tags": [{"tag_id": "T", "tag_name": "标签T", "enabled": 1}],
+        "tag_rules": [{"rule_id": "TR", "tag_id": "T", "parameter_id": "state",
+                       "operator": "eq", "value1": "A", "enabled": 1}],
+        "couplings": [{"coupling_id": "C", "coupling_name": "关系C", "coupling_type": "positive",
+                       "parameter_a": "x", "parameter_b": "x", "strength": 1,
+                       "severity": "warning", "enabled": 1}],
+        "constraints": [{"rule_id": "R", "rule_name": "规则R", "left_parameter": "x",
+                         "operator": "gte", "multiplier": 1, "offset": 0,
+                         "severity": "warning", "enabled": 1}],
+        "agreements": [], "model_inputs": [],
+    }, evaluate_agreements=False, sync_model_contract=False)
+    service = DataMasterService(store, runtime)
+    workbook = read_workbook_bytes(service.export_current())
+
+    # Old maintenance workbooks could keep enum values only in ValueMappings.
+    definition_rows = workbook["指标定义"]
+    allowed_column = definition_rows[0].index("允许值")
+    state_row = next(row for row in definition_rows[1:] if row[0] == "state")
+    state_row[allowed_column] = ""
+    legacy_bytes = write_workbook_bytes([(name, rows) for name, rows in workbook.items()])
+
+    report = service.parse("legacy-maintenance.xlsx", legacy_bytes)
+    assert report["valid"], report["errors"]
+    state = next(item for item in report["data"]["parameters"] if item["parameter_id"] == "state")
+    assert json.loads(state["allowed_values_json"]) == ["A", "B"]
+    assert [item["rule_id"] for item in report["data"]["tag_rules"]] == ["TR"]
+    assert [item["coupling_id"] for item in report["data"]["couplings"]] == ["C"]
+    assert [item["rule_id"] for item in report["data"]["constraints"]] == ["R"]
+
+    mapping_rows = workbook["ValueMappings"]
+    mapping_allowed_column = mapping_rows[0].index("allowed")
+    for row in mapping_rows[1:]:
+        if row[0] == "state":
+            row[mapping_allowed_column] = 0
+    invalid_bytes = write_workbook_bytes([(name, rows) for name, rows in workbook.items()])
+    invalid_report = service.parse("legacy-maintenance-missing-values.xlsx", invalid_bytes)
+    assert not invalid_report["valid"]
+    assert "指标state配置为离散搜索类型时必须填写允许值。" in invalid_report["errors"]
+
+
 def test_relaxation_quantizes_non_grid_values_in_the_safe_direction():
     definition = {"label": "重量", "value_type": "number",
                   "search_type": "continuous", "decimal_places": 3}

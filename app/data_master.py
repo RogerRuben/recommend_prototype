@@ -783,6 +783,20 @@ class DataMasterService(object):
                     "required": parse_bool(r.get("是否必填", 1)), "auto_adjustable": parse_bool(r.get("允许自动调整", 1)),
                     "decimal_places": integer(r.get("显示小数位"), 3), "display_order": integer(r.get("显示顺序"), len(parameters)+1), "enabled": parse_bool(r.get("是否启用", 1)), "model_bound": 1,
                 })
+            for parameter in parameters:
+                # Model-bound status is synchronized later from whichever HTTP
+                # services are active; it is not a DataMaster validation input.
+                parameter["model_bound"] = 0
+
+            # A readable ValueMappings sheet is authoritative when present.
+            # Legacy JSON columns remain fully supported when it is absent.
+            if "ValueMappings" in workbook:
+                apply_value_mappings(parameters, parsed["ValueMappings"], report["errors"])
+
+            # Validate discrete domains only after applying ValueMappings.
+            # Older maintenance workbooks may intentionally leave the legacy
+            # "允许值" cell empty and keep the authoritative domain solely in
+            # the ValueMappings sheet.
             valid_search_types = set(("auto", "continuous", "integer", "ordered_discrete", "unordered_enum", "boolean"))
             for p in parameters:
                 if p.get("search_type") not in valid_search_types:
@@ -794,16 +808,8 @@ class DataMasterService(object):
                     report["errors"].append("指标%s只有布尔取值类型才能使用布尔开关搜索。" % p.get("parameter_id"))
                 if p.get("search_type") in ("continuous", "integer", "ordered_discrete") and p.get("value_type") not in ("number", "ip_grade"):
                     report["errors"].append("指标%s的搜索类型与取值类型不匹配。" % p.get("parameter_id"))
-            for parameter in parameters:
-                # Model-bound status is synchronized later from whichever HTTP
-                # services are active; it is not a DataMaster validation input.
-                parameter["model_bound"] = 0
             report["data"]["parameters"] = parameters
-
-            # A readable ValueMappings sheet is authoritative when present.
-            # Legacy JSON columns remain fully supported when it is absent.
-            if "ValueMappings" in workbook:
-                apply_value_mappings(parameters, parsed["ValueMappings"], report["errors"])
+            param_by_key = dict((p.get("parameter_id"), p) for p in parameters if p.get("parameter_id"))
 
             group_items = []
             if "指标分组" in workbook:
