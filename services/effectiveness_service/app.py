@@ -17,6 +17,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from services.common.http_service import ServiceApplication, JsonServiceError, run_service
+from services.effectiveness_service.lock_v17_backend import (
+    LockV17Backend,
+    PACKAGE_FORMAT as LOCK_V17_PACKAGE_FORMAT,
+)
 
 
 def _sha(path):
@@ -524,13 +528,14 @@ class FrozenRuntimeBackend(OriginalRuntimeBackend):
         return result
 
 
-def backend_from_package(manifest_path):
+def backend_from_package(manifest_path, lock_v17_adapter_config=None):
     manifest_path = Path(manifest_path).resolve()
     raw = json.loads(manifest_path.read_text(encoding="utf-8"))
     format_version = raw.get("format_version")
     if format_version not in (
         "effectiveness-original-runtime-package-1.0",
         "effectiveness-frozen-runtime-package-1.0",
+        LOCK_V17_PACKAGE_FORMAT,
     ):
         raise RuntimeError("效能运行包格式无效")
     root = manifest_path.parent
@@ -540,6 +545,13 @@ def backend_from_package(manifest_path):
         path = root / item.get("path")
         if not path.is_file() or _sha(path) != item.get("sha256"):
             raise RuntimeError("效能运行包文件校验失败: %s" % item.get("path"))
+    if format_version == LOCK_V17_PACKAGE_FORMAT:
+        if not lock_v17_adapter_config:
+            raise RuntimeError(
+                "Lock V17运行包必须配置--lock-v17-adapter-config或"
+                "EFFECT_LOCK_V17_ADAPTER_CONFIG"
+            )
+        return LockV17Backend(root, raw, lock_v17_adapter_config)
     if format_version == "effectiveness-frozen-runtime-package-1.0":
         model_rel = raw.get("model")
         if not model_rel:
@@ -682,13 +694,25 @@ class EffectivenessService(ServiceApplication):
             data.update({"model": str(self.backend.model_path), "state_mode": "frozen_learned_model_without_training_records", "read_only": True})
         elif isinstance(self.backend, OriginalRuntimeBackend):
             data.update({"workbook": str(self.backend.workbook), "workbook_sha256": _sha(self.backend.workbook), "state": str(self.backend.state_path or "baseline")})
+        elif isinstance(self.backend, LockV17Backend):
+            data.update({
+                "model": str(self.backend.model_path),
+                "state_mode": "lock_v17_frozen_model_without_training_records",
+                "read_only": True,
+                "physical_feasibility_evaluated": False,
+            })
         return data
 
     def _one(self, request):
-        result = self.backend.evaluate(
-            request.get("parameters") or request.get("params") or {},
-            target_protocol=request.get("target_protocol"),
-        )
+        try:
+            result = self.backend.evaluate(
+                request.get("parameters") or request.get("params") or {},
+                target_protocol=request.get("target_protocol"),
+            )
+        except ValueError as exc:
+            if isinstance(self.backend, LockV17Backend):
+                raise JsonServiceError(str(exc), 400, "lock_v17_invalid_input")
+            raise
         # Legacy effectiveness runtimes called generation_min/max violations
         # "hard".  Those fields are now advisory range metadata: a successful
         # model calculation must not be turned into a hard rejection merely for
@@ -720,7 +744,7 @@ class EffectivenessService(ServiceApplication):
                 gate["decision"] = "pass"
                 gate["passed"] = True
         result["physical_gate"] = gate
-        return {
+        response = {
             "request_id": request.get("request_id"), "candidate_id": request.get("candidate_id"), "success": True,
             "evaluation": {
                 "effectiveness_score": result.get("effectiveness_score"), "capability_score": result.get("capability_score"),
@@ -748,14 +772,27 @@ class EffectivenessService(ServiceApplication):
                       "algorithm_version": self.schema().get("algorithm_version"), "profile_version": self.schema().get("profile_version"),
                       "learning_fingerprint": self.schema().get("learning_fingerprint"), "state_sha256": self.schema().get("state_sha256")},
         }
+        for key in (
+            "derived_features",
+            "reuse_assessment",
+            "physical_feasibility_evaluated",
+        ):
+            if key in result:
+                response[key] = result[key]
+        return response
 
     def _improve_one(self, request):
         if not hasattr(self.backend, "improve"):
             raise JsonServiceError("当前效能后端不支持反事实改进处方", 400, "improvement_unsupported")
-        result = self.backend.improve(
-            request.get("parameters") or request.get("params") or {},
-            target_protocol=request.get("target_protocol"),
-        )
+        try:
+            result = self.backend.improve(
+                request.get("parameters") or request.get("params") or {},
+                target_protocol=request.get("target_protocol"),
+            )
+        except ValueError as exc:
+            if isinstance(self.backend, LockV17Backend):
+                raise JsonServiceError(str(exc), 400, "lock_v17_invalid_input")
+            raise
         current = result.get("current_evaluation") or {}
         return {
             "request_id": request.get("request_id"),
@@ -818,10 +855,10 @@ class EffectivenessService(ServiceApplication):
         return {"request_id": "EFFECT-DEMO-001", "product_code": self.schema().get("product_code"), "parameters": values}
 
     def openapi(self):
-        return {"openapi": "3.0.3", "info": {"title": "效能与可行性预测服务 API", "version": self.service_version, "description": "优先运行V11专家软件冻结模型包，并兼容原效能工程Workbook+State与快照模式。"},
+        return {"openapi": "3.0.3", "info": {"title": "效能与可行性预测服务 API", "version": self.service_version, "description": "支持常规专家效能运行包、快照模式，以及18102内部的锁V17特例适配后端。"},
                 "paths": {"/health": {"get": {"summary": "健康检查与效能模型状态"}}, "/api/v1/schema": {"get": {"summary": "效能字段契约"}},
                           "/api/v1/evaluate": {"post": {"summary": "单方案效能、可行性和轮廓评价"}}, "/api/v1/evaluate/batch": {"post": {"summary": "批量评价，最多1000条"}},
-                          "/api/v1/improve": {"post": {"summary": "按需生成V11反事实改进处方"}},
+                          "/api/v1/improve": {"post": {"summary": "按当前后端能力生成局部改进处方"}},
                           "/openapi.json": {"get": {"summary": "OpenAPI 3.0文档"}}, "/docs": {"get": {"summary": "简易接口前端"}}}}
 
 
@@ -829,7 +866,7 @@ def build_backend(args):
     if args.source_root and args.workbook:
         return OriginalRuntimeBackend(args.source_root, args.workbook, args.state or None, args.state_dir or None)
     if args.package and Path(args.package).is_file():
-        return backend_from_package(args.package)
+        return backend_from_package(args.package, args.lock_v17_adapter_config or None)
     if args.snapshot:
         return SnapshotBackend(args.snapshot)
     raise RuntimeError("必须配置--package，或配置--source-root与--workbook，或配置--snapshot")
@@ -844,6 +881,19 @@ def main():
     parser.add_argument("--state", default=os.environ.get("EFFECT_STATE", ""))
     parser.add_argument("--state-dir", default=os.environ.get("EFFECT_STATE_DIR", ""))
     parser.add_argument("--package", default=os.environ.get("EFFECT_RUNTIME_PACKAGE", str(ROOT / "services" / "effectiveness_service" / "model" / "current" / "effectiveness_runtime_manifest.json")))
+    parser.add_argument(
+        "--lock-v17-adapter-config",
+        default=os.environ.get(
+            "EFFECT_LOCK_V17_ADAPTER_CONFIG",
+            str(
+                ROOT
+                / "services"
+                / "effectiveness_service"
+                / "config"
+                / "lock_v17_adapter.json"
+            ),
+        ),
+    )
     parser.add_argument("--snapshot", default=os.environ.get("EFFECT_SNAPSHOT", str(ROOT / "models" / "effectiveness_bundle.json")))
     args = parser.parse_args()
     run_service(EffectivenessService(build_backend(args)), args.host, args.port)
