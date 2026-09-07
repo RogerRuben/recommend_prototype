@@ -6,9 +6,6 @@ import json
 import os
 import socket
 import sys
-import threading
-import time
-import webbrowser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -34,9 +31,10 @@ def available_port(host, preferred, span=10):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default=os.environ.get("IPDEMO_HOST", "127.0.0.1"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("IPDEMO_PORT", "17891")))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("IPDEMO_PORT", "7003")))
     parser.add_argument("--port-span", type=int, default=int(os.environ.get("IPDEMO_PORT_SPAN", "10")))
-    parser.add_argument("--no-browser", action="store_true", default=os.environ.get("IPDEMO_OPEN_BROWSER", "1") in ("0", "false", "False"))
+    # Kept as a no-op for compatibility with existing START_ALL_NO_BROWSER.bat.
+    parser.add_argument("--no-browser", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     port = available_port(args.host, args.port, args.port_span)
     server = create_server(ROOT, args.host, port)
@@ -72,11 +70,6 @@ def main():
         print("LOGIN REQUIRED: %s" % os.environ.get("IPDEMO_AUTH_USERNAME", "ab123"))
     print("Press Ctrl+C to stop.")
     print("=" * 72)
-    if not args.no_browser:
-        def open_later():
-            time.sleep(1.0)
-            webbrowser.open(info["url"])
-        threading.Thread(target=open_later, daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

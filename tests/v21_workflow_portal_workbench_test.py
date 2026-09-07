@@ -22,12 +22,17 @@ def static_contracts():
     html = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
     js = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
     css = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
+    index_theme = (ROOT / "app/static/index-theme.css").read_text(encoding="utf-8")
     effectiveness_js = (ROOT / "app/static/effectiveness.js").read_text(encoding="utf-8")
     price_js = (ROOT / "app/static/price.js").read_text(encoding="utf-8")
     generation_tasks = (ROOT / "app/generation_tasks.py").read_text(encoding="utf-8")
     server = (ROOT / "app/server.py").read_text(encoding="utf-8")
     for token in ("railResizeHandle", "hideCoveredParams", "demandSummary", "recommendBtn", "helpBtn"):
         assert token in html
+    assert '<link rel="stylesheet" href="/index-theme.css">' in html
+    assert "--brand2:#2563eb" in index_theme
+    assert ".result-controls" in index_theme and ".toolbar-popover>summary" in index_theme
+    assert ".product-context" in index_theme and ".product-context>small" in index_theme
     assert "推荐工作流程" not in html
     assert "parameterSearch" not in html
     assert "filter-search-results" in js and "selectParameter(" in js
@@ -43,7 +48,7 @@ def static_contracts():
     assert 'required=field.required===false?"":" required"' in effectiveness_js
     assert 'required=f.required===false?"":" required"' in price_js
     assert "historical_incompatible_fallback" in effectiveness_js and "historical_incompatible_fallback" in price_js
-    assert "清空筛选条件" in html and "评价协议已恢复默认" in js
+    assert "恢复默认" in html and "评价协议已恢复默认" in js
     assert 'localStorage.setItem(key,String(Math.round(value)))' in js
     assert 'key="ipdemo-search-rail-width"' in js
     assert "tag_parameter_coverage" in js
@@ -75,6 +80,8 @@ def portal_and_login_contracts():
         assert Handler._safe_next(unsafe) is None
     run_app = (ROOT / "run_app.py").read_text(encoding="utf-8")
     assert '"url": "http://%s:%d/portal"' in run_app
+    assert 'os.environ.get("IPDEMO_PORT", "7003")' in run_app
+    assert "webbrowser.open" not in run_app and "threading.Thread" not in run_app
 
     with tempfile.TemporaryDirectory(prefix="ipdemo_portal_") as folder:
         config = Path(folder) / "config"
@@ -137,14 +144,14 @@ def standard_startup_contract():
 
     class FakeSocket(object):
         def bind(self, address):
-            if address[1] == 17891:
+            if address[1] == 7003:
                 raise OSError("occupied")
 
         def close(self):
             pass
 
     with patch("run_app.socket.socket", side_effect=lambda *args, **kwargs: FakeSocket()):
-        assert available_port("127.0.0.1", 17891, 1) == 17892
+        assert available_port("127.0.0.1", 7003, 1) == 7004
 
 
 def deterministic_history_contract():
