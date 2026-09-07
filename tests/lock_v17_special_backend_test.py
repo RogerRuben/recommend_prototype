@@ -2,6 +2,8 @@
 import copy
 import hashlib
 import json
+import math
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -301,8 +303,12 @@ class LockV17SpecialBackendTest(unittest.TestCase):
             self.backend()
 
     def test_public_schema_has_four_business_source_fields(self):
-        names = [item["field_name"] for item in self.backend().schema()["fields"]]
+        fields = self.backend().schema()["fields"]
+        names = [item["field_name"] for item in fields]
         self.assertTrue(set(("a", "b", "c", "d")).issubset(names))
+        source_fields = [item for item in fields if item["field_name"] in ("a", "b", "c", "d")]
+        self.assertTrue(source_fields)
+        self.assertTrue(all(item["required"] is False for item in source_fields))
 
     def test_public_schema_does_not_expose_derived_e(self):
         schema = self.backend().schema()
@@ -344,14 +350,21 @@ class LockV17SpecialBackendTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "不存在评价基准"):
             self.backend().evaluate({"a": 10, "b": 6, "c": 8, "d": 5, "quality": 10}, "UNKNOWN")
 
-    def test_matching_reference_values_are_accepted(self):
+    def test_public_protocol_metadata_does_not_expose_internal_reference_values(self):
+        schema = self.backend().schema()
+        self.assertNotIn("reference_values", schema["active_protocol"])
+        self.assertTrue(all("reference_values" not in item for item in schema["protocol_profiles"]))
+        result = self.backend().evaluate({"a": 10, "b": 6, "c": 8, "d": 5, "quality": 10}, "REQ-2")
+        self.assertNotIn("reference_values", result["protocol"])
+
+    def test_matching_reference_values_are_also_rejected_by_public_contract(self):
         target = {"profile_id": "REQ-2", "reference_values": {"e": 2, "quality": 8}}
-        result = self.backend().evaluate({"a": 10, "b": 6, "c": 8, "d": 5, "quality": 10}, target)
-        self.assertEqual(result["protocol"]["profile_id"], "REQ-2")
+        with self.assertRaisesRegex(ValueError, "只接受冻结运行包中的profile_id"):
+            self.backend().evaluate({"a": 10, "b": 6, "c": 8, "d": 5, "quality": 10}, target)
 
     def test_mismatched_reference_values_reject(self):
         target = {"profile_id": "REQ-2", "reference_values": {"e": 3, "quality": 8}}
-        with self.assertRaisesRegex(ValueError, "不支持请求时动态构造"):
+        with self.assertRaisesRegex(ValueError, "只接受冻结运行包中的profile_id"):
             self.backend().evaluate({"a": 10, "b": 6, "c": 8, "d": 5, "quality": 10}, target)
 
     def test_improve_returns_business_fields_only(self):
@@ -410,6 +423,39 @@ class LockV17SpecialBackendTest(unittest.TestCase):
     def test_existing_backend_types_remain_separate(self):
         self.assertFalse(issubclass(LockV17Backend, OriginalRuntimeBackend))
         self.assertTrue(issubclass(FrozenRuntimeBackend, OriginalRuntimeBackend))
+
+
+class LockV17RealFrozenPackageSmokeTest(unittest.TestCase):
+    """Opt-in E2E smoke against the final, non-stub V17 frozen package."""
+
+    def test_real_frozen_package_schema_evaluate_batch_and_improve(self):
+        manifest = os.environ.get("LOCK_V17_REAL_PACKAGE_MANIFEST")
+        config = os.environ.get("LOCK_V17_REAL_ADAPTER_CONFIG")
+        params_json = os.environ.get("LOCK_V17_REAL_BUSINESS_PARAMS_JSON")
+        if not manifest or not config or not params_json:
+            self.skipTest(
+                "最终含派生字段的V17冻结包尚未提供；设置LOCK_V17_REAL_PACKAGE_MANIFEST、"
+                "LOCK_V17_REAL_ADAPTER_CONFIG和LOCK_V17_REAL_BUSINESS_PARAMS_JSON后执行真实smoke"
+            )
+        params = json.loads(params_json)
+        backend = backend_from_package(manifest, config)
+        self.assertIsInstance(backend, LockV17Backend)
+        schema = backend.schema()
+        derived_names = [item["field_name"] for item in schema["derived_features"]]
+        public_names = [item["field_name"] for item in schema["fields"]]
+        self.assertTrue(derived_names)
+        self.assertFalse(set(derived_names) & set(public_names))
+        self.assertTrue(all("reference_values" not in item for item in schema["protocol_profiles"]))
+        evaluation = backend.evaluate(params)
+        self.assertTrue(math.isfinite(float(evaluation["capability_score"])))
+        self.assertFalse(evaluation["physical_feasibility_evaluated"])
+        service = EffectivenessService(backend)
+        batch = service.handle_post("/api/v1/evaluate/batch", {"items": [{"parameters": params}]})
+        self.assertEqual(batch["count"], 1)
+        if schema["capabilities"]["counterfactual_improvement"]:
+            improved = backend.improve(params)
+            recommended = improved["improvement_plan"].get("recommended_parameters") or {}
+            self.assertFalse(set(derived_names) & set(recommended))
 
 
 if __name__ == "__main__":

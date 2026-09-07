@@ -39,14 +39,6 @@ def _number(value, default=None):
     return result if math.isfinite(result) else default
 
 
-def _same_reference(left, right):
-    left_number = _number(left)
-    right_number = _number(right)
-    if left_number is not None and right_number is not None:
-        return math.isclose(left_number, right_number, rel_tol=0.0, abs_tol=1e-9)
-    return str(left) == str(right)
-
-
 def _activate_source(source_root):
     source_root = Path(source_root).resolve()
     source_text = str(source_root).lower()
@@ -195,7 +187,6 @@ class LockV17Backend(object):
             "profile_id": str(item.get("profile_id") or ""),
             "profile_name": str(item.get("profile_name") or item.get("profile_id") or ""),
             "reference_score": float(item.get("score", 100.0)),
-            "reference_values": params,
             "reference_digest": _canonical_digest(payload),
             "mode": "packaged_profile_selected_per_request",
         }
@@ -217,16 +208,11 @@ class LockV17Backend(object):
         if profile_id not in self.protocols:
             raise ValueError("Lock V17冻结模型中不存在评价基准: %s" % profile_id)
         item = self.protocols[profile_id]
-        expected = item.get("params") or {}
         if supplied is not None:
-            if not isinstance(supplied, dict):
-                raise ValueError("Lock V17 target_protocol.reference_values必须是对象")
-            if set(map(str, supplied)) != set(map(str, expected)) or any(
-                not _same_reference(supplied.get(key), expected.get(key)) for key in expected
-            ):
-                raise ValueError(
-                    "Lock V17只支持冻结运行包中已有评价基准，不支持请求时动态构造新的reference_values"
-                )
+            raise ValueError(
+                "Lock V17公共协议只接受冻结运行包中的profile_id，"
+                "不接受或公开内部reference_values"
+            )
         return profile_id, self._protocol_metadata(item)
 
     def schema(self):

@@ -200,7 +200,11 @@ class LockV17InputAdapter(object):
             raw["field_name"] = key
             raw.setdefault("field_label", key)
             raw.setdefault("dtype", "number")
-            raw.setdefault("required", True)
+            # Each source group is conditionally required: an entire x1/x2
+            # group may be absent, while a partial group is rejected by
+            # ``prepare``.  Advertising these fields as globally required
+            # would make schema-driven clients reject valid absent groups.
+            raw["required"] = False
             raw.setdefault("participates_generation", True)
             raw.setdefault("default_visible", True)
             raw["source"] = "product_parameter"
