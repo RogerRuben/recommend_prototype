@@ -1,0 +1,89 @@
+{
+  "config_version": "1.0",
+  "enabled": true,
+  "backend": {
+    "package_format": "lock-product-reuse-runtime-package-17.0",
+    "adapter_id": "lock_v17_abs_diff_product_v1"
+  },
+  "derived_feature": {
+    "target_field": "e",
+    "operation": "abs_diff_product",
+    "x1": {
+      "fields": ["a", "c"]
+    },
+    "x2": {
+      "fields": ["b", "d"]
+    },
+    "absence": {
+      "sentinel_values": [-1],
+      "all_missing_group_is_absent": true,
+      "if_any_group_absent": "zero",
+      "zero_value": 0.0,
+      "partial_group_policy": "reject"
+    },
+    "input_precedence": "always_recompute"
+  },
+  "public_source_fields": {
+    "a": {
+      "field_label": "钩锁力-1",
+      "dtype": "number",
+      "unit": "请填写真实单位",
+      "generation_min": null,
+      "generation_max": null,
+      "preference_direction": "neutral",
+      "participates_generation": false,
+      "default_visible": true
+    },
+    "b": {
+      "field_label": "钩锁力-2",
+      "dtype": "number",
+      "unit": "请填写真实单位",
+      "generation_min": null,
+      "generation_max": null,
+      "preference_direction": "neutral",
+      "participates_generation": false,
+      "default_visible": true
+    },
+    "c": {
+      "field_label": "钩锁刚度-1",
+      "dtype": "number",
+      "unit": "请填写真实单位",
+      "generation_min": null,
+      "generation_max": null,
+      "preference_direction": "neutral",
+      "participates_generation": false,
+      "default_visible": true
+    },
+    "d": {
+      "field_label": "钩锁刚度-2",
+      "dtype": "number",
+      "unit": "请填写真实单位",
+      "generation_min": null,
+      "generation_max": null,
+      "preference_direction": "neutral",
+      "participates_generation": false,
+      "default_visible": true
+    }
+  },
+  "protocol": {
+    "mode": "packaged_profile_id_only",
+    "allow_matching_reference_values": true
+  },
+  "physical_compatibility": {
+    "physical_feasibility_evaluated": false,
+    "probability_placeholder": 0.65,
+    "status": "not_evaluated_lock_v17",
+    "gate_decision": "pass_not_evaluated"
+  },
+  "improvement": {
+    "enabled": false,
+    "method": "local_neighborhood",
+    "rounds": 2,
+    "max_candidates": 120,
+    "round1_step_ratios": [0.05, 0.1, 0.2],
+    "round2_step_ratios": [0.025, 0.05],
+    "min_gain": 0.1,
+    "objective": "conservative_capability_score",
+    "lock_absent_derived_groups": true
+  }
+}
