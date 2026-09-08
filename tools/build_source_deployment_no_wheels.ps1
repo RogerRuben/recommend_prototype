@@ -66,7 +66,7 @@ if (Test-Path -LiteralPath $stagedTests) {
     Get-ChildItem -LiteralPath $stagedTests -File | Where-Object { $allowedTestFiles -notcontains $_.Name } | Remove-Item -Force
 }
 $allowedToolFiles = @(
-    "check_model_services.py", "product_delivery.py", "verify_model_environment.py",
+    "check_model_services.py", "product_delivery.py", "verify_model_environment.py", "verify_dual_runtime.py", "build_v22_dual_runtime_delivery.py",
     "wheelhouse_manifest.py", "build_source_deployment_no_wheels.ps1"
 )
 $stagedTools = Join-Path $stage "tools"
@@ -79,8 +79,8 @@ $publicDeployment = Join-Path $stage "deploy"
 if (Test-Path -LiteralPath $publicDeployment) { Remove-Item -LiteralPath $publicDeployment -Recurse -Force }
 
 $rootFiles = @(
-    "README.md", "VERSION.txt", "requirements.txt", "run_app.py", "规范版价格预测_V19_6原生服务导出补丁.ipynb",
-    "CHECK_ENVIRONMENT.bat", "CHECK_MODEL_SERVICES.bat", "INSTALL_SOURCE_DEPENDENCIES_WIN7.bat",
+    "README.md", "VERSION.txt", "requirements.txt", "requirements_field_py38_sklearn0241.txt", "run_app.py", "规范版价格预测_V19_6原生服务导出补丁.ipynb",
+    "CHECK_ENVIRONMENT.bat", "CHECK_MODEL_SERVICES.bat", "CHECK_DUAL_RUNTIME.bat", "INSTALL_SOURCE_DEPENDENCIES_WIN7.bat",
     "INSTALL_FROZEN_EFFECTIVENESS_MODEL_WIN7.bat", "PACKAGE_EFFECTIVENESS_SERVICE_MODEL_WIN7.bat",
     "START_PRICE_SERVICE_WIN7.bat", "START_EFFECTIVENESS_SERVICE_WIN7.bat", "START_ALL_SERVICES_WIN7.bat",
     "START_RECOMMENDATION_WITH_SERVICES_WIN7.bat", "START_ALL_NO_BROWSER.bat",
@@ -141,8 +141,8 @@ $manifest = [ordered]@{
     price_runtime = "services/price_service/model/price_native_bundle.pkl"
     production_candidate_generator = "V19.6.14 coupling-aware fast/deep beam search"
     effectiveness_model_install = "INSTALL_FROZEN_EFFECTIVENESS_MODEL_WIN7.bat (recommended frozen ZIP) or PACKAGE_EFFECTIVENESS_SERVICE_MODEL_WIN7.bat (legacy compatible)"
-    effectiveness_workbench = "http://127.0.0.1:17891/effectiveness"
-    price_workbench = "http://127.0.0.1:17891/price"
+    effectiveness_workbench = "http://127.0.0.1:7003/effectiveness"
+    price_workbench = "http://127.0.0.1:7003/price"
     cost_effectiveness_workbench = "http://127.0.0.1:17000"
     cost_effectiveness_start_script = "START_COST_EFFECTIVENESS_ANALYSIS_WIN7.bat"
     install_script = "INSTALL_SOURCE_DEPENDENCIES_WIN7.bat"
@@ -161,7 +161,7 @@ $guideLines = @(
     "3. For an offline target, provide dependency wheels separately or copy an accepted runtime\venvs\model_runtime38. Wheels are intentionally absent here.",
     "4. Run VERIFY_MODEL_ENVIRONMENTS.bat.",
     "5. Run START_ALL_SERVICES_WIN7.bat. Readiness requires real numeric price/effectiveness JSON responses; Schema and product-code differences are operator warnings, not preflight blockers.",
-    "6. Open http://127.0.0.1:17891/; use /admin for data maintenance, /price for price-only prediction and /effectiveness for effectiveness-only evaluation.",
+    "6. Open http://127.0.0.1:7003/; use /admin for data maintenance, /price for price-only prediction and /effectiveness for effectiveness-only evaluation.",
     "7. In Product Data Workspace, ordinary historical CSV/XLSX data can be analyzed, edited and switched independently of the currently running HTTP model product.",
     "8. A business/model mismatch pauses model calculations only; it does not block data maintenance, switching, or historical-product recommendation.",
     "9. Open the single *V19_6*.ipynb file in the package. Set only PRODUCT_CODE in the final cell; any fitted model subset is accepted and installed directly as price_native_bundle.pkl.",

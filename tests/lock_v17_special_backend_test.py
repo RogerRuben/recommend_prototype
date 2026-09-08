@@ -13,6 +13,7 @@ from services.effectiveness_service.app import (
     EffectivenessService,
     FrozenRuntimeBackend,
     OriginalRuntimeBackend,
+    _portable_sha_matches,
     backend_from_package,
 )
 from services.effectiveness_service.lock_v17_adapter import (
@@ -310,6 +311,14 @@ class LockV17SpecialBackendTest(unittest.TestCase):
         source_fields = [item for item in fields if item["field_name"] in ("a", "b", "c", "d")]
         self.assertTrue(source_fields)
         self.assertTrue(all(item["required"] is False for item in source_fields))
+
+    def test_python_package_digest_tolerates_only_line_ending_conversion(self):
+        path = self.root / "portable_source.py"
+        path.write_bytes(b"print('ok')\r\n")
+        expected = hashlib.sha256(b"print('ok')\n").hexdigest()
+        self.assertTrue(_portable_sha_matches(path, expected))
+        path.write_bytes(b"print('changed')\r\n")
+        self.assertFalse(_portable_sha_matches(path, expected))
 
     def test_public_schema_does_not_expose_derived_e(self):
         schema = self.backend().schema()

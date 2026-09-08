@@ -51,7 +51,7 @@ if not exist "%NATIVE%" (
 )
 
 if exist "%RESULTFILE%" del /q "%RESULTFILE%" >nul 2>&1
-"%BOOTPY%" tools\select_price_runtime.py --root "%CD%" --model "%NATIVE%" --log "%LOGFILE%" --result-file "%RESULTFILE%"
+"%BOOTPY%" tools\select_price_runtime.py --root "%CD%\." --model "%NATIVE%" --log "%LOGFILE%" --result-file "%RESULTFILE%"
 if errorlevel 1 goto startup_failed
 set "PRICEPY="
 set /p PRICEPY=<"%RESULTFILE%"

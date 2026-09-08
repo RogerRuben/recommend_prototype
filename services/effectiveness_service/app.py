@@ -31,6 +31,19 @@ def _sha(path):
     return h.hexdigest()
 
 
+def _portable_sha_matches(path, expected):
+    """Accept Git's LF/CRLF conversion for packaged Python source only."""
+    path = Path(path)
+    expected = str(expected or "").lower()
+    if _sha(path).lower() == expected:
+        return True
+    if path.suffix.lower() != ".py":
+        return False
+    raw = path.read_bytes()
+    normalized = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return hashlib.sha256(normalized).hexdigest().lower() == expected
+
+
 def _json_sha(value):
     raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -543,7 +556,7 @@ def backend_from_package(manifest_path, lock_v17_adapter_config=None):
     # Verify packaged files before importing executable source.
     for item in raw.get("files") or []:
         path = root / item.get("path")
-        if not path.is_file() or _sha(path) != item.get("sha256"):
+        if not path.is_file() or not _portable_sha_matches(path, item.get("sha256")):
             raise RuntimeError("效能运行包文件校验失败: %s" % item.get("path"))
     if format_version == LOCK_V17_PACKAGE_FORMAT:
         if not lock_v17_adapter_config:

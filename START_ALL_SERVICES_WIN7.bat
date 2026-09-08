@@ -29,13 +29,13 @@ if not defined BOOTPY (
 set "PYTHONUTF8=1"
 
 echo [INFO] Starting price prediction service...
-start "Price Prediction Service" cmd /k call "%CD%\START_PRICE_SERVICE_WIN7.bat"
+if /I "%IPDEMO_HEADLESS%"=="1" (start "" /b cmd /c call "%CD%\START_PRICE_SERVICE_WIN7.bat") else (start "Price Prediction Service" cmd /k call "%CD%\START_PRICE_SERVICE_WIN7.bat")
 echo [INFO] Starting effectiveness prediction service...
-start "Effectiveness Prediction Service" cmd /k call "%CD%\START_EFFECTIVENESS_SERVICE_WIN7.bat"
+if /I "%IPDEMO_HEADLESS%"=="1" (start "" /b cmd /c call "%CD%\START_EFFECTIVENESS_SERVICE_WIN7.bat") else (start "Effectiveness Prediction Service" cmd /k call "%CD%\START_EFFECTIVENESS_SERVICE_WIN7.bat")
 
 echo [INFO] Waiting for service health. Maximum wait: 20 seconds.
 for /L %%S in (1,1,20) do (
-  timeout /t 1 /nobreak >nul
+  "%BOOTPY%" -c "import time; time.sleep(1)"
   "%BOOTPY%" tools\check_service_readiness.py --port 18101 --service price-prediction-service --quiet >nul 2>&1
   set "PRICE_READY=!ERRORLEVEL!"
   "%BOOTPY%" tools\check_service_readiness.py --port 18102 --service effectiveness-prediction-service --quiet >nul 2>&1
@@ -70,6 +70,22 @@ exit /b 1
 echo.
 echo [OK] Deployment verification passed.
 type "logs\model_service_check.log"
+echo [INFO] Starting cost-effectiveness analysis service...
+if /I "%IPDEMO_HEADLESS%"=="1" (start "" /b cmd /c call "%CD%\START_COST_EFFECTIVENESS_ANALYSIS_WIN7.bat") else (start "Cost-Effectiveness Analysis" cmd /k call "%CD%\START_COST_EFFECTIVENESS_ANALYSIS_WIN7.bat")
+echo [INFO] Waiting for cost-effectiveness service. Maximum wait: 20 seconds.
+for /L %%S in (1,1,20) do (
+  "%BOOTPY%" -c "import time; time.sleep(1)"
+  "%BOOTPY%" tools\check_service_readiness.py --port 17000 --service cost-effectiveness-analysis --quiet >nul 2>&1
+  if not errorlevel 1 goto cost_effectiveness_ready
+  echo [INFO] Starting cost-effectiveness service... %%S/20
+)
+echo [ERROR] Cost-effectiveness service did not become ready within 20 seconds.
+if exist "logs\cost_effectiveness_service.log" type "logs\cost_effectiveness_service.log"
+pause
+exit /b 1
+
+:cost_effectiveness_ready
+echo [OK] Cost-effectiveness service is ready on 127.0.0.1:17000.
 echo [INFO] Starting recommendation system...
 set "IPDEMO_AUTH_ENABLED=1"
 set "PYEXE="
@@ -84,11 +100,11 @@ if not defined PYEXE (
   exit /b 1
 )
 if exist "runtime\last_port.txt" del /q "runtime\last_port.txt" >nul 2>&1
-start "Recommendation System" cmd /k call "%CD%\START_RECOMMENDATION_WITH_SERVICES_WIN7.bat"
+if /I "%IPDEMO_HEADLESS%"=="1" (start "" /b cmd /c call "%CD%\START_RECOMMENDATION_WITH_SERVICES_WIN7.bat") else (start "Recommendation System" cmd /k call "%CD%\START_RECOMMENDATION_WITH_SERVICES_WIN7.bat")
 
 echo [INFO] Waiting for recommendation Portal. Maximum wait: 60 seconds.
 for /L %%S in (1,1,60) do (
-  timeout /t 1 /nobreak >nul
+  "%PYEXE%" -c "import time; time.sleep(1)"
   if exist "runtime\last_port.txt" (
     set "MAIN_PORT="
     set /p MAIN_PORT=<"runtime\last_port.txt"
@@ -106,6 +122,6 @@ exit /b 1
 
 :recommendation_ready
 set "PORTAL_URL=http://127.0.0.1:!MAIN_PORT!/portal"
-echo [OK] Opening !PORTAL_URL!
-start "" "!PORTAL_URL!"
+echo [OK] Portal is ready: !PORTAL_URL!
+if /I not "%IPDEMO_OPEN_BROWSER%"=="0" start "" "!PORTAL_URL!"
 exit /b 0
