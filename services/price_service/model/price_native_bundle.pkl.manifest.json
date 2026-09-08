@@ -2,7 +2,7 @@
   "format_version": "price-native-bundle-1.0",
   "product_code": "AIRCRAFT_DOOR_LOCK_BASIC_DEMO",
   "product_name": "AIRCRAFT_DOOR_LOCK_BASIC_DEMO",
-  "model_version": "price-native-notebook",
+  "model_version": "price-native-sklearn0241-v22",
   "feature_order": [
     "attr_001",
     "attr_002",
@@ -117,22 +117,22 @@
   },
   "residual_calibration": {
     "space": "native",
-    "half_width_native": 1.0861486707717132,
+    "half_width_native": 1.086148607713336,
     "coverage": 0.95,
     "source": "recomputed_from_selected_models",
     "sample_count": 3
   },
   "training_environment": {
-    "python": "3.10.9",
+    "python": "3.8.10",
     "platform": "Windows-10-10.0.26200-SP0",
-    "numpy": "1.23.5",
-    "scikit_learn": "1.2.1",
-    "xgboost": "1.7.6",
-    "joblib": "1.1.1"
+    "numpy": "1.19.5",
+    "scikit_learn": "0.24.1",
+    "xgboost": null,
+    "joblib": "1.0.1"
   },
   "required_modules": [
     "sklearn"
   ],
   "bundle_file": "price_native_bundle.pkl",
-  "bundle_sha256": "df848c993eff5cc0c21f882ae601f0213c6f25e18db25dd007ffb201de9d2ced"
+  "bundle_sha256": "735f17d9f7472a0f3232f17a4dca667fc3972cd357de6acf8b9577a813f95cdf"
 }

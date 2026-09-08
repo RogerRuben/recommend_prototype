@@ -13,6 +13,7 @@ Run with the same Python that has scikit-learn (e.g. D:\\anaconda\\python.exe):
 """
 from __future__ import print_function
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -50,7 +51,13 @@ def load_fixture():
     return feat_cols, rows
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", default=str(OUTPUT), help="价格模型 bundle 输出路径")
+    parser.add_argument("--model-version", default="price-native-sklearn0241")
+    args = parser.parse_args(argv)
+    output = Path(args.output).resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
     feat_cols, rows = load_fixture()
     if not rows:
         raise SystemExit("fixture has no complete rows")
@@ -103,15 +110,15 @@ def main():
         "PRODUCT_NAME": "AIRCRAFT_DOOR_LOCK_BASIC_DEMO",
         "PRICE_MODEL_SOURCE": "namespace",
         "TARGET_DIVISOR_TO_WAN": 1.0,
-        "PRICE_MODEL_VERSION": "price-native-notebook",
+        "PRICE_MODEL_VERSION": args.model_version,
         "PRICE_OUTPUT_TRANSFORM": "log",
     }
     bundle = export_from_notebook(
         namespace,
-        output=str(OUTPUT),
+        output=str(output),
         product_code="AIRCRAFT_DOOR_LOCK_BASIC_DEMO",
         product_name="AIRCRAFT_DOOR_LOCK_BASIC_DEMO",
-        model_version="price-native-notebook",
+        model_version=args.model_version,
         target_divisor_to_wan=1.0,
         model_variables={
             "lasso": "lasso_model", "ridge": "ridge_model", "random_forest": "rf_model",
@@ -121,12 +128,12 @@ def main():
         model_source="namespace",
         model_output_transform="log",
     )
-    print("rebuilt bundle ->", OUTPUT)
+    print("rebuilt bundle ->", output)
     print("training samples:", len(rows), "features:", feat_cols)
     print("weights:", {k: round(v, 4) for k, v in weights.items()})
     # smoke-check on the fixture rows
     from services.price_service.native_bundle import load_bundle, predict
-    b = load_bundle(str(OUTPUT))
+    b = load_bundle(str(output))
     for (price, feats), _ in zip(rows, range(5)):
         params = dict(zip(feat_cols, feats))
         got = predict(b, params)["predicted_price_wan"]

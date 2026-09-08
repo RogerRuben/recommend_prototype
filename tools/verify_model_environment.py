@@ -15,7 +15,17 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-EXPECTED = {
+EXPECTED_RUNTIME = {
+    "numpy": "1.19.5",
+    "scipy": "1.7.3",
+    "openpyxl": "3.0.10",
+    "sklearn": "0.24.1",
+    "joblib": "1.0.1",
+    "threadpoolctl": "2.1.0",
+    "pandas": "1.2.5",
+}
+
+EXPECTED_TRAINING = {
     "numpy": "1.23.5",
     "scipy": "1.10.1",
     "openpyxl": "3.1.3",
@@ -48,7 +58,7 @@ def verify_modules(profile):
         try:
             actual = module_version(name)
             versions[name] = actual
-            expected = EXPECTED.get(name)
+            expected = (EXPECTED_TRAINING if profile == "training" else EXPECTED_RUNTIME).get(name)
             if expected and actual != expected:
                 errors.append("%s版本应为%s，实际为%s" % (name, expected, actual))
         except Exception as exc:

@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Verify the field sklearn 0.24.1 runtime and isolated price runtime."""
+"""Verify the single field Python 3.8/sklearn 0.24.1 runtime and all models."""
 from __future__ import print_function
 
-import argparse
 import importlib
 import json
 import struct
-import subprocess
 import sys
 from pathlib import Path
 
@@ -46,16 +44,13 @@ def sample_for(schema):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--price-python", required=True)
-    args = parser.parse_args(argv)
-    report = {"field_python": sys.executable, "field_versions": {}, "price": None, "errors": []}
+    report = {"python": sys.executable, "versions": {}, "models": None, "errors": []}
     if sys.version_info[:2] != (3, 8) or struct.calcsize("P") * 8 != 64:
         report["errors"].append("现场运行时必须是64位Python 3.8")
     for name, expected in EXPECTED_FIELD.items():
         try:
             actual = version(name)
-            report["field_versions"][name] = actual
+            report["versions"][name] = actual
             if actual != expected:
                 report["errors"].append("%s应为%s，实际为%s" % (name, expected, actual))
         except Exception as exc:
@@ -73,19 +68,14 @@ def main(argv=None):
             report["errors"].append("效能模型没有返回效能分")
     except Exception as exc:
         report["errors"].append("主程序/效能/效费比冒烟失败：%s" % exc)
-    price_python = Path(args.price_python).resolve()
-    completed = subprocess.run(
-        [str(price_python), str(ROOT / "tools" / "verify_model_environment.py"),
-         "--profile", "runtime", "--smoke-current-models"],
-        cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        universal_newlines=True,
-    )
     try:
-        report["price"] = json.loads(completed.stdout)
-    except Exception:
-        report["price"] = {"raw": completed.stdout}
-    if completed.returncode != 0:
-        report["errors"].append("独立价格运行时或当前价格模型冒烟失败")
+        from tools.verify_model_environment import smoke_current_models
+        models, errors, warnings = smoke_current_models()
+        report["models"] = models
+        report["errors"].extend(errors)
+        report["warnings"] = warnings
+    except Exception as exc:
+        report["errors"].append("价格/效能模型冒烟失败：%s" % exc)
     report["status"] = "PASS" if not report["errors"] else "FAIL"
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
     return 0 if report["status"] == "PASS" else 1

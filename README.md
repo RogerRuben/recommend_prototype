@@ -14,7 +14,7 @@ START_COST_EFFECTIVENESS_ANALYSIS_WIN7.bat
 
 页面支持按名称搜索、按历史/专家/其他正式方案筛选、全选或反选当前结果，并限制每次最多分析 30 个方案。正常情况下每个模型只调用一次批量接口；若旧方案缺少模型必填字段，工作台会隔离失败方案，其余方案继续完成计算。价格服务输出会按 `config/cost_effectiveness_analysis.json` 中独立的 `price_output.unit/scale` 先换算为万元，再参与效费比和 Pareto 计算；规则与推荐系统一致但配置互不耦合。启动脚本要求现场已有 `runtime` 包，并在启动前执行导入预检。完整配置、API 与只读边界见 [效费比分析工作台](docs/COST_EFFECTIVENESS_ANALYSIS.md)。
 
-本项目面向工业成品技术协议的需求录入、历史方案推荐、候选方案生成、价格预测、效能评价和业务数据维护。系统采用“推荐主应用 + 价格模型服务 + 效能模型服务”的三服务结构，并支持 Windows 7、Python 3.8 和完全离线部署。
+本项目面向工业成品技术协议的需求录入、历史方案推荐、候选方案生成、价格预测、效能评价和业务数据维护。系统采用“推荐主应用 + 价格模型服务 + 效能模型服务 + 效费比分析服务”的四服务结构，并支持 Windows 7、Python 3.8 和完全离线部署。
 
 本文是项目主入口文档，重点说明当前代码如何实现、服务之间如何调用、关键数据语义和开发维护边界。历史版本说明和专项交付说明保留在 `docs/` 目录中。
 
@@ -562,7 +562,9 @@ python tests\coupling_pair_priority_test.py
 - `START_OFFLINE_WIN7.bat`：从包内运行时启动；
 - `BUILD_SOURCE_DEPLOYMENT_NO_WHEELS.bat`：构建不带依赖的源码包。
 
-价格模型如果由 sklearn 0.24.x 训练，价格服务必须使用实际 smoke 通过的兼容运行时。不要重新导出或自动 fallback 来掩盖 `_loss`、pickle 类型或自定义树节点加载问题。
+V22 现场交付使用单一的 64 位 CPython 3.8.10 运行时，四项服务均固定为 scikit-learn 0.24.1。正式价格 bundle 也必须在 0.24.1 中训练和导出；不能把由 1.2.x 序列化的 pickle 交给 0.24.x 加载，也不能用自动 fallback 掩盖 pickle 类型或自定义树节点加载问题。
+
+收到完整环境包后先运行 `CHECK_RUNTIME.bat`，确认 Python、numpy、scipy、pandas、scikit-learn 版本以及价格/效能模型实算均为 `PASS`，再双击 `START_ALL_SERVICES_WIN7.bat`。启动器依次验证价格 `18101`、效能 `18102`、效费比 `17000` 和 Portal `7003`；默认只输出一个小于 100 MiB 的完整 ZIP，不生成分卷。
 
 ### 11.2 BuildKit 的 `source` 目录
 
@@ -582,7 +584,7 @@ IPDemo_Onedir_Offline_BuildKit/
 
 | 场景 | 替换内容 | 后续动作 |
 | --- | --- | --- |
-| 已安装源码系统 | `app`、`run_app.py` | 重新启动三服务 |
+| 已安装源码系统 | 源码包中的变更文件（包括模型、配置和启动脚本） | 重新启动四服务 |
 | 离线 BuildKit | 整个 `source` | 重新运行 `BUILD_ONEDIR_WIN7.bat` |
 
 ## 12. 安全与维护注意事项

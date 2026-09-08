@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Build the V22 ready-to-run dual Python 3.8 delivery and sub-100 MiB volumes."""
+"""Build one V22 ZIP with a single Python 3.8/sklearn 0.24.1 runtime."""
 from __future__ import print_function
 
 import argparse
@@ -27,14 +27,14 @@ SOURCE_DIRECTORIES = (
 ROOT_FILES = (
     "README.md", "VERSION.txt", "requirements.txt",
     "requirements_field_py38_sklearn0241.txt", "requirements_offline_py38.txt",
-    "run_app.py", "CHECK_DUAL_RUNTIME.bat", "CHECK_ENVIRONMENT.bat",
+    "run_app.py", "CHECK_RUNTIME.bat", "CHECK_ENVIRONMENT.bat",
     "CHECK_MODEL_SERVICES.bat", "START_ALL_SERVICES_WIN7.bat",
     "START_ALL_NO_BROWSER.bat", "START_PRICE_SERVICE_WIN7.bat",
     "START_EFFECTIVENESS_SERVICE_WIN7.bat",
     "START_COST_EFFECTIVENESS_ANALYSIS_WIN7.bat",
     "START_RECOMMENDATION_WITH_SERVICES_WIN7.bat",
 )
-VOLUME_BYTES = 90 * 1024 * 1024
+MAX_ZIP_BYTES = 100 * 1024 * 1024
 
 
 def sha256(path):
@@ -81,22 +81,7 @@ def manifest_files(stage):
     return result
 
 
-def split_zip(zip_path):
-    parts = []
-    with Path(zip_path).open("rb") as source:
-        index = 1
-        while True:
-            block = source.read(VOLUME_BYTES)
-            if not block:
-                break
-            part = Path("%s.%03d" % (zip_path, index))
-            part.write_bytes(block)
-            parts.append(part)
-            index += 1
-    return parts
-
-
-def build(field_runtime, price_runtime, output, package_name):
+def build(field_runtime, output, package_name):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=True)
     stage = output / package_name
@@ -105,8 +90,6 @@ def build(field_runtime, price_runtime, output, package_name):
         shutil.rmtree(str(stage))
     if zip_path.exists():
         zip_path.unlink()
-    for old in output.glob(package_name + ".zip.[0-9][0-9][0-9]"):
-        old.unlink()
     stage.mkdir()
     for name in SOURCE_DIRECTORIES:
         source = ROOT / name
@@ -119,47 +102,40 @@ def build(field_runtime, price_runtime, output, package_name):
 
     runtime = stage / "runtime"
     copy_runtime(field_runtime, runtime / "python38")
-    copy_runtime(price_runtime, runtime / "price_python38")
     configure_pth(runtime / "python38")
-    configure_pth(runtime / "price_python38")
     (runtime / "service_runtime.local.bat").write_text(
         "@echo off\r\n"
         "set \"MAIN_APP_PYTHON=%~dp0python38\\python.exe\"\r\n"
         "set \"EFFECT_SERVICE_PYTHON=%~dp0python38\\python.exe\"\r\n"
         "set \"COST_EFFECTIVENESS_PYTHON=%~dp0python38\\python.exe\"\r\n"
-        "set \"PRICE_SERVICE_PYTHON=%~dp0price_python38\\python.exe\"\r\n",
+        "set \"PRICE_SERVICE_PYTHON=%~dp0python38\\python.exe\"\r\n",
         encoding="ascii",
     )
     (stage / "DELIVERY_README.txt").write_text(
         "V22 Lock V17 ready-to-run delivery\n\n"
-        "1. Put all .zip.001/.002/... files in the same directory.\n"
-        "2. Run REASSEMBLE_PACKAGE.bat next to the volumes.\n"
-        "3. Extract the rebuilt ZIP to a short path such as D:\\ParameterDesignV22.\n"
-        "4. Run CHECK_DUAL_RUNTIME.bat; it must report PASS.\n"
-        "5. Double-click START_ALL_SERVICES_WIN7.bat.\n"
-        "6. Portal: http://127.0.0.1:7003/portal\n"
+        "1. Extract this single ZIP to a short path such as D:\\ParameterDesignV22.\n"
+        "2. Run CHECK_RUNTIME.bat; it must report PASS.\n"
+        "3. Double-click START_ALL_SERVICES_WIN7.bat.\n"
+        "4. Portal: http://127.0.0.1:7003/portal\n"
         "   Price: 18101; Effectiveness: 18102; Cost-effectiveness: 17000.\n\n"
-        "Field runtime: CPython 3.8.10 + scikit-learn 0.24.1.\n"
-        "Price runtime: CPython 3.8.10 + scikit-learn 1.2.1, isolated because the current price bundle was trained with 1.2.1.\n",
+        "All four services, especially the price service: CPython 3.8.10 + scikit-learn 0.24.1.\n",
         encoding="utf-8",
     )
     check = subprocess.run(
-        [str(runtime / "python38" / "python.exe"),
-         str(stage / "tools" / "verify_dual_runtime.py"),
-         "--price-python", str(runtime / "price_python38" / "python.exe")],
+        [str((runtime / "python38" / "python.exe").resolve()),
+         str((stage / "tools" / "verify_field_runtime.py").resolve())],
         cwd=str(stage), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         universal_newlines=True,
     )
     if check.returncode != 0:
-        raise RuntimeError("Staged dual-runtime verification failed:\n%s" % check.stdout)
+        raise RuntimeError("Staged runtime verification failed:\n%s" % check.stdout)
     manifest = {
-        "format_version": "parameter-design-v22-dual-runtime-1.0",
+        "format_version": "parameter-design-v22-py38-sklearn0241-1.0",
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "package_name": package_name,
         "entrypoint": "START_ALL_SERVICES_WIN7.bat",
         "services": {"portal": 7003, "price": 18101, "effectiveness": 18102, "cost_effectiveness": 17000},
-        "field_runtime": {"python": "3.8.10", "scikit_learn": "0.24.1"},
-        "price_runtime": {"python": "3.8.10", "scikit_learn": "1.2.1"},
+        "runtime": {"python": "3.8.10", "scikit_learn": "0.24.1", "used_by": ["portal", "price", "effectiveness", "cost_effectiveness"]},
         "files": manifest_files(stage),
     }
     (stage / "DELIVERY_MANIFEST.json").write_text(
@@ -173,24 +149,14 @@ def build(field_runtime, price_runtime, output, package_name):
         corrupt = archive.testzip()
         if corrupt:
             raise RuntimeError("ZIP integrity failed: %s" % corrupt)
-    parts = split_zip(zip_path)
-    copy_expression = "+".join('"%s"' % part.name for part in parts)
-    rebuild = output / "REASSEMBLE_PACKAGE.bat"
-    rebuild.write_text(
-        "@echo off\r\ncopy /b %s \"%s\"\r\n"
-        "if errorlevel 1 (echo [FAIL] Reassembly failed.&pause&exit /b 1)\r\n"
-        "certutil -hashfile \"%s\" SHA256\r\npause\r\n" %
-        (copy_expression, zip_path.name, zip_path.name),
-        encoding="ascii",
-    )
+    if zip_path.stat().st_size >= MAX_ZIP_BYTES:
+        raise RuntimeError("单个ZIP达到%.2f MiB，必须先精简，禁止分卷" % (zip_path.stat().st_size / 1024.0 / 1024.0))
     hashes = output / "SHA256SUMS.txt"
     hash_lines = ["%s  %s" % (sha256(zip_path), zip_path.name)]
-    hash_lines.extend("%s  %s" % (sha256(part), part.name) for part in parts)
     hashes.write_text("\n".join(hash_lines) + "\n", encoding="ascii")
     return {
         "stage": str(stage), "zip": str(zip_path), "zip_size": zip_path.stat().st_size,
         "zip_sha256": sha256(zip_path),
-        "parts": [{"path": str(part), "size": part.stat().st_size, "sha256": sha256(part)} for part in parts],
         "runtime_check": check.stdout,
     }
 
@@ -198,11 +164,10 @@ def build(field_runtime, price_runtime, output, package_name):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--field-runtime", required=True)
-    parser.add_argument("--price-runtime", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--package-name", required=True)
     args = parser.parse_args(argv)
-    result = build(args.field_runtime, args.price_runtime, args.output, args.package_name)
+    result = build(args.field_runtime, args.output, args.package_name)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
