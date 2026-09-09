@@ -24,6 +24,9 @@ PARAMETER_DEFINITIONS = {
 SEEDS = [
     {"agreement_id": "H-01", "params": {"attr_a": 10, "env": 40}, "tags": []},
     {"agreement_id": "H-02", "params": {"attr_a": 9, "env": 35}, "tags": []},
+    # Incomplete legacy rows must not have a selected frozen field invented by
+    # model-input preflight.
+    {"agreement_id": "H-03", "params": {"attr_a": 9}, "tags": []},
 ]
 
 
@@ -108,8 +111,21 @@ class _MockStore(object):
 
 def main():
     gen = HistorySeededGenerator(_MockStore(), _MockRuntime(), mock_evaluate, mock_evaluate_batch)
+
+    # A demand anchor may run first, but selecting the same field as frozen must
+    # restore the untouched historical value rather than preserve the anchor.
+    anchored = {"env": 20}
+    locked = {"env": 20}
+    sources, missing = gen._apply_frozen(anchored, locked, ["env"], {"env": 40})
+    assert not missing
+    assert anchored["env"] == 40 and locked["env"] == 40
+    assert sources["env"] == "user_frozen"
+
     request = {"min_capability": 50, "frozen_parameters": ["env"], "selected_tags": [],
-               "indicator_filters": [], "indicator_filter_mode": "all",
+               # H-02 does not meet this demand.  The generator must not turn its
+               # frozen env=35 into the anchor value 38.
+               "indicator_filters": [{"parameter_id": "env", "operator": "gte", "value1": 38}],
+               "indicator_filter_mode": "all",
                "sort_by": "comprehensive", "count": 6, "target_protocol": None}
     result = gen.generate(request, count=6, seed=5, budget=300, search_mode="fast")
     candidates = result.get("candidates", [])
@@ -118,6 +134,8 @@ def main():
     # The frozen parameter must keep each seed's own historical value.
     for c in candidates:
         origin = c.get("generation_trace", {}).get("origin_seed_id")
+        assert origin != "H-03", "seed missing a frozen field must be excluded"
+        assert origin != "H-02", "a demand anchor must not rewrite H-02's frozen env=35 to 38"
         expected = 40 if origin == "H-01" else 35
         assert c["params"]["env"] == expected, "frozen env must stay %s for %s, got %s" % (expected, origin, c["params"]["env"])
 

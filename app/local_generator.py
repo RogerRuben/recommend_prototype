@@ -652,19 +652,29 @@ class HistorySeededGenerator(object):
         return params
 
     @staticmethod
-    def _apply_frozen(params, locked, frozen_parameters):
+    def _apply_frozen(params, locked, frozen_parameters, source_params=None):
         """Lock user-frozen parameters to each seed's own historical value.
 
         Returns a ``{key: source}`` map so the trace can distinguish user-anchored
         values from user-frozen values, while every search action treats both as
-        immutable via the shared ``locked`` dict.
+        immutable via the shared ``locked`` dict.  ``source_params`` must be the
+        untouched historical seed: demand anchoring runs before this method and
+        must never become the value that an explicitly frozen field preserves.
         """
         locked_sources = dict((key, "user_anchor") for key in (locked or {}))
+        source_params = source_params if source_params is not None else params
+        missing = []
         for key in (frozen_parameters or []):
-            if key in params and key not in locked:
-                locked[key] = params[key]
-                locked_sources[key] = "user_frozen"
-        return locked_sources
+            if key not in source_params or source_params.get(key) in (None, ""):
+                missing.append(key)
+                continue
+            # Frozen has stronger semantics than a demand anchor on the same
+            # field.  Restore the historical value now and again during every
+            # later projection/finalisation through ``locked``.
+            params[key] = source_params[key]
+            locked[key] = source_params[key]
+            locked_sources[key] = "user_frozen"
+        return locked_sources, missing
 
     def _contour_diagnostics(self, params, locked):
         details = []
@@ -2088,8 +2098,20 @@ class HistorySeededGenerator(object):
             if budget["attempted"] >= budget["max"]:
                 break
             params = dict(base.get("params") or {})
+            seed_params = dict(params)
             locked, conflicts = self._anchor_demands(params, bounds, definitions)
-            self._apply_frozen(params, locked, frozen_parameters)
+            _locked_sources, missing_frozen = self._apply_frozen(
+                params, locked, frozen_parameters, source_params=seed_params
+            )
+            if missing_frozen:
+                if rejection_details is not None and len(rejection_details) < 5:
+                    rejection_details.append({
+                        "stage": "frozen_invariant",
+                        "candidate_id": str(base.get("agreement_id") or "EMERGENCY"),
+                        "error_type": "FrozenParameterMissingError",
+                        "message": "历史方案缺少已选不变属性：%s" % "、".join(missing_frozen),
+                    })
+                continue
             changed = self._changed_parameters(params, base["params"], definitions)
             for key, definition in definitions.items():
                 if key in locked or key not in params or not definition.get("auto_adjustable", 1):
@@ -2365,7 +2387,7 @@ class HistorySeededGenerator(object):
         tag_weights = dict((key, value.get("weight", 1.0)) for key, value in tag_map.items())
         all_records = []
         seen = set()
-        rejection = {"not_changed": 0, "duplicate": 0, "model_input": 0, "hard_conflict": 0, "demand_unmet": 0, "extrapolation": 0, "known_boundary_repaired": 0, "repeated_risk_signature": 0, "conditional_frozen_conflict": 0, "anchor_invariant": 0}
+        rejection = {"not_changed": 0, "duplicate": 0, "model_input": 0, "hard_conflict": 0, "demand_unmet": 0, "extrapolation": 0, "known_boundary_repaired": 0, "repeated_risk_signature": 0, "conditional_frozen_conflict": 0, "anchor_invariant": 0, "frozen_missing_in_seed": 0}
         rejection_details = []
         evaluations = 0
         attempted_evaluations = 0
@@ -2397,6 +2419,7 @@ class HistorySeededGenerator(object):
             branch_effort_row(branch_info["demand_branch_id"])["seed_attempts"] += 1
             branch_bounds.append(bounds)
             params = dict(base["params"])
+            seed_params = dict(params)
             locked, anchor_conflicts = self._anchor_demands(params, bounds, definitions)
             anchor_resolutions = []
             for conflict in anchor_conflicts:
@@ -2411,9 +2434,24 @@ class HistorySeededGenerator(object):
                         "resolution": "nearest_engineering_boundary",
                         "strictly_satisfies_request": False,
                     })
-            locked_sources = self._apply_frozen(params, locked, request.get("frozen_parameters"))
+            locked_sources, missing_frozen = self._apply_frozen(
+                params, locked, request.get("frozen_parameters"), source_params=seed_params
+            )
+            if missing_frozen:
+                rejection["frozen_missing_in_seed"] += 1
+                if len(rejection_details) < 5:
+                    rejection_details.append({
+                        "stage": "frozen_invariant",
+                        "candidate_id": "SEED-%04d" % seed_index,
+                        "error_type": "FrozenParameterMissingError",
+                        "message": "历史方案%s缺少已选不变属性：%s；该种子未参与生成" % (
+                            base.get("agreement_id") or "", "、".join(missing_frozen)
+                        ),
+                    })
+                continue
             for resolution in anchor_resolutions:
-                locked_sources[resolution["parameter_id"]] = "engineering_boundary_fallback"
+                if locked_sources.get(resolution["parameter_id"]) != "user_frozen":
+                    locked_sources[resolution["parameter_id"]] = "engineering_boundary_fallback"
             finalized = self._finalize_params(params, base, locked, definitions, soft_strength=0.18)
             params = finalized["params"]
             anchor_violations = validate_anchor_integrity(

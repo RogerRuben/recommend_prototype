@@ -1451,7 +1451,10 @@ class Application(object):
         refreshed = []
         for source, evaluation in zip(evaluatable, evaluations):
             item = dict(source)
-            params = dict(evaluation.get("parameters") or item.get("params") or {})
+            # The evaluator may expose model-normalised, filtered or completed
+            # inputs.  Those values are audit data, not a replacement for the
+            # generated business scheme (especially its frozen attributes).
+            params = dict(item.get("params") or {})
             tags = self.store.derive_tags(params, evaluation, item.get("tags") or [])
             item.update({
                 "params": params,
