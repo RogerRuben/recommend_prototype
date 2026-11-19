@@ -29,6 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app.configuration import COST_EFFECTIVENESS_PATH
 from app.historical_onboarding import HistoricalProductOnboarding
 from app.product_table import product_table_rows
 from app.product_releases import ProductReleaseService
@@ -437,9 +438,12 @@ def serve(output_dir, activate_draft=False, no_browser=False, price_port=18701, 
     portal=json.loads(portal_path.read_text(encoding='utf-8')) if portal_path.is_file() else {}
     service_links=portal.setdefault('services',{})
     for key,label,url in [('recommendation','智能推荐','/'),('quick_price','简易价格预测','/price'),
-                          ('effectiveness','效能评价','/effectiveness'),('admin','数据管理','/admin'),
-                          ('cost_effectiveness_analysis','效费分析台',analysis_url)]:
+                          ('effectiveness','效能评价','/effectiveness'),('admin','数据管理','/admin')]:
         service_links.setdefault(key,{}).update(label=label,url=url,enabled=True,visible=True)
+    analysis_link = service_links.setdefault("cost_effectiveness_analysis", {})
+    if re.fullmatch(r"http://127\.0\.0\.1:\d+/?", str(analysis_link.get("url") or "")):
+        analysis_link["url"] = COST_EFFECTIVENESS_PATH
+    analysis_link.setdefault("url", COST_EFFECTIVENESS_PATH)
     write_json(portal_path,portal)
     from .process_group import OwnedServices
     managed=OwnedServices();children,handles,server=managed.children,[],None

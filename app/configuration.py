@@ -26,12 +26,16 @@ DEFAULT_MODEL_SERVICE_CONFIG = {
     "price_output": {"unit": "wan_yuan", "scale": 1.0},
 }
 
+COST_EFFECTIVENESS_PATH = "/cost-effectiveness/"
+COST_EFFECTIVENESS_ALIASES = {COST_EFFECTIVENESS_PATH.rstrip("/"), "/cost-analysis", "/cost_effectiveness"}
+
+
 DEFAULT_SERVICE_PORTAL_CONFIG = {
     "title": "工业技术协议智能系统",
     "services": {
         "recommendation": {"label": "方案智能推荐", "description": "根据设计要求筛选、推荐并生成候选方案", "url": "/", "visible": True, "enabled": True},
         "quick_price": {"label": "简易价格预测", "description": "快速估算成品参考价格", "url": "/price", "visible": True, "enabled": True},
-        "cost_effectiveness_analysis": {"label":"效费分析台","description":"比较方案的价格、效能与帕累托前沿","url":"http://127.0.0.1:17000","visible":True,"enabled":True},
+        "cost_effectiveness_analysis": {"label": "效费比分析", "description": "比较方案的价格、效能与帕累托前沿", "url": COST_EFFECTIVENESS_PATH, "visible": True, "enabled": True},
         "advanced_price": {"label": "价格深度分析", "description": "专业价格预测与综合分析", "url": "", "visible": True, "enabled": False},
         "effectiveness": {"label": "简易效能评价", "description": "评估综合效能与主要风险", "url": "/effectiveness", "visible": True, "enabled": True},
         "admin": {"label": "数据管理中心", "description": "维护成品数据、指标、规则与系统设置", "url": "/admin", "visible": True, "enabled": True},
@@ -172,6 +176,11 @@ def load_service_portal_config(root):
             external = parsed.scheme in ("http", "https") and bool(parsed.netloc)
             if ("\\" in url or any(ord(char) < 32 for char in url) or not (local or external)):
                 raise ValueError("config/service_portal.json服务%s的url不安全或无效" % key)
+            if key == "cost_effectiveness_analysis" and (
+                url.rstrip("/") == "http://127.0.0.1:17000"
+                or (local and parsed.path.rstrip("/") in COST_EFFECTIVENESS_ALIASES)
+            ):
+                url = COST_EFFECTIVENESS_PATH
         elif enabled:
             raise ValueError("config/service_portal.json服务%s启用时必须配置url" % key)
         item["description"] = str(item.get("description") or "").strip()

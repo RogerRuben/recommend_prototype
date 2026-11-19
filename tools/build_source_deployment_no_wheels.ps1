@@ -18,7 +18,7 @@ New-Item -ItemType Directory -Force -Path $stage | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $stage "runtime") | Out-Null
 Set-Content -LiteralPath (Join-Path $stage "runtime\.keep") -Value "Runtime workspace; no virtual environment is included." -Encoding ASCII
 
-$directories = @("app", "config", "data", "data_master", "deploy", "docs", "models", "services", "tests", "tools")
+$directories = @("app", "config", "cost_effectiveness_analysis", "data", "data_master", "deploy", "docs", "models", "services", "tests", "tools")
 foreach ($relative in $directories) {
     $source = Join-Path $root $relative
     if (Test-Path -LiteralPath $source) {
@@ -36,7 +36,7 @@ foreach ($relative in $directories) {
 # The clean operator package keeps only current operational documentation and
 # API contracts. Historical upgrade journals remain available in Git history.
 $allowedDocs = @(
-    "DATA_GOVERNANCE_V19_6.md", "DATABASE_ADMIN_GUIDE.md", "DATAMASTER_GUIDE_V19_6.md",
+    "COST_EFFECTIVENESS_ANALYSIS.md", "DATA_GOVERNANCE_V19_6.md", "DATABASE_ADMIN_GUIDE.md", "DATAMASTER_GUIDE_V19_6.md",
     "EFFECTIVENESS_ARTIFACT_CONSUMPTION_V11.md", "INTEGRATION_ARCHITECTURE.md",
     "MODEL_FIELD_MAPPING.md", "MODEL_SERVICE_DEPLOYMENT_WIN7.md",
     "MODEL_SERVICE_OUTAGE_AND_DATA_CENTER.md", "PORT_AND_STARTUP.md",

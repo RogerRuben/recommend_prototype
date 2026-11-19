@@ -62,7 +62,11 @@ def main():
                 assert 'initRailResize' in text(base+'/app.js')
                 assert 'portalAnalysis' in text(ready['portal_url'])
                 services={s['key']:s for s in get(base+'/api/portal')['services']}
-                assert services['cost_effectiveness_analysis']['url']==ready['cost_effectiveness_url']
+                entry=services['cost_effectiveness_analysis']['url']
+                assert entry in ('/cost-effectiveness/',ready['cost_effectiveness_url'])
+                if entry == '/cost-effectiveness/':
+                    assert '效费比分析工作台' in text(base+entry)
+                    assert get(base+entry+'health')['database']=='ok'
                 cost=ready['cost_effectiveness_url'].rstrip('/');health=get(cost+'/health')
                 assert health['database_readonly'] and health['database']=='ok' and health['price_service']=='ok' and health['effectiveness_service']=='ok'
                 assert health['recommendation_url']==ready['portal_url']

@@ -65,8 +65,7 @@ def portal_and_login_contracts():
     assert portal["services"]["advanced_price"]["url"] == ""
     assert portal["services"]["advanced_price"]["enabled"] is False
     assert portal["services"]["advanced_price"]["visible"] is True
-    assert portal["services"]["cost_effectiveness_analysis"]["url"].endswith(":17000")
-    assert portal["services"]["cost_effectiveness_analysis"]["open_new_window"] is True
+    assert portal["services"]["cost_effectiveness_analysis"]["url"] == "/cost-effectiveness/"
     assert "advanced_price" not in models
     assert models["price_service_url"].endswith(":18101")
     assert models["effectiveness_service_url"].endswith(":18102")
@@ -74,7 +73,8 @@ def portal_and_login_contracts():
     for unsafe in ("https://evil.test/", "//evil.test/", "/\\evil.test/", "admin", "javascript:alert(1)"):
         assert Handler._safe_next(unsafe) is None
     run_app = (ROOT / "run_app.py").read_text(encoding="utf-8")
-    assert '"url": "http://%s:%d/portal"' in run_app
+    assert 'webbrowser.open(info["portal_url"])' in run_app
+    assert '"portal_url": "http://%s:%d/portal"' in run_app
 
     with tempfile.TemporaryDirectory(prefix="ipdemo_portal_") as folder:
         config = Path(folder) / "config"
@@ -90,6 +90,14 @@ def portal_and_login_contracts():
         loaded = load_service_portal_config(folder)["services"]
         assert set(loaded) == set(allowed) | {"recommendation", "quick_price", "advanced_price", "effectiveness", "cost_effectiveness_analysis", "admin"}
         assert loaded["recommendation"]["url"] == "/"
+        for url, expected in (
+            ("http://127.0.0.1:17000", "/cost-effectiveness/"),
+            ("http://127.0.0.1:17000/", "/cost-effectiveness/"),
+            ("/cost-analysis", "/cost-effectiveness/"),
+            ("https://example.test/analysis", "https://example.test/analysis"),
+        ):
+            path.write_text(json.dumps({"services": {"cost_effectiveness_analysis": {"url": url}}}), encoding="utf-8")
+            assert load_service_portal_config(folder)["services"]["cost_effectiveness_analysis"]["url"] == expected
         for unsafe in ("javascript:alert(1)", "data:text/html,x", "file:///tmp/x", "vbscript:x", "//evil.test/x", "\\\\evil.test\\x", ""):
             path.write_text(json.dumps({"services": {"bad": {"url": unsafe, "enabled": True}}}), encoding="utf-8")
             try:
@@ -125,15 +133,12 @@ def portal_and_login_contracts():
 
 def standard_startup_contract():
     standard = (ROOT / "START_ALL_SERVICES_WIN7.bat").read_text(encoding="utf-8")
+    recommendation = (ROOT / "START_RECOMMENDATION_WITH_SERVICES_WIN7.bat").read_text(encoding="utf-8")
     no_browser = (ROOT / "START_ALL_NO_BROWSER.bat").read_text(encoding="utf-8")
-    assert 'start "Recommendation System"' in standard
-    assert 'runtime\\last_port.txt' in standard
-    assert '/api/health' in standard
-    assert '!MAIN_PORT!/portal' in standard
-    assert 'start "" "!PORTAL_URL!"' in standard
-    assert 'set "IPDEMO_AUTH_ENABLED=1"' in standard
-    assert "--no-browser" in no_browser
-    assert "17891/portal" not in standard
+    assert "call CHECK_MODEL_SERVICES.bat" in standard
+    assert "call START_RECOMMENDATION_WITH_SERVICES_WIN7.bat" in standard
+    assert "call START_ALL_NO_BROWSER.bat" in recommendation
+    assert "run_app.py --no-browser" in no_browser
 
     class FakeSocket(object):
         def bind(self, address):

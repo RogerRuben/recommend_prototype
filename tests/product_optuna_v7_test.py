@@ -97,6 +97,23 @@ class V7Tests(unittest.TestCase):
         b,s=train_price_optuna_v7(data_fixture(4,8),self.root/'resume_b',overrides=cfg,progress=lambda s:None)
         self.assertEqual(s['baseline_new_fits'],0);self.assertEqual(s['extra_fits_this_session'],0)
         self.assertEqual(r['weights'],s['weights']);self.assertEqual(r['deployed_training_metrics'],s['deployed_training_metrics'])
+    def test_disabled_resume_gives_each_training_a_fresh_fit_budget(self):
+        cfg = options()
+        cfg['v7']['persistence'] = {
+            'enabled': True, 'resume': False, 'directory': str(self.root / 'no_resume'),
+        }
+        cfg['v7']['budget'].update(minimum_extra_fits=64, max_extra_fits=64)
+        cfg['v7']['model_seeds']['enabled'] = False
+        cfg['v7']['review']['folds'] = 2
+        data = data_fixture(10, 8)
+        _, first = train_price_optuna_v7(data, self.root / 'fresh_first', overrides=cfg, progress=lambda message: None)
+        _, second = train_price_optuna_v7(data, self.root / 'fresh_second', overrides=cfg, progress=lambda message: None)
+        self.assertNotEqual(first['checkpoint_directory'], second['checkpoint_directory'])
+        for report in (first, second):
+            stats = report['fit_statistics']
+            self.assertGreater(stats['extra_new_attempts'], 0)
+            self.assertEqual(stats['extra_new_attempts'], stats['extra_attempts_total'])
+
     def test_report_only_consistency_does_not_change_model_selection(self):
         cfg=options();cfg['v7']['consistency']={'mode':'report'}
         b,r=train_price_optuna_v7(self.data,self.root/'report_only',overrides=cfg,progress=lambda s:None)

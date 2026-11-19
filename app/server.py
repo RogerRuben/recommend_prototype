@@ -19,6 +19,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
+from cost_effectiveness_analysis.app import CostEffectivenessApplication, CostEffectivenessRoutes
+
 from .model_runtime import IntegratedModelRuntime, ModelInputError
 from .model_service_client import DegradedServiceRuntime, ModelServiceGateway, ServiceBackedRuntime, build_model_request
 from .recommender import agreement_matches, rank_agreements, rank_historical_products
@@ -28,7 +30,8 @@ from .data_master import DataMasterService
 from .product_releases import ProductReleaseService
 from .local_generator import HistorySeededGenerator
 from .generation_tasks import GenerationTaskManager
-from .configuration import (_boolean, load_model_service_config, load_service_portal_config,
+from .configuration import (_boolean, COST_EFFECTIVENESS_ALIASES, COST_EFFECTIVENESS_PATH,
+                            load_model_service_config, load_service_portal_config,
                             load_workbench_defaults, save_price_output_config)
 from .range_diagnostics import build_range_diagnostics
 from .scenario_policy import ScenarioPolicyService
@@ -2264,7 +2267,7 @@ class Application(object):
             return {"replaced":True,"contract":clean_report,"manifest":self.runtime.manifest(),"archive":str(archive.relative_to(self.root))}
 
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(CostEffectivenessRoutes, BaseHTTPRequestHandler):
     app = None
     AUTH_COOKIE = "ipdemo_auth"
     PUBLIC_PATHS = {"/login", "/login.html", "/login.js", "/styles.css", "/api/health", "/api/auth/status", "/api/auth/login", "/api/auth/logout"}
@@ -2332,7 +2335,7 @@ class Handler(BaseHTTPRequestHandler):
             return False
         if self._is_authenticated():
             return False
-        if path.startswith("/api/"):
+        if path.startswith(("/api/", COST_EFFECTIVENESS_PATH + "api/")):
             self._json({"error":"authentication_required","message":"请先登录后访问演示系统。","login_path":"/login?next=" + quote(self.path, safe="")}, 401)
         else:
             self._redirect("/login?next=" + quote(self.path, safe=""))
@@ -2376,12 +2379,34 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Disposition", disposition)
         self.end_headers(); self.wfile.write(data)
 
+    def _analysis_app(self):
+        models = self.app.model_config
+        config = {
+            "port": self.server.server_port,
+            "database": {"path": self.app.store.db_path},
+            "services": {
+                "price": {"url": models["price_service_url"]},
+                "effectiveness": {"url": models["effectiveness_service_url"]},
+            },
+            "timeout_seconds": models["timeout_seconds"],
+            "price_output": models["price_output"],
+            "recommendation_url": "/portal",
+        }
+        return CostEffectivenessApplication(self.app.root, config=config)
+
+    def _cost_effectiveness_url(self):
+        item = (self.app.portal_config.get("services") or {}).get("cost_effectiveness_analysis") or {}
+        return item.get("url") if item.get("enabled") else None
+
+    def _cost_effectiveness_get(self, path, query):
+        url = self._cost_effectiveness_url()
+        if url and path.rstrip("/") in COST_EFFECTIVENESS_ALIASES and path != url:
+            return self._redirect(url)
+        if url != COST_EFFECTIVENESS_PATH:
+            return self._json({"error": "analysis_unavailable", "message": "站内效费比分析未启用。"}, 503)
+        return self._analysis_get("/" + path[len(COST_EFFECTIVENESS_PATH):], query)
+
     def _static(self, path):
-        if path.rstrip("/") in ("/cost-effectiveness", "/cost-analysis", "/cost_effectiveness"):
-            item = (self.app.portal_config.get("services") or {}).get("cost_effectiveness_analysis") or {}
-            if item.get("enabled") and item.get("url"):
-                self._redirect(item["url"]); return
-            self._json({"error":"analysis_unavailable", "message":"效费分析台未启动，请使用统一START入口。"},503); return
         if path in ("/admin","/admin/") and self.app.disable_admin:
             self._admin_forbidden(); return
         if path in ("/login", "/login.html"): rel = "login.html"
@@ -2402,6 +2427,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._redirect(self._safe_next((query.get("next") or [""])[0]) or "/portal"); return
             if self._auth_required(path):
                 return
+            if path.startswith(COST_EFFECTIVENESS_PATH) or path.rstrip("/") in COST_EFFECTIVENESS_ALIASES:
+                return self._cost_effectiveness_get(path, query)
             if path == "/api/auth/status":
                 self._json({
                     "auth_enabled": self.app.auth_enabled,
@@ -2474,6 +2501,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         try:
+            if self._auth_required(path):
+                return
+            if path.startswith(COST_EFFECTIVENESS_PATH):
+                if self._cost_effectiveness_url() != COST_EFFECTIVENESS_PATH:
+                    return self._json({"error": "analysis_unavailable", "message": "站内效费比分析未启用。"}, 503)
+                return self._analysis_post("/" + path[len(COST_EFFECTIVENESS_PATH):])
             request = self._body()
             if path == "/api/auth/login":
                 client_id = str(self.headers.get("CF-Connecting-IP") or self.client_address[0])
@@ -2505,8 +2538,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Cache-Control","no-store")
                 self._set_auth_cookie("", 0)
                 self.end_headers(); self.wfile.write(data); return
-            if self._auth_required(path):
-                return
             if self.app.demo_read_only and path in self.WRITE_PATHS:
                 self._demo_forbidden(); return
             if self.app.demo_read_only and path.startswith("/api/saved/"):

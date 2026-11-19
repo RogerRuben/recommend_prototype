@@ -16,4 +16,6 @@ def test_frontend_has_required_sections_and_no_direct_model_fetch():
     assert ".rank-bar{display:block" in css
     assert "127.0.0.1:18101" not in js
     assert "127.0.0.1:18102" not in js
-    assert 'api("/api/analyze"' in js
+    assert 'href="./styles.css"' in html and 'src="./app.js"' in html
+    assert 'href="/portal"' in html
+    assert 'api("./api/analyze"' in js

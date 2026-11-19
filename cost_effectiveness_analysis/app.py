@@ -4,7 +4,6 @@ from __future__ import print_function
 import argparse
 import json
 import mimetypes
-import os
 import sys
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -12,6 +11,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -32,7 +32,6 @@ class CostEffectivenessApplication(object):
             self.config["timeout_seconds"],
             self.config.get("price_output"),
         )
-        self.static_dir = Path(__file__).resolve().parent / "static"
 
     def health(self):
         try:
@@ -97,7 +96,66 @@ class CostEffectivenessApplication(object):
         }
 
 
-class Handler(BaseHTTPRequestHandler):
+class CostEffectivenessRoutes:
+    def _analysis_app(self):
+        return self.app
+
+    def _analysis_error(self, exc, status=500):
+        if isinstance(exc, ValueError):
+            status = 400
+        elif isinstance(exc, KeyError):
+            status = 404
+        elif isinstance(exc, DatabaseUnavailable):
+            status = 503
+        self._json({"success": False, "error": exc.__class__.__name__,
+                    "message": str(exc).strip("'\"")}, status)
+
+    def _analysis_static(self, name):
+        path = (STATIC_DIR / name).resolve()
+        if path.parent != STATIC_DIR.resolve() or not path.is_file():
+            self._json({"error": "not_found", "message": "资源不存在"}, 404)
+            return
+        data = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", (mimetypes.guess_type(str(path))[0] or "application/octet-stream") + ("; charset=utf-8" if path.suffix in (".html", ".js", ".css") else ""))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _analysis_get(self, path, query):
+        try:
+            if path in ("/", "/index.html"):
+                return self._analysis_static("index.html")
+            if path in ("/app.js", "/styles.css"):
+                return self._analysis_static(path[1:])
+            if path == "/health":
+                return self._json(self._analysis_app().health())
+            if path == "/api/schemes":
+                return self._json(self._analysis_app().list_schemes(
+                    (query.get("source") or [None])[0], (query.get("search") or [None])[0]
+                ))
+            if path.startswith("/api/schemes/"):
+                scheme = self._analysis_app().scheme_detail(unquote(path[len("/api/schemes/"):]))
+                return self._json({"scheme": scheme}, 200 if scheme else 404)
+            self._json({"error": "not_found", "message": "接口不存在"}, 404)
+        except Exception as exc:
+            self._analysis_error(exc)
+
+    def _analysis_post(self, path):
+        if path != "/api/analyze":
+            return self._json({"error": "not_found", "message": "接口不存在"}, 404)
+        try:
+            size = int(self.headers.get("Content-Length") or 0)
+            if not 0 <= size <= 1024 * 1024:
+                raise ValueError("请求长度无效或内容过大")
+            request = json.loads(self.rfile.read(size).decode("utf-8") or "{}")
+            return self._json(self._analysis_app().analyze(request))
+        except Exception as exc:
+            self._analysis_error(exc)
+
+
+class Handler(CostEffectivenessRoutes, BaseHTTPRequestHandler):
     app = None
 
     def log_message(self, fmt, *args):
@@ -112,61 +170,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _error(self, exc, status=500):
-        if isinstance(exc, ValueError):
-            status = 400
-        elif isinstance(exc, KeyError):
-            status = 404
-        elif isinstance(exc, DatabaseUnavailable):
-            status = 503
-        self._json({"success": False, "error": exc.__class__.__name__,
-                    "message": str(exc).strip("'\"")}, status)
-
-    def _static(self, name):
-        path = (self.app.static_dir / name).resolve()
-        if path.parent != self.app.static_dir.resolve() or not path.is_file():
-            self._json({"error": "not_found", "message": "资源不存在"}, 404)
-            return
-        data = path.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", (mimetypes.guess_type(str(path))[0] or "application/octet-stream") + ("; charset=utf-8" if path.suffix in (".html", ".js", ".css") else ""))
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
-
     def do_GET(self):
         parsed = urlparse(self.path)
-        try:
-            if parsed.path in ("/", "/index.html"):
-                return self._static("index.html")
-            if parsed.path in ("/app.js", "/styles.css"):
-                return self._static(parsed.path[1:])
-            if parsed.path == "/health":
-                return self._json(self.app.health())
-            if parsed.path == "/api/schemes":
-                query = parse_qs(parsed.query)
-                return self._json(self.app.list_schemes(
-                    (query.get("source") or [None])[0], (query.get("search") or [None])[0]
-                ))
-            if parsed.path.startswith("/api/schemes/"):
-                scheme = self.app.scheme_detail(unquote(parsed.path.split("/api/schemes/", 1)[1]))
-                return self._json({"scheme": scheme}, 200 if scheme else 404)
-            self._json({"error": "not_found", "message": "接口不存在"}, 404)
-        except Exception as exc:
-            self._error(exc)
+        self._analysis_get(parsed.path, parse_qs(parsed.query))
 
     def do_POST(self):
-        parsed = urlparse(self.path)
-        try:
-            size = int(self.headers.get("Content-Length") or 0)
-            if size > 1024 * 1024:
-                raise ValueError("请求内容过大")
-            request = json.loads(self.rfile.read(size).decode("utf-8") or "{}")
-            if parsed.path == "/api/analyze":
-                return self._json(self.app.analyze(request))
-            self._json({"error": "not_found", "message": "接口不存在"}, 404)
-        except Exception as exc:
-            self._error(exc)
+        self._analysis_post(urlparse(self.path).path)
 
 
 def create_server(root=ROOT, host=None, port=None, repository=None, model_client=None, config=None):

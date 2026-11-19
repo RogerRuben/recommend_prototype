@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import copy,hashlib,json,pickle,shutil,time,traceback
 from pathlib import Path
+from tempfile import mkdtemp
 import numpy as np
 from threadpoolctl import threadpool_limits
 from .product_price_optuna_v7 import load_config,baseline_config,history_references
@@ -37,17 +38,20 @@ def _train(data,output,cfg_path,overrides,input_path,trace):
         'v3_history_references':history_references(cfg)}
     identity=hashlib.sha256(json.dumps([frame.values.tolist(),list(frame.columns),y.tolist(),rows.tolist(),expert,mappings,contract,identity_cfg,code],sort_keys=True).encode('utf-8')).hexdigest()
     persist=cfg['v7']['persistence'];checkpoint=Path(persist['directory'] or ROOT/'state/v7')
+    resume = persist['enabled'] and persist['resume']
     if not checkpoint.is_absolute():checkpoint=ROOT/checkpoint
     root=(checkpoint/identity[:24]) if persist['enabled'] else output/'transient_search';root.mkdir(parents=True,exist_ok=True)
+    if not resume:
+        root = Path(mkdtemp(prefix="run-", dir=str(root)))
     basecfg=baseline_config(cfg);basecfg['targets']['hard_gate']=False
     baseline_code={name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in (
         'automl_pipeline/product_price_optuna_v2.py','automl_pipeline/product_price_optuna_v3.py',
         'services/price_service/optuna_v2/price_automl_core.py','services/price_service/optuna_v2/optimizer.py',
         'services/price_service/optuna_v2/optimizer_v3.py','services/price_service/optuna_v2/cached_backend.py','services/price_service/optuna_v2/typed_features.py')}
     baseline_identity=hashlib.sha256(json.dumps([frame.values.tolist(),list(frame.columns),y.tolist(),rows.tolist(),expert,mappings,contract,basecfg,baseline_code],sort_keys=True).encode('utf-8')).hexdigest()
-    base_root=checkpoint/'original_v3_baselines'/baseline_identity[:24] if persist['enabled'] else root
+    base_root=checkpoint/'original_v3_baselines'/baseline_identity[:24] if resume else root
     base_root.mkdir(parents=True,exist_ok=True);base=base_root/'baseline_source'
-    marker=load_state(base_root/'baseline_done',baseline_identity) if persist['enabled'] and persist['resume'] else None
+    marker=load_state(base_root/'baseline_done',baseline_identity) if resume else None
     base_files=('training_report.json','effective_config.json','price_ensemble_bundle.pkl','selected_split_bundle.pkl','price_native_bundle.pkl','study_history.json','best_config.json')
     if marker:
         for name,digest in marker['sha256'].items():
@@ -55,7 +59,7 @@ def _train(data,output,cfg_path,overrides,input_path,trace):
         baseline= json.loads((base/'training_report.json').read_text(encoding='utf-8'));baseline_new_fits=0
         trace.emit('v7_baseline_restored',sha256=marker['sha256'],baseline_parameters=baseline['selected_parameters'])
     else:
-        observer=BaselineObserver(base_root/'baseline_state',baseline_identity,resume=persist['resume'],enabled=persist['enabled'],progress=trace.message)
+        observer=BaselineObserver(base_root/'baseline_state',baseline_identity,resume=resume,enabled=persist['enabled'],progress=trace.message)
         observer.trace=trace
         with trace.span('v7_original_v3_baseline',training_rows=rows,baseline_config=basecfg):
             with threadpool_limits(limits=1):

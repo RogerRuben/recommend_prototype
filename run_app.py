@@ -48,6 +48,7 @@ def main():
     browser_host = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
     info = {
         "url": "http://%s:%d/" % (browser_host, port),
+        "portal_url": "http://%s:%d/portal" % (browser_host, port),
         "listen": "%s:%d" % (args.host, port),
         "port": port,
         "pid": os.getpid(),
@@ -62,6 +63,7 @@ def main():
     print("Industrial Protocol Demo V19.6.14 - Clean HTTP Model Pipeline")
     print("Listen: %s" % info["listen"])
     print("Local URL: %s" % info["url"])
+    print("Portal URL: %s" % info["portal_url"])
     print("Model mode: %s" % info["mode"])
     print("Local fallback: %s" % ("enabled" if info["local_fallback_enabled"] else "disabled"))
     if info["public_bind"]:
@@ -75,7 +77,7 @@ def main():
     if not args.no_browser:
         def open_later():
             time.sleep(1.0)
-            webbrowser.open(info["url"])
+            webbrowser.open(info["portal_url"])
         threading.Thread(target=open_later, daemon=True).start()
     try:
         server.serve_forever()

@@ -58,7 +58,12 @@ def main():
                 handles=[k.OpenProcess(0x1000|0x1,False,pid) for pid in [info['pid']]+info['child_pids']]
                 base=info['url'].rstrip('/');b=get(base+'/api/bootstrap');assert b['counts']['historical']==n and len(b['parameters'])==p
                 assert 'V21.6' in text(base+'/') and '优化目标' in text(base+'/') and 'initRailResize' in text(base+'/app.js')
-                portal=get(base+'/api/portal');assert any(s['key']=='cost_effectiveness_analysis' for s in portal['services'])
+                portal=get(base+'/api/portal')
+                entry=next(s['url'] for s in portal['services'] if s['key']=='cost_effectiveness_analysis')
+                assert entry in ('/cost-effectiveness/',info['cost_effectiveness_url'])
+                if entry == '/cost-effectiveness/':
+                    assert '效费比分析工作台' in text(base+entry)
+                    assert get(base+entry+'health')['database']=='ok'
                 cost=info['cost_effectiveness_url'].rstrip('/');health=get(cost+'/health');assert health['database']=='ok' and health['recommendation_url']==info['portal_url']
                 schemes=get(cost+'/api/schemes')['items'];analysis=post(cost+'/api/analyze',{'scheme_ids':[s['scheme_id'] for s in schemes[:2]]});assert analysis['success']
                 business=read(out/'business_release.iprelease.json');data=business.get('data') or business.get('release',{}).get('data');sample=data['agreements'][0]['params']

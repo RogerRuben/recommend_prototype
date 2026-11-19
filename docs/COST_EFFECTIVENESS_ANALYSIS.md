@@ -1,18 +1,12 @@
 # 效费比分析工作台
 
-效费比分析工作台是独立运行的只读分析服务，默认地址为 `http://127.0.0.1:17000`。它从推荐系统 SQLite 数据库读取已持久化的历史方案和专家保存方案，统一调用当前价格、效能模型后计算效费比与 Pareto 前沿。
+在系统门户 `/portal` 选择「效费比分析」，当前标签页会打开同一站点的 `/cost-effectiveness/`。工作台从 SQLite 数据库只读加载历史方案和专家保存方案，调用主系统配置的价格与效能 HTTP 服务，按主系统的价格单位计算效费比与 Pareto 前沿。
 
 方案选择区支持名称/编号搜索、来源筛选、全选当前结果、反选当前结果和清空已选。搜索或切换来源不会清除其他筛选结果中已勾选的方案；所有批量操作都遵守每次最多 30 个方案的限制。
 
 ## 启动与依赖
 
-先启动价格服务 `:18101` 和效能服务 `:18102`，再运行：
-
-```bat
-START_COST_EFFECTIVENESS_ANALYSIS_WIN7.bat
-```
-
-也可以直接运行：
+站内工作台随推荐系统启动并沿用登录会话。开始分析前需要启动配置的价格和效能 HTTP 服务。也可在启动两个模型服务后单独运行工作台：
 
 ```text
 python -m cost_effectiveness_analysis.app --port 17000
@@ -20,15 +14,9 @@ python -m cost_effectiveness_analysis.app --port 17000
 
 推荐服务 `:17891` 不需要启动。浏览器只访问 `:17000`，由后端批量调用两个模型服务，不会直连模型端口。
 
-启动脚本只使用现场 `runtime` 包，不再回退到系统 `python`。解释器按 `COST_EFFECTIVENESS_PYTHON`、`MAIN_APP_PYTHON`、`runtime\python38\python.exe`、`runtime\venvs\model_runtime38\Scripts\python.exe`、`runtime\python.exe` 的顺序解析；启动前会预检效费比模块和价格换算模块能否导入。可在不提交 Git 的 `runtime\service_runtime.local.bat` 中单独配置：
-
-```bat
-set "COST_EFFECTIVENESS_PYTHON=C:\path\to\accepted-runtime\python.exe"
-```
-
 环境变量 `COST_EFFECTIVENESS_HOST`、`COST_EFFECTIVENESS_PORT`、`COST_EFFECTIVENESS_DATABASE`、`COST_EFFECTIVENESS_PRICE_URL`、`COST_EFFECTIVENESS_EFFECTIVENESS_URL`、`COST_EFFECTIVENESS_TIMEOUT_SECONDS`、`COST_EFFECTIVENESS_PRICE_OUTPUT_UNIT` 和 `COST_EFFECTIVENESS_PRICE_OUTPUT_SCALE` 可覆盖默认值。
 
-## 配置
+## 独立运行配置
 
 独立配置位于 `config/cost_effectiveness_analysis.json`。数据库路径、页面监听地址、两个模型 API 地址和价格输出换算都在这里维护，不使用 Portal URL 或 `model_services.json` 作为本服务配置。
 
@@ -58,7 +46,7 @@ SQLite 数据库始终通过 URI `mode=ro` 打开，并额外启用 `PRAGMA quer
 
 ## Portal 配置
 
-`config/service_portal.json` 中的 `cost_effectiveness_analysis` 仅是导航入口。管理员可在“系统设置 → 服务导航配置”修改名称、描述、URL、显示、启用和新窗口打开。该配置不会改变 `:18101` 或 `:18102` 的模型 API 地址。
+`config/service_portal.json` 中的 `cost_effectiveness_analysis` 默认使用 `/cost-effectiveness/`。旧配置中保存的默认 `http://127.0.0.1:17000` 地址在读取时会转换为站内入口。管理员可在“系统设置 → 服务导航配置”修改名称、描述、URL、显示和启用状态。配置 HTTP 或 HTTPS 外部地址时，门户会在新标签页打开。
 
 ## 测试
 
